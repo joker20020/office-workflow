@@ -1,14 +1,20 @@
 [project]
 name = "office"
 version = "0.1.0"
-description = "Add your description here"
+description = "办公小工具整合平台 - AI对话操作 + 节点流编辑 + 插件化扩展"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
+    "PySide6>=6.6.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.1",
     "pymupdf>=1.26.3",
-    "wxauto>=39.1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [[tool.uv.index]]
