@@ -1,0 +1,15 @@
+[project]
+name = "office"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.1",
+    "pymupdf>=1.26.3",
+    "wxauto>=39.1.13",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
