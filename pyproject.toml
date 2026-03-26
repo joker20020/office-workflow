@@ -9,12 +9,15 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pandas>=2.3.1",
     "pymupdf>=1.26.3",
+    "agentscope>=1.0.17",
+    "aiosqlite>=0.19.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-qt>=4.2.0",
 ]
 
 [[tool.uv.index]]
