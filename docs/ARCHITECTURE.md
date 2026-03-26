@@ -13,6 +13,7 @@
 基于PySide6的桌面办公工具整合平台，核心特性：
 
 - **节点编辑器** - 可视化工作流设计，支持自定义节点扩展办公功能
+- **节点包管理** - 从Git仓库下载、更新、启用/禁用、删除自定义节点包
 - **Agent辅助** - AI助手读取节点列表，辅助设计工作流
 - **插件系统** - 通过事件系统扩展功能，暴露程序上下文
 - **统一存储** - SQLite + SQLAlchemy 持久化
@@ -68,6 +69,7 @@
 | OpenAI API | HTTP | Agent对话能力 |
 | 本地文件系统 | 文件读写 | Excel/文档处理 |
 | SQLite | 本地数据库 | 持久化存储 |
+| Git仓库 | git clone/pull | 自定义节点包下载与更新 |
 
 ---
 
@@ -98,14 +100,23 @@
 │  │ AgentScope  │      │ NodeEngine  │      │  持久化层   │        │
 │  │  Toolkit    │      │  (自研)     │      │ (SQLite)    │        │
 │  └─────────────┘      └─────────────┘      └─────────────┘        │
+│                              │                                     │
+│                              ▼                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                  节点包管理器 (NodePackageManager)           │   │
+│  │  • Git下载/更新节点包                                        │   │
+│  │  • 节点包启用/禁用                                           │   │
+│  │  • 节点包删除                                                │   │
+│  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        插件目录 (plugins/)                           │
+│                     节点包目录 (node_packages/)                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│  │ excel_tools │  │ table_tools │  │ chat_tools  │  ...            │
+│  │ 节点包A     │  │ 节点包B     │  │ 节点包C     │  ...            │
+│  │ (git)       │  │ (git)       │  │ (local)     │                 │
 │  └─────────────┘  └─────────────┘  └─────────────┘                 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -121,6 +132,7 @@
 | AgentScope Toolkit | AI工具注册、ReAct模式执行 | AgentScope |
 | NodeEngine | 图执行、拓扑排序、数据传递 | 自研 |
 | 持久化层 | 工作流存储、配置、对话历史 | SQLite + SQLAlchemy |
+| 节点包管理器 | 自定义节点包的下载、更新、启用、删除 | GitPython |
 
 ---
 
@@ -201,9 +213,37 @@ class AppContext:
     node_engine: "NodeEngine"
     agent_toolkit: "AgentToolkit"
     storage: "StorageService"
+    node_package_manager: "NodePackageManager"
     
     def get_tool(self, name: str) -> Optional[ToolDefinition]: ...
     def register_tool(self, tool: ToolDefinition) -> None: ...
+```
+
+### 4.6 节点包管理接口
+
+```python
+@dataclass
+class NodePackageMeta:
+    """节点包元信息"""
+    id: str                    # 唯一标识
+    name: str                  # 显示名称
+    version: str               # 版本号
+    author: str                # 作者
+    description: str           # 描述
+    repository_url: str        # Git仓库地址
+    branch: str = "main"       # 分支
+    local_path: Path = None    # 本地安装路径
+    enabled: bool = True       # 是否启用
+
+class NodePackageManager:
+    """节点包管理器"""
+    def install_from_git(self, url: str, branch: str = "main") -> bool: ...
+    def update_package(self, package_id: str) -> bool: ...
+    def enable_package(self, package_id: str) -> None: ...
+    def disable_package(self, package_id: str) -> None: ...
+    def remove_package(self, package_id: str) -> bool: ...
+    def get_installed_packages(self) -> List[NodePackageMeta]: ...
+    def get_available_updates(self) -> List[str]: ...
 ```
 
 ---
@@ -397,7 +437,172 @@ class MyPlugin(PluginBase):
 
 ---
 
-## 8. 持久化层架构
+## 8. 自定义节点管理架构
+
+### 8.1 节点包结构
+
+```
+node_packages/
+├── package_A/                    # 从Git安装的节点包
+│   ├── package.json             # 包元信息
+│   ├── nodes/
+│   │   ├── __init__.py
+│   │   ├── node_1.py            # 节点实现
+│   │   └── node_2.py
+│   └── requirements.txt         # 依赖（可选）
+├── package_B/                    # 另一个节点包
+│   └── ...
+└── local_nodes/                  # 用户本地自定义节点
+    └── my_node.py
+```
+
+**package.json 格式**:
+
+```json
+{
+    "id": "com.example.text-tools",
+    "name": "文本处理工具",
+    "version": "1.2.0",
+    "author": "Developer",
+    "description": "文本处理相关节点",
+    "repository": "https://github.com/example/text-tools",
+    "branch": "main",
+    "nodes": ["text_split", "text_join", "text_replace"]
+}
+```
+
+### 8.2 节点包生命周期
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Git下载    │───▶│   安装      │───▶│   启用      │───▶│   活跃      │
+└─────────────┘    └─────────────┘    └─────────────┘    └──────┬──────┘
+       │                  │                  │                   │
+       │                  │                  │                   ▼
+       │                  │                  │            ┌─────────────┐
+       │                  │                  └───────────▶│   禁用      │
+       │                  │                                └──────┬──────┘
+       │                  │                                       │
+       │                  ▼                                       ▼
+       │            ┌─────────────┐                        ┌─────────────┐
+       │            │   更新      │                        │   删除      │
+       │            └─────────────┘                        └─────────────┘
+       │                  │
+       └──────────────────┘
+```
+
+| 操作 | 说明 |
+|------|------|
+| **Git下载** | `git clone` 到 `node_packages/{package_id}/` |
+| **安装** | 解析package.json，安装requirements.txt依赖 |
+| **启用** | 加载节点模块，注册到NodeEngine |
+| **禁用** | 从NodeEngine注销节点，保留本地文件 |
+| **更新** | `git pull`，重新加载节点 |
+| **删除** | 删除本地目录，清理注册信息 |
+
+### 8.3 管理流程
+
+#### 8.3.1 从Git安装节点包
+
+```
+1. 用户提供Git URL
+       │
+       ▼
+2. NodePackageManager.install_from_git(url, branch)
+       │
+       ├──▶ 验证URL有效性
+       │
+       ├──▶ git clone 到临时目录
+       │
+       ├──▶ 解析 package.json
+       │
+       ├──▶ 检查依赖兼容性
+       │
+       ├──▶ pip install -r requirements.txt (如有)
+       │
+       ├──▶ 移动到 node_packages/{package_id}/
+       │
+       ├──▶ 存储元信息到SQLite
+       │
+       └──▶ EventBus.publish(PACKAGE_INSTALLED)
+              │
+              ▼
+3. 自动启用（或等待用户手动启用）
+```
+
+#### 8.3.2 更新节点包
+
+```
+1. 用户点击"更新"
+       │
+       ▼
+2. NodePackageManager.update_package(package_id)
+       │
+       ├──▶ git fetch + git pull
+       │
+       ├──▶ 检查版本变化
+       │
+       ├──▶ 如有requirements变化，重新安装
+       │
+       ├──▶ 更新SQLite中的元信息
+       │
+       └──▶ EventBus.publish(PACKAGE_UPDATED)
+              │
+              ▼
+3. 如已启用，重新加载节点
+```
+
+#### 8.3.3 启用/禁用节点包
+
+```
+启用:
+┌─────────────────────────────────────────┐
+│ NodePackageManager.enable_package(id)   │
+│         │                               │
+│         ├──▶ importlib加载节点模块       │
+│         │                               │
+│         ├──→ 注册节点到NodeEngine        │
+│         │                               │
+│         └──▶ 更新SQLite enabled=true    │
+└─────────────────────────────────────────┘
+
+禁用:
+┌─────────────────────────────────────────┐
+│ NodePackageManager.disable_package(id)  │
+│         │                               │
+│         ├──▶ 从NodeEngine注销节点        │
+│         │                               │
+│         ├──▶ 保留本地文件                │
+│         │                               │
+│         └──▶ 更新SQLite enabled=false   │
+└─────────────────────────────────────────┘
+```
+
+### 8.4 安全考虑
+
+| 风险 | 缓解措施 |
+|------|----------|
+| 恶意代码 | 用户确认后才安装；显示package.json内容 |
+| 依赖冲突 | 使用虚拟环境或pip check |
+| 网络问题 | 超时机制；重试逻辑；离线模式 |
+| 版本不兼容 | 版本检查；降级提示 |
+
+### 8.5 节点包市场（未来扩展）
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  节点包市场 (可选)                   │
+├─────────────────────────────────────────────────────┤
+│  • 官方维护的节点包索引                             │
+│  • 社区提交的节点包                                 │
+│  • 评分和下载统计                                   │
+│  • 一键安装                                         │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. 持久化层架构
 
 ### 8.1 存储策略
 
@@ -409,7 +614,7 @@ class MyPlugin(PluginBase):
 | 对话历史 | SQLite | 可配置保留期 |
 | 运行时缓存 | 内存 | 会话级 |
 
-### 8.2 核心实体
+### 9.2 核心实体
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -422,14 +627,20 @@ class MyPlugin(PluginBase):
 │ updated_at  │     │             │     │ timestamp   │
 └─────────────┘     └─────────────┘     └─────────────┘
 
-┌─────────────┐     ┌─────────────┐
-│  PluginConfig│     │  McpServer  │
-├─────────────┤     ├─────────────┤
-│ id          │     │ id          │
-│ plugin_name │     │ name        │
-│ config_json │     │ endpoint    │
-│ enabled     │     │ enabled     │
-└─────────────┘     └─────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────────┐
+│  PluginConfig│     │  McpServer  │     │  NodePackage    │
+├─────────────┤     ├─────────────┤     ├─────────────────┤
+│ id          │     │ id          │     │ id              │
+│ plugin_name │     │ name        │     │ name            │
+│ config_json │     │ endpoint    │     │ version         │
+│ enabled     │     │ enabled     │     │ author          │
+└─────────────┘     └─────────────┘     │ repository_url  │
+                                        │ branch           │
+                                        │ local_path       │
+                                        │ enabled          │
+                                        │ installed_at     │
+                                        │ updated_at       │
+                                        └─────────────────┘
 ```
 
 ### 8.3 SQLAlchemy模型模式
@@ -455,9 +666,9 @@ class Workflow(Base):
 
 ---
 
-## 9. 数据流
+## 10. 数据流
 
-### 9.1 插件注册流程
+### 10.1 插件注册流程
 
 ```
 1. 应用启动
@@ -485,7 +696,59 @@ class Workflow(Base):
 5. EventBus.publish(PLUGIN_LOADED)
 ```
 
-### 9.2 节点执行流程
+### 10.2 节点包安装流程
+
+```
+1. 用户提供Git仓库URL
+       │
+       ▼
+2. NodePackageManager.install_from_git(url, branch)
+       │
+       ├──▶ git clone 到临时目录
+       │
+       ├──▶ 解析 package.json
+       │
+       ├──▶ 检查依赖并安装
+       │
+       ├──▶ 移动到 node_packages/{id}/
+       │
+       └──▶ 保存到 NodePackage 表
+              │
+              ▼
+3. EventBus.publish(PACKAGE_INSTALLED)
+       │
+       ▼
+4. 默认启用 → NodePackageManager.enable_package(id)
+       │
+       ├──▶ 加载节点模块
+       │
+       └──▶ 注册到 NodeEngine
+```
+
+### 10.3 节点包更新流程
+
+```
+1. 检测可用更新 / 用户点击更新
+       │
+       ▼
+2. NodePackageManager.update_package(id)
+       │
+       ├──▶ git fetch + git pull (node_packages/{id}/)
+       │
+       ├──▶ 比较版本变化
+       │
+       ├──▶ 如有新依赖，执行安装
+       │
+       └──▶ 更新 NodePackage 表
+              │
+              ▼
+3. EventBus.publish(PACKAGE_UPDATED)
+       │
+       ▼
+4. 如已启用，重新加载节点
+```
+
+### 10.4 节点执行流程
 
 ```
 1. 用户点击"执行"
@@ -538,9 +801,99 @@ class Workflow(Base):
 6. 节点编辑器渲染工作流
 ```
 
+### 9.4 节点包管理流程
+
+#### 安装节点包
+
+```
+1. 用户提供Git URL和分支
+       │
+       ▼
+2. NodePackageManager.install_from_git(url, branch)
+       │
+       ├──▶ git clone 到临时目录
+       │
+       ├──▶ 解析 package.json
+       │
+       ├──▶ 验证节点包格式
+       │
+       ├──▶ pip install -r requirements.txt
+       │
+       ├──▶ 移动到 node_packages/{id}/
+       │
+       ├──▶ 保存到SQLite (NodePackage表)
+       │
+       └──▶ EventBus.publish(PACKAGE_INSTALLED)
+              │
+              ▼
+3. 自动启用（或等待用户启用）
+```
+
+#### 更新节点包
+
+```
+1. 用户点击"更新"
+       │
+       ▼
+2. NodePackageManager.update_package(id)
+       │
+       ├──▶ cd node_packages/{id}
+       │
+       ├──▶ git fetch && git pull
+       │
+       ├──▶ 对比版本变化
+       │
+       ├──▶ 如有新依赖， pip install
+       │
+       ├──▶ 更新SQLite中的version
+       │
+       └──▶ EventBus.publish(PACKAGE_UPDATED)
+              │
+              ▼
+3. 如已启用，重新加载节点
+```
+
+#### 启用/禁用节点包
+
+```
+启用:
+1. NodePackageManager.enable_package(id)
+       │
+       ├──▶ 更新SQLite enabled=true
+       │
+       ├──▶ importlib加载节点模块
+       │
+       ├──▶ 注册节点到NodeEngine
+       │
+       └──▶ EventBus.publish(PACKAGE_ENABLED)
+
+禁用:
+1. NodePackageManager.disable_package(id)
+       │
+       ├──▶ 从NodeEngine注销节点
+       │
+       ├──▶ 更新SQLite enabled=false
+       │
+       └──▶ EventBus.publish(PACKAGE_DISABLED)
+```
+
+#### 删除节点包
+
+```
+1. NodePackageManager.remove_package(id)
+       │
+       ├──▶ 如已启用，先禁用
+       │
+       ├──▶ 删除 node_packages/{id}/ 目录
+       │
+       ├──▶ 从SQLite删除记录
+       │
+       └──▶ EventBus.publish(PACKAGE_REMOVED)
+```
+
 ---
 
-## 10. 架构决策记录 (ADR)
+## 11. 架构决策记录 (ADR)
 
 ### ADR-001: UI框架选择
 
@@ -674,7 +1027,27 @@ class Workflow(Base):
 
 ---
 
-## 11. 目录结构
+### ADR-008: 自定义节点包管理
+
+**状态**: 已决定
+
+**背景**: 用户需要从Git仓库下载和管理自定义节点包，支持更新、启用、禁用、删除操作。
+
+**决策**: 实现NodePackageManager组件，使用GitPython库管理Git操作，SQLite存储元信息。
+
+**理由**:
+- 用户需要便捷地获取社区贡献的节点
+- 需要版本管理和更新机制
+- 需要灵活启用/禁用节点包而不删除
+
+**后果**:
+- 需要GitPython依赖
+- 需要处理网络异常
+- 节点包可能包含恶意代码（需要用户确认）
+
+---
+
+## 12. 目录结构
 
 ```
 office/
@@ -700,6 +1073,11 @@ office/
 │   │   ├── api_key_manager.py  # API Key管理
 │   │   ├── mcp_manager.py      # MCP管理
 │   │   └── skill_manager.py    # Skill管理
+│   ├── nodes/                     # 节点包管理模块
+│   │   ├── __init__.py
+│   │   ├── package_manager.py  # 节点包管理器
+│   │   ├── package_loader.py   # 节点包加载器
+│   │   └── git_utils.py        # Git操作工具
 │   ├── storage/
 │   │   ├── __init__.py
 │   │   ├── database.py         # 数据库连接
@@ -709,6 +1087,7 @@ office/
 │   │   ├── __init__.py
 │   │   ├── main_window.py      # 主窗口
 │   │   ├── chat_panel.py       # AI对话面板
+│   │   ├── package_panel.py    # 节点包管理面板
 │   │   └── node_editor/
 │   │       ├── __init__.py
 │   │       ├── scene.py        # QGraphicsScene
@@ -719,11 +1098,15 @@ office/
 │   └── utils/
 │       ├── __init__.py
 │       └── crypto.py           # 加密工具
-├── plugins/
+├── plugins/                     # 内置插件目录
 │   ├── __init__.py
 │   ├── excel_tools/            # Excel工具插件
 │   ├── table_tools/            # 表格工具插件
 │   └── chat_tools/             # 聊天工具插件
+├── node_packages/              # 自定义节点包目录
+│   ├── package_A/              # 从Git安装的节点包
+│   ├── package_B/              # 另一个节点包
+│   └── local_nodes/            # 用户本地自定义节点
 ├── docs/
 │   └── ARCHITECTURE.md         # 本文档
 ├── tests/
@@ -734,9 +1117,9 @@ office/
 
 ---
 
-## 12. 依赖清单
+## 13. 依赖清单
 
-### 12.1 核心依赖
+### 13.1 核心依赖
 
 | 包 | 版本 | 用途 |
 |---|------|------|
@@ -744,8 +1127,9 @@ office/
 | agentscope | >=0.0.5 | AI Agent框架 |
 | sqlalchemy | >=2.0 | ORM |
 | cryptography | >=41.0 | API Key加密 |
+| GitPython | >=3.1 | 自定义节点包Git操作 |
 
-### 12.2 可选依赖
+### 13.2 可选依赖
 
 | 包 | 用途 |
 |---|------|
@@ -756,7 +1140,7 @@ office/
 
 ---
 
-## 13. 术语表
+## 14. 术语表
 
 | 术语 | 定义 |
 |------|------|
@@ -772,6 +1156,9 @@ office/
 | **Skill** | 预定义的技能包，包含多个Tool |
 | **AppContext** | 暴露给插件的程序上下文接口 |
 | **EventBus** | 事件发布/订阅系统 |
+| **节点包(NodePackage)** | 从Git仓库安装的自定义节点集合 |
+| **package.json** | 节点包元信息描述文件 |
+| **NodePackageManager** | 管理节点包生命周期的组件 |
 
 ---
 
