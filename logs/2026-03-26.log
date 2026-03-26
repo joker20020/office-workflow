@@ -1,0 +1,1443 @@
+2026-03-26 14:11:29 | INFO     | __main__ | ==================================================
+2026-03-26 14:11:29 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:11:29 | INFO     | __main__ | ==================================================
+2026-03-26 14:11:29 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:11:29 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:11:29 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:11:29 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:11:29 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:11:29 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:11:29 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:11:29 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:11:29 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:11:29 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:11:47 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:11:47 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:11:47 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:11:47 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:11:47 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:11:47 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:11:47 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:11:47 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:11:47 | INFO     | __main__ | ==================================================
+2026-03-26 14:11:47 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:11:47 | INFO     | __main__ | ==================================================
+2026-03-26 14:14:41 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: cfd50bc6..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:14:41 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:14:41 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:14:41 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:05 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: 998d7d5d..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:15:05 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:05 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:05 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:15 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_create_tables0/test.db
+2026-03-26 14:15:15 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_create_tables0/test.db
+2026-03-26 14:15:15 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_create_tables0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_get_session0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_get_session0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_get_session0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_session_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_session_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_session_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_context_manager0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_create_plugin_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_create_plugin_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_create_plugin_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_unique_plugin_name0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_unique_plugin_name0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_unique_plugin_name0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_create_setting_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_create_setting_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_create_setting_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_create_permission_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_create_permission_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_create_permission_record0/test.db
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 发现插件: test_plugin v1.0.0 (/tmp/pytest-of-jdy/pytest-32/test_discover_plugins0/plugins/test_plugin)
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:16 | WARNING  | src.core.plugin_manager | 插件未加载: nonexistent
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_initialize0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_initialize0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_initialize0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_initialize0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_event_bus_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_event_bus_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_event_bus_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_event_bus_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_database_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_database_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_database_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_database_property0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_shutdown0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_shutdown0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_data_directory_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_data_directory_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_data_directory_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_data_directory_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_database_file_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_database_file_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_database_file_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_database_file_created0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_init_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_init_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_init_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_init_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_get_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_get_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_get_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_get_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-32/test_shutdown_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-32/test_shutdown_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:16 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:16 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:16 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:16 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-32/test_shutdown_context0/data/app.db
+2026-03-26 14:15:16 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_initialize0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_initialize0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_initialize0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_initialize0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_event_bus_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_event_bus_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_event_bus_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_event_bus_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_permission_manager_proper0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_plugin_manager_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_database_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_database_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_database_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_database_property0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_shutdown0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_shutdown0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_data_directory_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_data_directory_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_data_directory_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_data_directory_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_database_file_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_database_file_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_database_file_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_database_file_created0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_init_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_init_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_init_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_init_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_get_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_get_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_get_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_get_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_shutdown_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-33/test_shutdown_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:15:24 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_shutdown_context0/data/app.db
+2026-03-26 14:15:24 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:15:24 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: 748f637d..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:15:24 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:15:24 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 发现插件: test_plugin v1.0.0 (/tmp/pytest-of-jdy/pytest-33/test_discover_plugins0/plugins/test_plugin)
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:24 | WARNING  | src.core.plugin_manager | 插件未加载: nonexistent
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_create_tables0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_create_tables0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_create_tables0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_get_session0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_get_session0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_get_session0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_session_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_session_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_session_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_session_rollback_on_error0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_context_manager0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_create_plugin_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_create_plugin_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_create_plugin_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_unique_plugin_name0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_unique_plugin_name0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_unique_plugin_name0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_create_setting_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_create_setting_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_create_setting_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-33/test_create_permission_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-33/test_create_permission_record0/test.db
+2026-03-26 14:15:24 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-33/test_create_permission_record0/test.db
+2026-03-26 14:16:07 | INFO     | src.main | ==================================================
+2026-03-26 14:16:07 | INFO     | src.main | 办公小工具整合平台 启动
+2026-03-26 14:16:07 | INFO     | src.main | ==================================================
+2026-03-26 14:16:07 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:16:07 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:16:07 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:16:07 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:16:07 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:16:07 | INFO     | src.main | AppContext 初始化完成
+2026-03-26 14:16:07 | INFO     | src.main | 发现 0 个插件: []
+2026-03-26 14:16:07 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:16:07 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:16:07 | INFO     | src.main | 主窗口显示
+2026-03-26 14:18:25 | INFO     | __main__ | ==================================================
+2026-03-26 14:18:25 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:18:25 | INFO     | __main__ | ==================================================
+2026-03-26 14:18:25 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:18:25 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:18:25 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:18:25 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:18:25 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:18:25 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:18:25 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:18:25 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:18:25 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:18:25 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:19:27 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:19:27 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:19:27 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:27 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:27 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:27 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:19:27 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:27 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:19:27 | INFO     | __main__ | ==================================================
+2026-03-26 14:19:27 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:19:27 | INFO     | __main__ | ==================================================
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_initialize0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_initialize0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_initialize0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_initialize0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_event_bus_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_event_bus_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_event_bus_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_event_bus_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_permission_manager_proper0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_permission_manager_proper0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_permission_manager_proper0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_permission_manager_proper0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_plugin_manager_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_plugin_manager_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_plugin_manager_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_plugin_manager_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_database_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_database_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_database_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_database_property0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_shutdown0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_shutdown0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_data_directory_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_data_directory_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_data_directory_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_data_directory_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_database_file_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_database_file_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_database_file_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_database_file_created0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_init_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_init_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_init_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_init_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_get_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_get_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_get_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_get_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_shutdown_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-34/test_shutdown_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:19:32 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_shutdown_context0/data/app.db
+2026-03-26 14:19:32 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:19:32 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: 8ae271fa..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:19:32 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:19:32 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 发现插件: test_plugin v1.0.0 (/tmp/pytest-of-jdy/pytest-34/test_discover_plugins0/plugins/test_plugin)
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:19:32 | WARNING  | src.core.plugin_manager | 插件未加载: nonexistent
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_create_tables0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_create_tables0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_create_tables0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_get_session0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_get_session0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_get_session0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_session_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_session_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_session_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_session_rollback_on_error0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_session_rollback_on_error0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_session_rollback_on_error0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_context_manager0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_create_plugin_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_create_plugin_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_create_plugin_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_unique_plugin_name0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_unique_plugin_name0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_unique_plugin_name0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_create_setting_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_create_setting_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_create_setting_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-34/test_create_permission_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-34/test_create_permission_record0/test.db
+2026-03-26 14:19:32 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-34/test_create_permission_record0/test.db
+2026-03-26 14:20:00 | INFO     | src.main | ==================================================
+2026-03-26 14:20:00 | INFO     | src.main | 办公小工具整合平台 启动
+2026-03-26 14:20:00 | INFO     | src.main | ==================================================
+2026-03-26 14:20:00 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:20:00 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:20:00 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:20:00 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:20:00 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:20:00 | INFO     | src.main | AppContext 初始化完成
+2026-03-26 14:20:00 | INFO     | src.main | 发现 0 个插件: []
+2026-03-26 14:20:00 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:20:00 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:20:00 | INFO     | src.main | 主窗口显示
+2026-03-26 14:20:16 | INFO     | __main__ | ==================================================
+2026-03-26 14:20:16 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:20:16 | INFO     | __main__ | ==================================================
+2026-03-26 14:20:16 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:20:16 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:20:16 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:20:16 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:20:16 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:20:16 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:20:16 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:20:16 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:20:16 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:20:16 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:20:35 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:20:35 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:20:35 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:20:35 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:20:35 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:20:35 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:20:35 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:20:35 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:20:35 | INFO     | __main__ | ==================================================
+2026-03-26 14:20:35 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:20:35 | INFO     | __main__ | ==================================================
+2026-03-26 14:22:43 | INFO     | src.main | ==================================================
+2026-03-26 14:22:43 | INFO     | src.main | 办公小工具整合平台 启动
+2026-03-26 14:22:43 | INFO     | src.main | ==================================================
+2026-03-26 14:22:43 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:22:43 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:22:43 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:22:43 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:22:43 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:22:43 | INFO     | src.main | AppContext 初始化完成
+2026-03-26 14:22:43 | INFO     | src.main | 发现 0 个插件: []
+2026-03-26 14:22:43 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:22:43 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:22:43 | INFO     | src.main | 主窗口显示
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_initialize0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_initialize0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_initialize0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_initialize0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_event_bus_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_event_bus_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_event_bus_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_event_bus_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_permission_manager_proper0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_permission_manager_proper0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_permission_manager_proper0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_permission_manager_proper0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_plugin_manager_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_plugin_manager_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_plugin_manager_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_plugin_manager_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_database_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_database_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_database_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_database_property0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_shutdown0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_shutdown0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_data_directory_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_data_directory_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_data_directory_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_data_directory_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_database_file_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_database_file_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_database_file_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_database_file_created0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_init_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_init_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_init_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_init_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_get_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_get_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_get_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_get_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_shutdown_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-35/test_shutdown_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:06 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_shutdown_context0/data/app.db
+2026-03-26 14:23:06 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:06 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: 77931cc1..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:23:06 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:06 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.read', 'file.write']
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 发现插件: test_plugin v1.0.0 (/tmp/pytest-of-jdy/pytest-35/test_discover_plugins0/plugins/test_plugin)
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:23:06 | WARNING  | src.core.plugin_manager | 插件未加载: nonexistent
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['event.subscribe', 'file.read']
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_create_tables0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_create_tables0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_create_tables0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_get_session0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_get_session0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_get_session0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_session_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_session_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_session_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_session_rollback_on_error0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_session_rollback_on_error0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_session_rollback_on_error0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_context_manager0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_create_plugin_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_create_plugin_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_create_plugin_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_unique_plugin_name0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_unique_plugin_name0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_unique_plugin_name0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_create_setting_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_create_setting_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_create_setting_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-35/test_create_permission_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-35/test_create_permission_record0/test.db
+2026-03-26 14:23:06 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-35/test_create_permission_record0/test.db
+2026-03-26 14:23:13 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:13 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:23:13 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:13 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:13 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:23:13 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:23:13 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:23:13 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:13 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:23:13 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:23:13 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:23:13 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:23:13 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:23:17 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:23:17 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:23:17 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:17 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:17 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:17 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:23:17 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:17 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:23:17 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:17 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:23:17 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:27 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:27 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:23:27 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:27 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:23:27 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:23:27 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:23:27 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:23:27 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:23:27 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:23:27 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:23:27 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:23:27 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:23:27 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:23:36 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:23:36 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:23:36 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:23:36 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:23:36 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:23:36 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:23:36 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:23:36 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:23:36 | INFO     | __main__ | ==================================================
+2026-03-26 14:23:36 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:23:36 | INFO     | __main__ | ==================================================
+2026-03-26 14:24:26 | INFO     | __main__ | ==================================================
+2026-03-26 14:24:26 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:24:26 | INFO     | __main__ | ==================================================
+2026-03-26 14:24:26 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:24:26 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:24:26 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:24:26 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:24:26 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:24:26 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:24:26 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:24:26 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:24:26 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:24:26 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:24:30 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:24:30 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:24:30 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:24:30 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:24:30 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:24:30 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:24:30 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:24:30 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:24:30 | INFO     | __main__ | ==================================================
+2026-03-26 14:24:30 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:24:30 | INFO     | __main__ | ==================================================
+2026-03-26 14:25:44 | INFO     | __main__ | ==================================================
+2026-03-26 14:25:44 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:25:44 | INFO     | __main__ | ==================================================
+2026-03-26 14:25:44 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:25:44 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:25:44 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:25:44 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:25:44 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:25:44 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:25:44 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:25:44 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:25:44 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:25:44 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:25:53 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:25:53 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:25:53 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:25:53 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:25:53 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:25:53 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:25:53 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:25:53 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:25:53 | INFO     | __main__ | ==================================================
+2026-03-26 14:25:53 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:25:53 | INFO     | __main__ | ==================================================
+2026-03-26 14:32:58 | INFO     | __main__ | ==================================================
+2026-03-26 14:32:58 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:32:58 | INFO     | __main__ | ==================================================
+2026-03-26 14:32:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:32:58 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:32:58 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:32:58 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:32:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:32:58 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:32:58 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:32:58 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:32:58 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:32:58 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:33:04 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:33:04 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:33:04 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:33:04 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:33:04 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:33:04 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:33:04 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:33:04 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:33:04 | INFO     | __main__ | ==================================================
+2026-03-26 14:33:04 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:33:04 | INFO     | __main__ | ==================================================
+2026-03-26 14:33:34 | INFO     | __main__ | ==================================================
+2026-03-26 14:33:34 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:33:34 | INFO     | __main__ | ==================================================
+2026-03-26 14:33:34 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:33:34 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:33:34 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:33:34 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:33:34 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:33:34 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:33:34 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:33:34 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:33:34 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:33:34 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:33:37 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:33:37 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:33:37 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:33:37 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:33:37 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:33:37 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:33:37 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:33:37 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:33:37 | INFO     | __main__ | ==================================================
+2026-03-26 14:33:37 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:33:37 | INFO     | __main__ | ==================================================
+2026-03-26 14:34:05 | INFO     | __main__ | ==================================================
+2026-03-26 14:34:05 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:34:05 | INFO     | __main__ | ==================================================
+2026-03-26 14:34:05 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:34:05 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:34:05 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:34:05 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:34:05 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:34:05 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:34:05 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:34:05 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:34:06 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:34:06 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:34:10 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:34:10 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:34:10 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:34:10 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:34:10 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:34:10 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:34:10 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:34:10 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:34:10 | INFO     | __main__ | ==================================================
+2026-03-26 14:34:10 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:34:10 | INFO     | __main__ | ==================================================
+2026-03-26 14:42:22 | INFO     | __main__ | ==================================================
+2026-03-26 14:42:22 | INFO     | __main__ | 办公小工具整合平台 启动
+2026-03-26 14:42:22 | INFO     | __main__ | ==================================================
+2026-03-26 14:42:22 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:22 | INFO     | src.storage.database | 数据库引擎创建: data/app.db
+2026-03-26 14:42:22 | INFO     | src.storage.database | 数据库表创建完成: data/app.db
+2026-03-26 14:42:22 | INFO     | src.core.app_context | 数据库初始化完成: data/app.db
+2026-03-26 14:42:22 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:22 | INFO     | __main__ | AppContext 初始化完成
+2026-03-26 14:42:22 | INFO     | __main__ | 发现 0 个插件: []
+2026-03-26 14:42:22 | WARNING  | src.ui.main_window | 页面不存在: home
+2026-03-26 14:42:22 | INFO     | src.ui.main_window | MainWindow 初始化完成
+2026-03-26 14:42:22 | INFO     | __main__ | 主窗口显示
+2026-03-26 14:42:30 | INFO     | src.ui.main_window | 主窗口关闭
+2026-03-26 14:42:30 | INFO     | __main__ | 应用关闭中...
+2026-03-26 14:42:30 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:30 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:30 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:30 | INFO     | src.storage.database | 数据库连接已关闭: data/app.db
+2026-03-26 14:42:30 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:30 | INFO     | __main__ | AppContext 已关闭
+2026-03-26 14:42:30 | INFO     | __main__ | ==================================================
+2026-03-26 14:42:30 | INFO     | __main__ | 应用退出 (code: 0)
+2026-03-26 14:42:30 | INFO     | __main__ | ==================================================
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_initialize0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_initialize0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_initialize0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_initialize0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_initialize_twice_raises_e0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_event_bus_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_event_bus_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_event_bus_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_event_bus_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_permission_manager_proper0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_permission_manager_proper0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_permission_manager_proper0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_permission_manager_proper0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_plugin_manager_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_plugin_manager_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_plugin_manager_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_plugin_manager_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_database_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_database_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_database_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_database_property0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_shutdown0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_shutdown0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_shutdown_clears_event_bus0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_data_directory_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_data_directory_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_data_directory_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_data_directory_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_database_file_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_database_file_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_database_file_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_database_file_created0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_init_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_init_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_init_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_init_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_init_context_twice_raises0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_get_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_get_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_get_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_get_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始初始化 AppContext...
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_shutdown_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 数据库初始化完成: /tmp/pytest-of-jdy/pytest-36/test_shutdown_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 初始化完成
+2026-03-26 14:42:58 | INFO     | src.core.app_context | 开始关闭 AppContext...
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_shutdown_context0/data/app.db
+2026-03-26 14:42:58 | INFO     | src.core.app_context | AppContext 关闭完成
+2026-03-26 14:42:58 | ERROR    | src.core.event_bus | 事件处理器执行失败: plugin.loaded, 订阅ID: c1756813..., 错误: division by zero
+Traceback (most recent call last):
+  File "/home/jdy/Documents/Github/office/src/core/event_bus.py", line 235, in publish
+    handler(event)
+  File "/home/jdy/Documents/Github/office/tests/test_event_bus.py", line 126, in <lambda>
+    bus.subscribe(EventType.PLUGIN_LOADED, lambda e: 1 / 0)
+                                                     ~~^~~
+ZeroDivisionError: division by zero
+2026-03-26 14:42:58 | INFO     | src.core.event_bus | 已清除所有事件订阅
+2026-03-26 14:42:58 | WARNING  | src.core.event_bus | 取消订阅失败: 未找到订阅ID nonexist...
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 失去权限 'file.read'
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 撤销: 插件 'test_plugin' 的所有权限
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'test_plugin' 获得权限: ['file.write', 'file.read']
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 授权: 插件 'test_plugin' 获得权限 'file.read'
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 发现插件: test_plugin v1.0.0 (/tmp/pytest-of-jdy/pytest-36/test_discover_plugins0/plugins/test_plugin)
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:42:58 | WARNING  | src.core.plugin_manager | 插件未加载: nonexistent
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 所有插件已卸载
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.permission_manager | 批量授权: 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件 'mock_plugin' 获得权限: ['file.read', 'event.subscribe']
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件加载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.core.plugin_manager | 插件卸载成功: mock_plugin
+2026-03-26 14:42:58 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_create_tables0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_create_tables0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_create_tables0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_get_session0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_get_session0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_get_session0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_session_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_session_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_session_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_session_rollback_on_error0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_session_rollback_on_error0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_session_rollback_on_error0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_context_manager0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_create_plugin_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_create_plugin_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_create_plugin_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_unique_plugin_name0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_unique_plugin_name0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_unique_plugin_name0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_create_setting_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_create_setting_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_create_setting_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库引擎创建: /tmp/pytest-of-jdy/pytest-36/test_create_permission_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库表创建完成: /tmp/pytest-of-jdy/pytest-36/test_create_permission_record0/test.db
+2026-03-26 14:42:59 | INFO     | src.storage.database | 数据库连接已关闭: /tmp/pytest-of-jdy/pytest-36/test_create_permission_record0/test.db
