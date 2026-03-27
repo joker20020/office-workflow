@@ -31,6 +31,7 @@ from typing import Optional
 from src.core.event_bus import EventBus, EventType
 from src.core.permission_manager import Permission, PermissionManager, PermissionSet
 from src.core.plugin_manager import PluginManager
+from src.engine.node_engine import NodeEngine
 from src.storage.database import Database
 from src.utils.logger import get_logger
 
@@ -90,6 +91,7 @@ class AppContext:
         self._permission_manager: Optional[PermissionManager] = None
         self._plugin_manager: Optional[PluginManager] = None
         self._database: Optional[Database] = None
+        self._node_engine: Optional[NodeEngine] = None
 
         # 状态
         self._initialized: bool = False
@@ -123,6 +125,13 @@ class AppContext:
         if self._database is None:
             raise RuntimeError("AppContext 未初始化，请先调用 initialize()")
         return self._database
+
+    @property
+    def node_engine(self) -> NodeEngine:
+        """获取节点引擎"""
+        if self._node_engine is None:
+            raise RuntimeError("AppContext 未初始化，请先调用 initialize()")
+        return self._node_engine
 
     @property
     def is_initialized(self) -> bool:
@@ -175,10 +184,14 @@ class AppContext:
         )
         _logger.debug("插件管理器初始化完成")
 
-        # 6. 标记为已初始化
+        # 6. 初始化节点引擎
+        self._node_engine = NodeEngine()
+        _logger.debug("节点引擎初始化完成")
+
+        # 7. 标记为已初始化
         self._initialized = True
 
-        # 7. 发布应用启动事件
+        # 8. 发布应用启动事件
         self._event_bus.publish(EventType.APP_STARTED, {})
 
         _logger.info("AppContext 初始化完成")
@@ -215,6 +228,7 @@ class AppContext:
 
         # 清理状态
         self._plugin_manager = None
+        self._node_engine = None
         self._database = None
         self._event_bus = None
         self._permission_manager = None

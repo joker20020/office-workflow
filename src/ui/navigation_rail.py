@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.utils.logger import get_logger
+from src.ui.theme import Theme
 
 # 模块日志记录器
 _logger = get_logger(__name__)
@@ -103,38 +104,8 @@ class NavItem(QPushButton):
         self._apply_style()
 
     def _apply_style(self) -> None:
-        """应用样式"""
-        if self._selected:
-            self.setStyleSheet("""
-                NavItem {
-                    background-color: #E3F2FD;
-                    border: none;
-                    border-radius: 8px;
-                    text-align: left;
-                }
-                NavItem:hover {
-                    background-color: #BBDEFB;
-                }
-                NavItem > QLabel {
-                    color: black;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                NavItem {
-                    background-color: transparent;
-                    border: none;
-                    border-radius: 8px;
-                    text-align: left;
-                    color: black;
-                }
-                NavItem:hover {
-                    background-color: #F5F5F5;
-                }
-                NavItem > QLabel {
-                    color: black;
-                }
-            """)
+        """应用样式 - 使用主题系统"""
+        self.setStyleSheet(Theme.get_nav_item_stylesheet(self._selected))
 
     @property
     def selected(self) -> bool:
@@ -200,22 +171,18 @@ class NavigationRail(QWidget):
 
         # 标题区域
         title_label = QLabel("办公小工具")
-        title_label.setStyleSheet("""
-            font-size: 16px;
-            font-weight: bold;
-            color: #1976D2;
-            padding: 8px;
-        """)
+        title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         main_layout.addWidget(title_label)
 
         # 分隔线
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #E0E0E0;")
+        separator.setStyleSheet(Theme.get_separator_stylesheet())
         main_layout.addWidget(separator)
 
         # 导航项容器
         self._items_widget = QWidget()
+        self._items_widget.setStyleSheet(Theme.get_navigation_rail_container_stylesheet())
         self._items_layout = QVBoxLayout(self._items_widget)
         self._items_layout.setContentsMargins(0, 8, 0, 0)
         self._items_layout.setSpacing(4)
@@ -224,13 +191,8 @@ class NavigationRail(QWidget):
         main_layout.addWidget(self._items_widget)
         main_layout.addStretch()
 
-        # 应用整体样式
-        self.setStyleSheet("""
-            NavigationRail {
-                background-color: #FAFAFA;
-                border-right: 1px solid #E0E0E0;
-            }
-        """)
+        # 应用整体样式 - 使用主题系统
+        self.setStyleSheet(Theme.get_navigation_rail_stylesheet())
 
     def add_item(self, item_id: str, text: str, icon: str = "") -> None:
         """

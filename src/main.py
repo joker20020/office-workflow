@@ -75,7 +75,7 @@ def main() -> int:
         _logger.error(f"插件发现失败: {e}", exc_info=True)
 
     # 5. 创建并显示主窗口
-    window = MainWindow()
+    window = MainWindow(engine=context.node_engine)
     window.show()
     _logger.info("主窗口显示")
 

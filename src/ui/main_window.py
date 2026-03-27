@@ -2,10 +2,9 @@
 """
 主窗口模块
 
-应用程序的主窗口，包含：
-- NavigationRail: 左侧导航栏
-- QStackedWidget: 右侧内容区域
-- 状态栏
+应用程序的主窗口， - NavigationRail: 左侧导航栏
+ - QStackedWidget: 右侧内容区域
+ - 状态栏
 
 使用方式：
     from src.ui.main_window import MainWindow
@@ -26,8 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.engine.node_engine import NodeEngine
 from src.ui.navigation_rail import NavigationRail
+from src.ui.node_editor import NodeEditorPanel
 from src.utils.logger import get_logger
+from src.ui.theme import Theme
 
 # 模块日志记录器
 _logger = get_logger(__name__)
@@ -35,30 +37,35 @@ _logger = get_logger(__name__)
 
 class MainWindow(QMainWindow):
     """
-    主窗口
+        主窗口
 
-    应用程序的主窗口，提供：
-    - 左侧导航栏
-    - 右侧内容区域（堆叠布局）
-    - 状态栏
+        应用程序的主窗口
+    :
+        - 左侧导航栏
+        - 右侧内容区域（堆叠布局）
+        - 状态栏
 
-    Example:
-        window = MainWindow()
-        window.add_page("home", home_widget)
-        window.show()
+        Example:
+            window = MainWindow()
+            window.add_page("home", home_widget)
+            window.show()
     """
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, engine: Optional[NodeEngine] = None, parent: Optional[QWidget] = None):
         """
         初始化主窗口
 
         Args:
+            engine: 节点引擎（可选，默认创建新实例）
             parent: 父组件
         """
         super().__init__(parent)
 
         # 页面映射：页面ID -> QWidget
         self._pages: dict[str, QWidget] = {}
+
+        # 节点引擎
+        self._node_engine = engine or NodeEngine()
 
         self._setup_ui()
 
@@ -87,71 +94,54 @@ class MainWindow(QMainWindow):
 
         # 右侧内容区域
         self._content_stack = QStackedWidget()
-        self._content_stack.setStyleSheet("""
-            QStackedWidget {
-                background-color: white;
-            }
-        """)
+        self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         main_layout.addWidget(self._content_stack, 1)
 
         # 状态栏（必须在 _setup_default_nav_items 之前创建）
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("就绪")
+        self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
 
         # 添加默认导航项
         self._setup_default_nav_items()
 
-        # 应用窗口样式
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #FAFAFA;
-            }
-        """)
+        # 应用窗口样式 - 暗色主题
+        self.setStyleSheet(Theme.get_main_window_stylesheet())
 
     def _setup_default_nav_items(self) -> None:
         """设置默认导航项"""
-        # 首页
-        self._nav_rail.add_item("home", "首页", "🏠")
+        # 先创建所有页面
         welcome_page = self._create_welcome_page()
+        nodes_page = self._create_nodes_page()
+
+        # 添加页面到堆栈
         self.add_page("home", welcome_page)
-
-        # 节点编辑器（Phase 2 实现）
-        self._nav_rail.add_item("nodes", "节点编辑器", "🔧")
-        nodes_page = self._create_placeholder_page("节点编辑器", "Phase 2")
         self.add_page("nodes", nodes_page)
+        self.add_page("agent", self._create_placeholder_page("AI 助手", "Phase 3"))
+        self.add_page("plugins", self._create_placeholder_page("插件管理", "Phase 4"))
+        self.add_page("packages", self._create_placeholder_page("节点包管理", "Phase 5"))
 
-        # AI 对话（Phase 3 实现）
+        # 然后添加导航项（第一个会自动选中）
+        self._nav_rail.add_item("home", "首页", "🏠")
+        self._nav_rail.add_item("nodes", "节点编辑器", "🔧")
         self._nav_rail.add_item("agent", "AI 助手", "🤖")
-        agent_page = self._create_placeholder_page("AI 助手", "Phase 3")
-        self.add_page("agent", agent_page)
-
-        # 插件管理（Phase 4 实现）
         self._nav_rail.add_item("plugins", "插件管理", "🧩")
-        plugins_page = self._create_placeholder_page("插件管理", "Phase 4")
-        self.add_page("plugins", plugins_page)
-
-        # 节点包管理（Phase 5 实现）
         self._nav_rail.add_item("packages", "节点包", "📦")
-        packages_page = self._create_placeholder_page("节点包管理", "Phase 5")
-        self.add_page("packages", packages_page)
-
-        # 设置默认显示首页
-        self._nav_rail.set_current("home")
 
     def _create_welcome_page(self) -> QWidget:
-        """创建欢迎页面"""
+        """创建欢迎页面 - 暗色主题"""
         page = QWidget()
         layout = QHBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         welcome_label = QLabel(
             "<h1>欢迎使用办公小工具整合平台</h1>"
-            "<p style='color: #666; font-size: 14px;'>"
+            "<p style='color: #90CAF9; font-size: 14px;'>"
             "这是一个基于节点编辑器的办公工具整合平台"
             "</p>"
-            "<p style='color: #999; font-size: 12px;'>"
-            "Phase 1: 基础框架已就绪"
+            "<p style='color: #666; font-size: 12px;'>"
+            "Phase 2: 节点编辑器核心已就绪"
             "</p>"
         )
         welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -160,31 +150,31 @@ class MainWindow(QMainWindow):
                 padding: 40px;
             }
             h1 {
-                color: #1976D2;
+                color: #90CAF9;
                 font-size: 28px;
+            }
+            p {
+                color: #90CAF9;
             }
         """)
         layout.addWidget(welcome_label)
 
         return page
 
+    def _create_nodes_page(self) -> QWidget:
+        """创建节点编辑器页面"""
+        # 创建节点编辑器面板，传入节点引擎
+        self._node_editor_panel = NodeEditorPanel(self._node_engine)
+        return self._node_editor_panel
+
     def _create_placeholder_page(self, title: str, phase: str) -> QWidget:
-        """创建占位页面"""
+        """创建占位页面 - 暗色主题"""
         page = QWidget()
         layout = QHBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         label = QLabel(f"<h2>{title}</h2><p style='color: #999;'>将在 {phase} 实现</p>")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("""
-            QLabel {
-                padding: 40px;
-            }
-            h2 {
-                color: #9E9E9E;
-                font-size: 24px;
-            }
-        """)
+        label.setStyleSheet(Theme.get_welcome_page_stylesheet())
         layout.addWidget(label)
 
         return page
@@ -258,6 +248,16 @@ class MainWindow(QMainWindow):
     def nav_rail(self) -> NavigationRail:
         """获取导航栏"""
         return self._nav_rail
+
+    @property
+    def node_engine(self) -> NodeEngine:
+        """获取节点引擎"""
+        return self._node_engine
+
+    @property
+    def node_editor_panel(self) -> NodeEditorPanel:
+        """获取节点编辑器面板"""
+        return self._node_editor_panel
 
     def closeEvent(self, event) -> None:
         """窗口关闭事件"""

@@ -1134,15 +1134,15 @@ node_packages/
 ### 9.2 核心实体
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Workflow   │     │  ApiKey     │     │  ChatHistory│
-├─────────────┤     ├─────────────┤     ├─────────────┤
-│ id          │     │ id          │     │ id          │
-│ name        │     │ provider    │     │ session_id  │
-│ graph_json  │     │ key(encrypted)  │ │ role        │
-│ created_at  │     │ created_at  │     │ content     │
-│ updated_at  │     │             │     │ timestamp   │
-└─────────────┘     └─────────────┘     └─────────────┘
+    ┌─────────────┐     ┌─────────────┐
+    │  ApiKey     │     │  ChatHistory│
+    ├─────────────┤     ├─────────────┤
+    │ id          │     │ id          │
+    │ provider    │     │ session_id  │
+    │ key(encrypted)  │ │ role        │
+    │ created_at  │     │ content     │
+    │             │     │ timestamp   │
+    └─────────────┘     └─────────────┘
 
 ┌─────────────┐     ┌─────────────┐     ┌─────────────────┐
 │  PluginConfig│     │  McpServer  │     │  NodePackage    │
@@ -1815,8 +1815,7 @@ office/
 | 2.7 | 节点拖放 + 端口连接交互 | 2.5, 2.6 | 3天 |
 | 2.8 | NodeEngine与UI状态同步 | 2.3, 2.7 | 2天 |
 | 2.9 | 工作流JSON序列化/反序列化 | 2.2 | 1天 |
-| 2.10 | WorkflowRepository (SQLite存储) | 2.9, Phase 1.4 | 1天 |
-| 2.11 | 内置插件: 文本处理节点 | 2.1, 2.3 | 2天 |
+| 2.10 | 内置插件: 文本处理节点 | 2.1, 2.3 | 2天 |
 
 **验证标准**:
 - [ ] 可拖放节点到画布
