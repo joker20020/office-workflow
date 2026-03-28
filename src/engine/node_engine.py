@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from src.core.event_bus import EventBus, EventType
-from src.engine.definitions import NodeDefinition, PortType
+from src.engine.definitions import NodeDefinition, PortDefinition, PortType
 from src.engine.node_graph import (
     Connection,
     CyclicDependencyError,
@@ -155,18 +155,22 @@ class NodeRegistry:
 
     def get_all_for_agent(self) -> List[Dict[str, Any]]:
         """
-        获取所有节点信息（供Agent使用）
-
-        返回所有节点的描述信息，包括：
-        - 节点类型、名称、描述
-        - 输入输出端口信息
-        - 分类和图标
+        获取所有节点信息，格式化为Agent可读的格式
 
         Returns:
-            节点信息字典列表
+            节点信息字典列表，每个字典包含：
+            - node_type: 节点类型
+            - display_name: 显示名称
+            - description: 描述
+            - category: 分类
+            - icon: 图标
+            - inputs: 输入端口列表
+            - outputs: 输出端口列表
 
-        Note:
-            不包含执行函数，因为函数不可序列化
+        Example:
+            >>> nodes = registry.get_all_for_agent()
+            >>> for node in nodes:
+            ...     print(f"{node['node_type']}: {node['description']}")
         """
         return [defn.to_dict() for defn in self._definitions.values()]
 
@@ -243,8 +247,93 @@ class NodeEngine:
         """
         self._registry = NodeRegistry()
         self._event_bus = event_bus
+        # self._register_builtin_nodes()
 
         _logger.debug("节点执行引擎初始化完成")
+
+    # def _register_builtin_nodes(self) -> None:
+    #     """注册内置节点类型"""
+    #     # 文本输入节点
+    #     self._registry.register(
+    #         NodeDefinition(
+    #             node_type="text.input",
+    #             display_name="文本输入",
+    #             description="输入文本内容",
+    #             category="text",
+    #             icon="📝",
+    #             inputs=[],
+    #             outputs=[
+    #                 PortDefinition("text", PortType.STRING, "输入的文本"),
+    #             ],
+    #             execute=lambda: {"text": ""},
+    #         )
+    #     )
+
+    #     # 文本拼接节点
+    #     self._registry.register(
+    #         NodeDefinition(
+    #             node_type="text.join",
+    #             display_name="文本拼接",
+    #             description="将两个文本拼接在一起",
+    #             category="text",
+    #             icon="🔗",
+    #             inputs=[
+    #                 PortDefinition("text1", PortType.STRING, "第一个文本"),
+    #                 PortDefinition("text2", PortType.STRING, "第二个文本"),
+    #                 PortDefinition(
+    #                     "separator", PortType.STRING, "分隔符", default=" ", required=False
+    #                 ),
+    #             ],
+    #             outputs=[PortDefinition("result", PortType.STRING, "拼接结果")],
+    #             execute=lambda text1, text2, separator=" ": {
+    #                 "result": f"{text1}{separator}{text2}"
+    #             },
+    #         )
+    #     )
+
+    #     # 文本转大写节点
+    #     self._registry.register(
+    #         NodeDefinition(
+    #             node_type="text.upper",
+    #             display_name="转大写",
+    #             description="将文本转换为大写",
+    #             category="text",
+    #             icon="🔠",
+    #             inputs=[PortDefinition("text", PortType.STRING, "输入文本")],
+    #             outputs=[PortDefinition("result", PortType.STRING, "大写文本")],
+    #             execute=lambda text: {"result": text.upper()},
+    #         )
+    #     )
+
+    #     # 文本转小写节点
+    #     self._registry.register(
+    #         NodeDefinition(
+    #             node_type="text.lower",
+    #             display_name="转小写",
+    #             description="将文本转换为小写",
+    #             category="text",
+    #             icon="🔡",
+    #             inputs=[PortDefinition("text", PortType.STRING, "输入文本")],
+    #             outputs=[PortDefinition("result", PortType.STRING, "小写文本")],
+    #             execute=lambda text: {"result": text.lower()},
+    #         )
+    #     )
+
+    #     # 文本输出预览节点
+    #     self._registry.register(
+    #         NodeDefinition(
+    #             node_type="text.output",
+    #             display_name="文本输出",
+    #             description="预览输出文本结果",
+    #             category="text",
+    #             icon="📄",
+    #             inputs=[PortDefinition("text", PortType.STRING, "要显示的文本")],
+    #             outputs=[],
+    #             execute=lambda text: {},
+    #         )
+    #     )
+
+    #     _logger.info(f"已注册 {len(self._registry._definitions)} 个内置节点")
 
     @property
     def registry(self) -> NodeRegistry:
@@ -598,3 +687,18 @@ class NodeEngine:
                 data["error"] = result.error
 
         self._event_bus.publish(event_type, data)
+
+    def get_available_nodes(self) -> List[Dict[str, Any]]:
+        """
+        获取所有可用节点信息（供Agent使用）
+
+        委托给NodeRegistry.get_all_for_agent()
+
+        Returns:
+            节点信息字典列表
+
+        Example:
+            >>> nodes = engine.get_available_nodes()
+            >>> print(f"共有 {len(nodes)} 个可用节点")
+        """
+        return self._registry.get_all_for_agent()

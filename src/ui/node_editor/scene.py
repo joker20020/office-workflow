@@ -93,10 +93,8 @@ class NodeEditorScene(QGraphicsScene):
         self.setSceneRect(-5000, -5000, 10000, 10000)
 
         # 网格画笔
-        self._grid_pen_minor = QPen(self.GRID_COLOR_MINOR)
-        self._grid_pen_minor.setWidth(1)
-        self._grid_pen_major = QPen(self.GRID_COLOR_MAJOR)
-        self._grid_pen_major.setWidth(2)
+        self._grid_pen_minor = Theme.color("grid_minor")
+        self._grid_pen_major = Theme.color("grid_major")
 
         _logger.debug("NodeEditorScene 初始化完成")
 
@@ -111,30 +109,48 @@ class NodeEditorScene(QGraphicsScene):
         _logger.debug("节点注册表已设置")
 
     def set_graph(self, graph: "NodeGraph") -> None:
-        """
-        设置数据图并同步UI
-
-        清空当前场景，然后根据数据图创建所有图形项。
-
-        Args:
-            graph: 数据图
-        """
-        self._graph = graph
-        self.clear_scene()
-
-        if graph is None:
-            return
-
-        # 创建节点图形项
-        for node in graph.nodes.values():
-            self._create_node_item(node)
-
-        # 创建连接图形项
-        for conn in graph.connections.values():
-            self._create_connection_item(conn)
+        import threading
 
         _logger.info(
-            f"场景已同步: {len(self._node_items)} 节点, {len(self._connection_items)} 连接"
+            f"[Thread: {threading.current_thread().name}] NodeEditorScene.set_graph被调用， "
+            f"节点数: {len(graph.nodes) if graph else 0}"
+        )
+        self._graph = graph
+
+        if graph is None:
+            self.clear_scene()
+            return
+
+        # 增量更新：只添加新节点，不清空现有节点
+        existing_ids = set(self._node_items.keys())
+        new_ids = set(graph.nodes.keys())
+
+        # 移除不再存在的节点
+        for node_id in existing_ids - new_ids:
+            self.remove_node_item(node_id)
+            _logger.debug(f"移除旧节点: {node_id[:8]}...")
+
+        # 添加新节点
+        added_count = 0
+        for node_id, node in graph.nodes.items():
+            if node_id not in existing_ids:
+                if self._create_node_item(node):
+                    added_count += 1
+
+        # 移除不再存在的连接
+        existing_conn_ids = set(self._connection_items.keys())
+        new_conn_ids = set(graph.connections.keys())
+        for conn_id in existing_conn_ids - new_conn_ids:
+            self.remove_connection_item(conn_id)
+
+        # 添加新连接
+        for conn_id, conn in graph.connections.items():
+            if conn_id not in existing_conn_ids:
+                self._create_connection_item(conn)
+
+        _logger.info(
+            f"[Thread: {threading.current_thread().name}] 场景增量更新完成: "
+            f"新增 {added_count} 节点, 共 {len(self._node_items)} 节点, {len(self._connection_items)} 连接"
         )
 
     def get_graph(self) -> Optional["NodeGraph"]:
@@ -202,15 +218,12 @@ class NodeEditorScene(QGraphicsScene):
         return self._node_items.get(node_id)
 
     def _create_node_item(self, node: "Node") -> "NodeGraphicsItem":
-        """
-        创建节点图形项（内部方法）
+        import threading
 
-        Args:
-            node: 数据节点
-
-        Returns:
-            创建的节点图形项
-        """
+        _logger.info(
+            f"[Thread: {threading.current_thread().name}] _create_node_item: "
+            f"创建节点图形项 {node.node_type}, id={node.id[:8]}..."
+        )
         from src.ui.node_editor.node_item import NodeGraphicsItem
 
         if self._node_registry is None:
@@ -224,6 +237,9 @@ class NodeEditorScene(QGraphicsScene):
 
         node_item = NodeGraphicsItem(node, definition)
         self.add_node_item(node_item)
+        _logger.info(
+            f"[Thread: {threading.current_thread().name}] 节点图形项创建完成: {node.id[:8]}..."
+        )
         return node_item
 
     # ==================== 连接管理 ====================

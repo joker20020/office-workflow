@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -210,10 +211,14 @@ class ApiKeyRecord(Base):
     """
 
     __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("provider", "model_name", name="uix_provider_model"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    provider: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
     encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -228,6 +233,49 @@ class ApiKeyRecord(Base):
 
     def __repr__(self) -> str:
         return f"<ApiKeyRecord {self.provider}>"
+
+
+class McpServerRecord(Base):
+    """MCP服务配置表"""
+
+    __tablename__ = "mcp_servers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    server_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "stdio" or "http"
+    command: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    args: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON数组
+    env: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON对象
+    timeout: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    transport: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now
+    )
+
+    def __repr__(self) -> str:
+        return f"<McpServerRecord {self.name} ({self.server_type})>"
+
+
+class SkillRecord(Base):
+    """Skill配置表"""
+
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now
+    )
+
+    def __repr__(self) -> str:
+        return f"<SkillRecord {self.name}>"
 
 
 class NodePackageRecord(Base):
@@ -275,3 +323,88 @@ class NodePackageRecord(Base):
 
     def __repr__(self) -> str:
         return f"<NodePackageRecord {self.name} v{self.version}>"
+
+
+class ChatSessionRecord(Base):
+    """
+    对话会话记录表
+
+    存储AI对话的会话信息，每个会话包含多条消息
+
+    Attributes:
+        id: 会话唯一标识 (UUID)
+        title: 会话标题（可选，默认使用第一条消息摘要）
+        created_at: 创建时间
+        updated_at: 最后更新时间
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.now,
+        onupdate=datetime.now,
+    )
+
+    # 关联的消息记录
+    messages: Mapped[List["ChatMessageRecord"]] = relationship(
+        "ChatMessageRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessageRecord.timestamp",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatSessionRecord {self.id[:8]}...>"
+
+
+class ChatMessageRecord(Base):
+    """
+    对话消息记录表
+
+    存储单条对话消息，归属于特定会话
+
+    Attributes:
+        id: 主键
+        session_id: 所属会话ID
+        role: 消息角色 (user/assistant/system)
+        content: 消息内容
+        timestamp: 消息时间戳
+        metadata: 消息元数据 (JSON格式，存储额外信息如工具调用等)
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # user/assistant/system
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.now,
+        index=True,
+    )
+    extra_data: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON格式
+
+    # 关联的会话
+    session: Mapped["ChatSessionRecord"] = relationship(
+        "ChatSessionRecord",
+        back_populates="messages",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatMessageRecord {self.session_id[:8]}... [{self.role}]>"

@@ -1,0 +1,589 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, List, Dict
+
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer
+from PySide6.QtWidgets import (
+    QScrollArea,
+    QVBoxLayout,
+    QHBoxLayout,
+    QWidget,
+    QLabel,
+    QTextEdit,
+    QPushButton,
+    QFrame,
+    QComboBox,
+    QListWidget,
+    QListWidgetItem,
+    QSplitter,
+    QMessageBox,
+)
+
+from src.agent.agent_integration import AgentIntegration
+from src.agent.api_key_manager import ApiKeyManager
+from src.ui.chat.settings_panel import AgentSettingsDialog
+from src.ui.theme import Theme
+from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.agent.mcp_server_manager import McpServerManager
+    from src.agent.skill_manager import SkillManager
+    from src.storage.repositories import ChatHistoryRepository
+
+_logger = get_logger(__name__)
+
+
+class AgentWorker(QThread):
+    response_ready = Signal(str)
+    error_occurred = Signal(str)
+
+    def __init__(self, agent: AgentIntegration, message: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._agent = agent
+        self._message = message
+
+    def run(self) -> None:
+        try:
+            _logger.info(f"AgentWorker: 开始处理消息: {self._message[:50]}...")
+            response = self._agent.chat(self._message)
+            _logger.info(f"AgentWorker: 获取到响应， length: {len(response)}")
+            self.response_ready.emit(response)
+        except Exception as e:
+            _logger.error(f"AgentWorker: 发生错误: {e}", exc_info=True)
+            self.error_occurred.emit(str(e))
+
+
+class MessageWidget(QWidget):
+    def __init__(self, role: str, content: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        role_label = QLabel(role.upper())
+        role_label.setStyleSheet(Theme.get_message_role_label_stylesheet(role))
+
+        content_label = QLabel(content)
+        content_label.setWordWrap(True)
+        content_label.setStyleSheet(Theme.get_message_content_label_stylesheet())
+
+        layout.addWidget(role_label)
+        layout.addWidget(content_label)
+
+
+class SessionListWidget(QWidget):
+    """会话列表组件 - 显示历史会话，支持切换、新建和删除"""
+
+    session_selected = Signal(str)  # session_id
+    session_delete_requested = Signal(str)  # session_id
+    new_session_requested = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QFrame()
+        header.setStyleSheet(Theme.get_session_list_header_stylesheet())
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 8, 12, 8)
+
+        title = QLabel("会话历史")
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.hex("text_primary")};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(title)
+
+        header_layout.addStretch()
+
+        new_btn = QPushButton("+ 新建")
+        new_btn.setFixedSize(60, 24)
+        new_btn.clicked.connect(self.new_session_requested.emit)
+        new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
+        header_layout.addWidget(new_btn)
+
+        layout.addWidget(header)
+
+        self._list_widget = QListWidget()
+        self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
+        self._list_widget.itemClicked.connect(self._on_item_clicked)
+        self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        layout.addWidget(self._list_widget, 1)
+
+        delete_area = QFrame()
+        delete_area.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Theme.hex("background_secondary")};
+                padding: 8px;
+            }}
+        """)
+        delete_layout = QHBoxLayout(delete_area)
+        delete_layout.setContentsMargins(8, 8, 8, 8)
+
+        delete_btn = QPushButton("删除选中会话")
+        delete_btn.clicked.connect(self._on_delete_clicked)
+        delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
+        delete_layout.addWidget(delete_btn)
+
+        layout.addWidget(delete_area)
+
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(300)
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        if session_id:
+            self.session_selected.emit(session_id)
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        if session_id:
+            self.session_selected.emit(session_id)
+
+    def _on_delete_clicked(self) -> None:
+        current_item = self._list_widget.currentItem()
+        if current_item:
+            session_id = current_item.data(Qt.ItemDataRole.UserRole)
+            if session_id:
+                self.session_delete_requested.emit(session_id)
+
+    def set_sessions(self, sessions: List[Dict]) -> None:
+        """设置会话列表"""
+        self._list_widget.clear()
+        for session in sessions:
+            item = QListWidgetItem()
+            title = session.get("title", "未命名会话")
+            msg_count = session.get("message_count", 0)
+            updated = session.get("updated_at", "")[:10]  # 只取日期部分
+
+            item.setText(f"{title}\n{msg_count}条消息 · {updated}")
+            item.setData(Qt.ItemDataRole.UserRole, session["id"])
+            self._list_widget.addItem(item)
+
+    def select_session(self, session_id: str) -> None:
+        """选中指定会话"""
+        for i in range(self._list_widget.count()):
+            item = self._list_widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == session_id:
+                self._list_widget.setCurrentItem(item)
+                break
+
+
+class ChatPanel(QWidget):
+    message_sent = Signal(str)
+
+    def __init__(
+        self,
+        agent: Optional[AgentIntegration] = None,
+        api_key_manager: Optional[ApiKeyManager] = None,
+        mcp_manager: Optional["McpServerManager"] = None,
+        skill_manager: Optional["SkillManager"] = None,
+        history_repository: Optional["ChatHistoryRepository"] = None,
+        parent: Optional[QWidget] = None,
+    ):
+        super().__init__(parent)
+        self._agent = agent
+        self._api_key_manager = api_key_manager
+        self._mcp_manager = mcp_manager
+        self._skill_manager = skill_manager
+        self._history_repository = history_repository
+        self._messages: list[MessageWidget] = []
+        self._current_provider: Optional[str] = None
+        self._worker: Optional[AgentWorker] = None
+        self._current_session_id: Optional[str] = None
+
+        self._setup_ui()
+        self._connect_signals()
+        self._load_api_keys()
+
+        # 如果有持久化存储，加载会话列表
+        if self._history_repository:
+            self._load_sessions()
+
+    def _setup_ui(self) -> None:
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet(Theme.get_splitter_stylesheet())
+
+        # 左侧：会话列表（如果有持久化存储）
+        if self._history_repository:
+            self._session_list = SessionListWidget()
+            self._session_list.session_selected.connect(self._on_session_selected)
+            self._session_list.session_delete_requested.connect(self._on_session_delete)
+            self._session_list.new_session_requested.connect(self._on_new_session)
+            splitter.addWidget(self._session_list)
+
+        # 右侧：聊天区域
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout(chat_widget)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(0)
+
+        header = self._create_header()
+        chat_layout.addWidget(header)
+
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setStyleSheet(Theme.get_chat_scroll_area_stylesheet())
+
+        messages_widget = QWidget()
+        self._messages_layout = QVBoxLayout(messages_widget)
+        self._messages_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._messages_layout.setSpacing(8)
+        self._messages_layout.setContentsMargins(12, 12, 12, 12)
+
+        self._scroll_area.setWidget(messages_widget)
+        chat_layout.addWidget(self._scroll_area, 1)
+
+        input_area = self._create_input_area()
+        chat_layout.addWidget(input_area)
+
+        chat_widget.setStyleSheet(Theme.get_chat_panel_stylesheet())
+        splitter.addWidget(chat_widget)
+
+        # 设置分割比例
+        splitter.setSizes([200, 600])
+
+        main_layout.addWidget(splitter)
+
+    def _create_header(self) -> QWidget:
+        header = QFrame()
+        header.setFixedHeight(50)
+        header.setStyleSheet(Theme.get_chat_header_stylesheet())
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(16, 0, 16, 0)
+
+        title_layout = QVBoxLayout()
+        self._title_label = QLabel("🤖 AI 助手")
+        self._title_label.setStyleSheet(Theme.get_chat_title_label_stylesheet())
+        title_layout.addWidget(self._title_label)
+
+        self._status_label = QLabel("请选择API密钥")
+        self._status_label.setStyleSheet(Theme.get_chat_status_label_stylesheet())
+        title_layout.addWidget(self._status_label)
+        layout.addLayout(title_layout)
+
+        self._api_key_combo = QComboBox()
+        self._api_key_combo.setPlaceholderText("选择API密钥")
+        self._api_key_combo.setMinimumWidth(200)
+        self._api_key_combo.setStyleSheet(Theme.get_combobox_stylesheet())
+        self._api_key_combo.currentIndexChanged.connect(self._on_api_key_changed)
+        layout.addWidget(self._api_key_combo)
+
+        layout.addStretch()
+
+        settings_btn = QPushButton("⚙ 设置")
+        settings_btn.setFixedHeight(28)
+        settings_btn.clicked.connect(self._open_settings)
+        settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+
+        clear_btn = QPushButton("清空")
+        clear_btn.setFixedHeight(28)
+        clear_btn.clicked.connect(self._clear_chat)
+        clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
+
+        layout.addWidget(settings_btn)
+        layout.addWidget(clear_btn)
+
+        return header
+
+    def _create_input_area(self) -> QWidget:
+        input_area = QFrame()
+        input_area.setMinimumHeight(120)
+        input_area.setMaximumHeight(200)
+        layout = QVBoxLayout(input_area)
+        layout.setContentsMargins(12, 8, 12, 8)
+
+        self._input_text = QTextEdit()
+        self._input_text.setPlaceholderText("输入消息，与AI助手对话...")
+        self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
+
+        button_layout = QHBoxLayout()
+
+        self._send_btn = QPushButton("发送")
+        self._send_btn.setFixedHeight(32)
+        self._send_btn.clicked.connect(self._send_message)
+        self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
+        self._send_btn.setEnabled(False)
+
+        button_layout.addStretch()
+        button_layout.addWidget(self._send_btn)
+
+        layout.addWidget(self._input_text, 1)
+        layout.addLayout(button_layout)
+
+        return input_area
+
+    def _connect_signals(self) -> None:
+        self._input_text.textChanged.connect(self._on_text_changed)
+
+    def _load_api_keys(self) -> None:
+        self._api_key_combo.blockSignals(True)
+        self._api_key_combo.clear()
+
+        if self._api_key_manager:
+            configs = self._api_key_manager.list_all_configs()
+            enabled_configs = [c for c in configs if c.get("enabled")]
+
+            for config in enabled_configs:
+                provider = config["provider"]
+                model_name = config.get("model_name", "")
+                display_text = f"{provider}"
+                if model_name:
+                    display_text += f" ({model_name})"
+                self._api_key_combo.addItem(display_text, (provider, model_name))
+
+        self._api_key_combo.blockSignals(False)
+
+    def _load_sessions(self) -> None:
+        """加载会话列表"""
+        if not self._history_repository:
+            return
+
+        sessions = self._history_repository.list_sessions(limit=50)
+        self._session_list.set_sessions(sessions)
+
+    def _on_session_selected(self, session_id: str) -> None:
+        """切换到选中的会话"""
+        if not self._agent or not self._history_repository:
+            return
+
+        # 切换会话
+        success = self._agent.switch_session(session_id)
+        if success:
+            self._current_session_id = session_id
+            self._load_session_messages()
+            self._session_list.select_session(session_id)
+            _logger.info(f"切换到会话: {session_id}")
+        else:
+            _logger.warning(f"切换会话失败: {session_id}")
+
+    def _on_session_delete(self, session_id: str) -> None:
+        """删除会话"""
+        if not self._history_repository:
+            return
+
+        # 确认删除
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            "确定要删除这个会话吗？此操作不可撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 如果删除的是当前会话，清空UI
+            if session_id == self._current_session_id:
+                self._clear_messages_ui()
+                self._current_session_id = None
+
+            # 删除会话
+            self._history_repository.delete_session(session_id)
+            self._load_sessions()
+            _logger.info(f"已删除会话: {session_id}")
+
+    def _on_new_session(self) -> None:
+        """创建新会话"""
+        if not self._agent:
+            return
+
+        # 清空当前消息
+        self._clear_messages_ui()
+
+        # 创建新会话
+        if self._history_repository and self._agent.is_persisted:
+            new_session_id = self._agent.create_new_session()
+            self._current_session_id = new_session_id
+            self._load_sessions()
+            self._session_list.select_session(new_session_id)
+            _logger.info(f"创建新会话: {new_session_id}")
+        else:
+            # 内存模式，直接重置
+            self._agent.reset()
+            _logger.info("重置为新的内存会话")
+
+    def _load_session_messages(self) -> None:
+        """加载当前会话的消息到UI"""
+        self._clear_messages_ui()
+
+        if not self._agent:
+            return
+
+        history = self._agent.get_history()
+        for msg in history:
+            self._add_message_widget(msg["role"], msg["content"])
+
+    def _clear_messages_ui(self) -> None:
+        """清空消息UI"""
+        for message in self._messages:
+            message.deleteLater()
+        self._messages.clear()
+
+    def _on_api_key_changed(self, index: int) -> None:
+        if index < 0:
+            self._current_provider = None
+            self._send_btn.setEnabled(False)
+            self._set_status("请选择API密钥")
+            return
+
+        item_data = self._api_key_combo.itemData(index)
+        if not item_data:
+            self._send_btn.setEnabled(False)
+            return
+
+        provider, model_name = item_data if isinstance(item_data, tuple) else (item_data, "")
+        self._current_provider = provider
+
+        config = self._api_key_manager.get_config(provider, model_name)
+        model_name = config.get("model_name", "") if config else model_name
+        base_url = config.get("base_url", "") if config else ""
+
+        if model_name:
+            self._set_status(f"已选择: {provider} ({model_name})")
+        else:
+            self._set_status(f"已选择: {provider}")
+
+        self._send_btn.setEnabled(True)
+
+        if self._agent:
+            _logger.info(f"开始初始化Agent: provider={provider}, model_name={model_name}")
+            success = self._agent.initialize(provider, model_name=model_name, base_url=base_url)
+            if success:
+                _logger.info(f"Agent初始化成功: {provider}")
+                # 如果有持久化存储且没有当前会话，加载最新会话
+                if self._history_repository and not self._current_session_id:
+                    sessions = self._history_repository.list_sessions(limit=1)
+                    if sessions:
+                        self._on_session_selected(sessions[0]["id"])
+            else:
+                _logger.error(f"Agent初始化失败: {provider}")
+                self._set_status("Agent初始化失败")
+
+    def _on_text_changed(self) -> None:
+        has_text = bool(self._input_text.toPlainText().strip())
+        self._send_btn.setEnabled(has_text and self._current_provider is not None)
+
+    def _send_message(self) -> None:
+        if not self._current_provider:
+            self._set_status("请先选择API密钥")
+            return
+
+        text = self._input_text.toPlainText().strip()
+        if not text:
+            return
+
+        self._input_text.clear()
+        self.add_message("user", text)
+        self.message_sent.emit(text)
+
+        if not self._agent or not self._agent.is_initialized:
+            self.add_message("system", "请先选择API密钥")
+            return
+
+        self._set_status("思考中...")
+        self._send_btn.setEnabled(False)
+
+        self._worker = AgentWorker(self._agent, text)
+        self._worker.response_ready.connect(self._on_agent_response)
+        self._worker.error_occurred.connect(self._on_agent_error)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+        _logger.info(f"已启动AgentWorker处理消息: {text[:50]}...")
+
+    def _on_agent_response(self, response: str) -> None:
+        _logger.info(f"收到Agent响应: {response[:100]}...")
+        self.add_message("assistant", response)
+        self._set_status("就绪")
+
+        # 刷新会话列表
+        if self._history_repository:
+            self._load_sessions()
+            if self._current_session_id:
+                self._session_list.select_session(self._current_session_id)
+
+    def _on_agent_error(self, error: str) -> None:
+        _logger.error(f"Agent处理错误: {error}")
+        self.add_message("system", f"错误: {error}")
+        self._set_status("错误")
+
+    def _on_worker_finished(self) -> None:
+        _logger.info("AgentWorker完成")
+        self._send_btn.setEnabled(self._current_provider is not None)
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
+
+    def _add_message_widget(self, role: str, content: str) -> None:
+        """添加消息组件到UI"""
+        message_widget = MessageWidget(role, content)
+        self._messages_layout.addWidget(message_widget)
+        self._messages.append(message_widget)
+        QTimer.singleShot(100, self._scroll_to_bottom)
+
+    def add_message(self, role: str, content: str) -> None:
+        """添加消息（公开接口）"""
+        self._add_message_widget(role, content)
+
+    def _scroll_to_bottom(self) -> None:
+        scrollbar = self._scroll_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _set_status(self, status: str) -> None:
+        self._status_label.setText(status)
+
+    def _clear_chat(self) -> None:
+        """清空当前对话"""
+        self._clear_messages_ui()
+
+        if self._agent:
+            self._agent.reset()
+
+        self._set_status("就绪" if self._current_provider else "请选择API密钥")
+        _logger.info("对话已清空")
+
+    def set_agent(self, agent: AgentIntegration) -> None:
+        self._agent = agent
+        if self._current_provider:
+            self._set_status("就绪")
+
+    def set_api_key_manager(self, manager: ApiKeyManager) -> None:
+        self._api_key_manager = manager
+        self._load_api_keys()
+
+    def set_mcp_manager(self, manager: McpServerManager) -> None:
+        self._mcp_manager = manager
+
+    def set_skill_manager(self, manager: SkillManager) -> None:
+        self._skill_manager = manager
+
+    def set_history_repository(self, repository: "ChatHistoryRepository") -> None:
+        """设置会话历史存储库"""
+        self._history_repository = repository
+        self._load_sessions()
+
+    def _open_settings(self) -> None:
+        if self._api_key_manager:
+            dialog = AgentSettingsDialog(
+                api_key_manager=self._api_key_manager,
+                mcp_manager=self._mcp_manager,
+                skill_manager=self._skill_manager,
+                on_api_key_changed=self._load_api_keys,
+                parent=self,
+            )
+            dialog.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+            dialog.exec()
+        else:
+            _logger.warning("API密钥管理器未初始化")

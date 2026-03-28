@@ -205,12 +205,24 @@ class NodeEditorPanel(QWidget):
         self._view.drop_node_type.connect(self._on_drop_node)
 
     def set_graph(self, graph: NodeGraph) -> None:
+        import threading
+
+        _logger.info(
+            f"[Thread: {threading.current_thread().name}] NodeEditorPanel.set_graph被调用，"
+            f"节点数: {len(graph.nodes) if graph else 0}"
+        )
         self._graph = graph
         self._scene.set_graph(graph)
         self._status_label.setText(f"已加载: {graph.name}")
+        # 强制刷新视图以确保节点正确显示
+        self._view.viewport().update()
+        _logger.info(f"[Thread: {threading.current_thread().name}] NodeEditorPanel.set_graph完成")
 
     def get_graph(self) -> Optional[NodeGraph]:
         return self._graph
+
+    def get_node_item(self, node_id: str) -> Optional["NodeGraphicsItem"]:
+        return self._scene.get_node_item(node_id)
 
     def new_graph(self, name: str = "未命名工作流") -> NodeGraph:
         self._graph = NodeGraph(name=name)

@@ -857,6 +857,7 @@ COMPREHENSIVE_TEST_DEFINITION = NodeDefinition(
             name="external_input",
             type=PortType.STRING,
             description="外部输入（无控件）",
+            required=False,
         ),
     ],
     outputs=[
