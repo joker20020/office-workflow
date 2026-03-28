@@ -54,21 +54,7 @@ class AgentWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
-class MessageWidget(QWidget):
-    def __init__(self, role: str, content: str, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-
-        role_label = QLabel(role.upper())
-        role_label.setStyleSheet(Theme.get_message_role_label_stylesheet(role))
-
-        content_label = QLabel(content)
-        content_label.setWordWrap(True)
-        content_label.setStyleSheet(Theme.get_message_content_label_stylesheet())
-
-        layout.addWidget(role_label)
-        layout.addWidget(content_label)
+from src.ui.chat.message_widget import MarkdownMessageWidget
 
 
 class SessionListWidget(QWidget):
@@ -196,7 +182,7 @@ class ChatPanel(QWidget):
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
-        self._messages: list[MessageWidget] = []
+        self._messages: list[MarkdownMessageWidget] = []
         self._current_provider: Optional[str] = None
         self._worker: Optional[AgentWorker] = None
         self._current_session_id: Optional[str] = None
@@ -371,11 +357,9 @@ class ChatPanel(QWidget):
             _logger.warning(f"切换会话失败: {session_id}")
 
     def _on_session_delete(self, session_id: str) -> None:
-        """删除会话"""
         if not self._history_repository:
             return
 
-        # 确认删除
         reply = QMessageBox.question(
             self,
             "确认删除",
@@ -385,18 +369,20 @@ class ChatPanel(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # 如果删除的是当前会话，清空UI
-            if session_id == self._current_session_id:
-                self._clear_messages_ui()
-                self._current_session_id = None
+            is_current_session = session_id == self._current_session_id
 
-            # 删除会话
             self._history_repository.delete_session(session_id)
             self._load_sessions()
             _logger.info(f"已删除会话: {session_id}")
 
+            if is_current_session:
+                self._clear_messages_ui()
+                self._current_session_id = None
+                sessions = self._history_repository.list_sessions(limit=1)
+                if sessions:
+                    self._on_session_selected(sessions[0]["id"])
+
     def _on_new_session(self) -> None:
-        """创建新会话"""
         if not self._agent:
             return
 
@@ -408,11 +394,7 @@ class ChatPanel(QWidget):
             new_session_id = self._agent.create_new_session()
             self._current_session_id = new_session_id
             self._load_sessions()
-            self._session_list.select_session(new_session_id)
-            _logger.info(f"创建新会话: {new_session_id}")
-        else:
-            # 内存模式，直接重置
-            self._agent.reset()
+            self._agent._sync_history_to_memory()
             _logger.info("重置为新的内存会话")
 
     def _load_session_messages(self) -> None:
@@ -463,6 +445,8 @@ class ChatPanel(QWidget):
             success = self._agent.initialize(provider, model_name=model_name, base_url=base_url)
             if success:
                 _logger.info(f"Agent初始化成功: {provider}")
+                # 同步当前会话历史到新Agent的memory
+                self._agent._sync_history_to_memory()
                 # 如果有持久化存储且没有当前会话，加载最新会话
                 if self._history_repository and not self._current_session_id:
                     sessions = self._history_repository.list_sessions(limit=1)
@@ -527,8 +511,7 @@ class ChatPanel(QWidget):
             self._worker = None
 
     def _add_message_widget(self, role: str, content: str) -> None:
-        """添加消息组件到UI"""
-        message_widget = MessageWidget(role, content)
+        message_widget = MarkdownMessageWidget(role, content)
         self._messages_layout.addWidget(message_widget)
         self._messages.append(message_widget)
         QTimer.singleShot(100, self._scroll_to_bottom)

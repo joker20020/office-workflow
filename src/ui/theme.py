@@ -370,17 +370,6 @@ class Theme:
         """
 
     @classmethod
-    def get_message_content_label_stylesheet(cls) -> str:
-        """获取消息内容标签样式表"""
-        return f"""
-            QLabel {{
-                color: {cls.hex("text_primary")};
-                font-size: 13px;
-                line-height: 1.5;
-            }}
-        """
-
-    @classmethod
     def get_chat_input_stylesheet(cls) -> str:
         """获取对话输入框样式表"""
         return f"""
@@ -605,18 +594,27 @@ class Theme:
         """
 
     @classmethod
-    def get_spinbox_stylesheet(cls) -> str:
+    def get_message_content_label_stylesheet(cls) -> str:
         return f"""
-            QSpinBox {{
+            QLabel {{
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_primary")};
                 border-radius: 4px;
-                padding: 4px 8px;
+                padding: 8px;
             }}
-            QSpinBox::up-button, QSpinBox::down-button {{
-                width: 20px;
-                background-color: {cls.hex("background_tertiary")};
+        """
+
+    @classmethod
+    def get_message_content_edit_stylesheet(cls) -> str:
+        return f"""
+            QTextEdit {{
+                background-color: {cls.hex("background_secondary")};
+                color: {cls.hex("text_primary")};
+                border: none;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
             }}
         """
 

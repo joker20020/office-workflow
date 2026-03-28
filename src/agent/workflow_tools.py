@@ -93,6 +93,15 @@ class WorkflowTools(QObject):
     def _tool_create_node(
         self, node_type: str, position: Optional[Tuple[float, float]] = None
     ) -> Any:
+        """创建一个新节点并添加到工作流中。
+
+        Args:
+            node_type: 节点类型标识符，必须使用get_node_types查询可用类型
+            position: 可选，节点位置坐标(x, y)，如果不提供则自动排列
+
+        Returns:
+            包含node_id、node_type、position和成功状态的响应
+        """
         try:
             if position is None:
                 position = (100 + len(self._graph.nodes) * 50, 100)
@@ -120,6 +129,14 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_delete_node(self, node_id: str) -> Any:
+        """从工作流中删除指定节点。
+
+        Args:
+            node_id: 要删除的节点ID
+
+        Returns:
+            包含成功状态的响应
+        """
         try:
             success = self._graph.remove_node(node_id)
             if success:
@@ -141,6 +158,17 @@ class WorkflowTools(QObject):
         target_node_id: str,
         target_port: str,
     ) -> Any:
+        """连接两个节点的端口。
+
+        Args:
+            source_node_id: 源节点ID（输出端）
+            source_port: 源节点的输出端口名称
+            target_node_id: 目标节点ID（输入端）
+            target_port: 目标节点的输入端口名称
+
+        Returns:
+            包含connection_id和成功状态的响应
+        """
         try:
             connection = self._graph.add_connection(
                 source_node_id, source_port, target_node_id, target_port
@@ -158,6 +186,15 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_disconnect_nodes(self, node_id: str, port_name: str) -> Any:
+        """断开与指定节点端口相关的所有连接。
+
+        Args:
+            node_id: 节点ID
+            port_name: 端口名称
+
+        Returns:
+            包含removed_count的响应
+        """
         try:
             connections = self._graph.get_connections_for_node(node_id)
             removed_count = 0
@@ -184,6 +221,16 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_set_node_value(self, node_id: str, port_name: str, value: Any) -> Any:
+        """设置节点输入端口的值。
+
+        Args:
+            node_id: 节点ID
+            port_name: 输入端口名称
+            value: 要设置的值
+
+        Returns:
+            包含成功状态的响应
+        """
         try:
             node = self._graph.get_node(node_id)
             if node is None:
@@ -215,6 +262,11 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_execute_workflow(self) -> Any:
+        """执行当前工作流中的所有节点。
+
+        Returns:
+            包含每个节点执行结果的响应
+        """
         try:
             results = self._engine.execute_graph(self._graph)
 
@@ -242,6 +294,11 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_list_nodes(self) -> Any:
+        """列出工作流中的所有节点。
+
+        Returns:
+            包含节点列表的响应
+        """
         try:
             nodes = []
             for node in self._graph.nodes.values():
@@ -261,6 +318,11 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_list_connections(self) -> Any:
+        """列出工作流中的所有连接。
+
+        Returns:
+            包含连接列表的响应
+        """
         try:
             connections = []
             for conn in self._graph.connections.values():
@@ -280,6 +342,11 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_get_node_types(self) -> Any:
+        """获取所有可用的节点类型列表。
+
+        Returns:
+            包含节点类型列表的响应，每个类型包含node_type、display_name、category、description
+        """
         try:
             node_types = self._engine.get_available_nodes()
             simplified_list = []
@@ -303,6 +370,14 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_get_node_info(self, node_type: str) -> Any:
+        """获取特定节点类型的详细信息。
+
+        Args:
+            node_type: 节点类型标识符（必须使用get_node_types查询可用类型）
+
+        Returns:
+            包含节点详细信息的响应，包括输入输出端口定义
+        """
         try:
             node_defs = self._engine.get_available_nodes()
             for node_def in node_defs:
@@ -315,13 +390,26 @@ class WorkflowTools(QObject):
                         {"success": True, "node_info": NodeFormatter.format_for_agent(node_def)}
                     )
             return _make_response(
-                {"success": False, "error": f"未找到节点类型: {node_type}"}, success=False
+                {
+                    "success": False,
+                    "error": f"未找到节点类型: {node_type}。请使用get_node_types查询可用类型。",
+                },
+                success=False,
             )
         except Exception as e:
             _logger.error(f"获取节点信息失败: {e}", exc_info=True)
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_search_nodes(self, query: str, category: Optional[str] = None) -> Any:
+        """按关键词搜索节点类型。
+
+        Args:
+            query: 搜索关键词
+            category: 可选，按分类筛选
+
+        Returns:
+            包含匹配节点列表的响应
+        """
         try:
             node_types = self._engine.get_available_nodes()
             results = []
@@ -364,6 +452,11 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_clear_workflow(self) -> Any:
+        """清空当前工作流中的所有节点和连接。
+
+        Returns:
+            包含清空统计的响应
+        """
         try:
             node_count = len(self._graph.nodes)
             conn_count = len(self._graph.connections)

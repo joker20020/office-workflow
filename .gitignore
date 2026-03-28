@@ -11,3 +11,9 @@ wheels/
 
 .ruff_cache/
 .*_cache/
+
+data/
+*.db
+*.sqlite3
+
+logs/

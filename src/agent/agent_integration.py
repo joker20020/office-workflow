@@ -206,6 +206,7 @@ class AgentIntegration:
                 formatter=formatter,
                 memory=InMemoryMemory(),
                 toolkit=self._toolkit,
+                max_iters=50,
             )
             _logger.info("ReActAgent创建成功")
 
@@ -476,51 +477,43 @@ class AgentIntegration:
         return success
 
     def _sync_history_to_memory(self) -> None:
-        import threading
-
-        _logger.info(f"[Thread: {threading.current_thread().name}] _sync_history_to_memory开始同步")
         if not self._agent or not hasattr(self._agent, "memory"):
-            _logger.warning("Agent或memory不存在，跳过同步")
+            _logger.warning("Agent或memory不存在")
+            return
+
+        if not AGENTSCOPE_AVAILABLE:
             return
 
         try:
             loop = asyncio.new_event_loop()
-            _logger.info(f"[Thread: {threading.current_thread().name}] 清空Agent memory...")
+            _logger.info("清空Agent memory...")
             loop.run_until_complete(self._agent.memory.clear())
-            _logger.info(f"[Thread: {threading.current_thread().name}] Agent memory已清空")
+            _logger.info("Agent memory已清空")
 
             if self._history_repository:
                 messages = self._history.get_all_messages_persisted()
-                _logger.info(
-                    f"[Thread: {threading.current_thread().name}] 从数据库加载 {len(messages)} 条历史消息"
-                )
+                _logger.info(f"从数据库加载 {len(messages)} 条历史消息")
             else:
                 messages = self._history.to_dict_list()
-                _logger.info(
-                    f"[Thread: {threading.current_thread().name}] 从内存加载 {len(messages)} 条历史消息"
-                )
+                _logger.info(f"从内存加载 {len(messages)} 条历史消息")
 
-            if AGENTSCOPE_AVAILABLE and Msg is not None:
-                sync_count = 0
-                for msg_data in messages:
-                    role = msg_data.get("role", "user")
-                    content = msg_data.get("content", "")
+            sync_count = 0
+            for msg_data in messages:
+                role = msg_data.get("role", "user")
+                content = msg_data.get("content", "")
 
-                    if role in ("user", "assistant"):
-                        msg = Msg(
-                            name="User" if role == "user" else "Assistant",
-                            content=content,
-                            role=role,
-                        )
-                        loop.run_until_complete(self._agent.memory.add(msg))
-                        sync_count += 1
+                if role in ("user", "assistant"):
+                    msg = Msg(
+                        name="User" if role == "user" else "Assistant",
+                        content=content,
+                        role=role,
+                    )
+                    loop.run_until_complete(self._agent.memory.add(msg))
+                    sync_count += 1
 
-                _logger.info(
-                    f"[Thread: {threading.current_thread().name}] 已同步 {sync_count} 条消息到Agent Memory"
-                )
-
+            _logger.info(f"已同步 {sync_count} 条消息到Agent memory")
             loop.close()
-            _logger.info(f"[Thread: {threading.current_thread().name}] _sync_history_to_memory完成")
+            _logger.info("历史同步完成")
 
         except Exception as e:
             _logger.warning(f"同步历史到Memory失败: {e}")

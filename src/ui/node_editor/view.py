@@ -226,6 +226,27 @@ class NodeEditorView(QGraphicsView):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
+
+        # 检查焦点是否在可编辑控件上
+        # 如果是，则不拦截Delete/Backspace键，让控件正常处理
+        focus_item = self.scene().focusItem()
+        if focus_item:
+            from PySide6.QtWidgets import QGraphicsProxyWidget
+
+            if isinstance(focus_item, QGraphicsProxyWidget):
+                if hasattr(focus_item, "widget"):
+                    widget = focus_item.widget
+                else:
+                    widget = focus_item.widget()
+
+                # InlineWidgetBase 子类都是可编辑控件
+                if widget is not None:
+                    from src.ui.node_editor.widgets import InlineWidgetBase
+
+                    if isinstance(widget, InlineWidgetBase):
+                        super().keyPressEvent(event)
+                        return
+
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self._delete_selected_items()
             event.accept()

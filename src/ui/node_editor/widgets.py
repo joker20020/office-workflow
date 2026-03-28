@@ -27,7 +27,7 @@
 from typing import Any, Callable, Dict, Optional
 
 from PySide6.QtCore import Signal, Qt, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFocusEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -1203,10 +1203,18 @@ class InlineWidgetProxy(QGraphicsProxyWidget):
         # 关键：只接受左键事件
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
 
-        # 设置 Z 值为负数，确保节点在控件上面接收事件
-        self.setZValue(-1)
-
         _logger.debug(f"创建内联控件代理: {widget.port_name}")
+
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        """焦点进入事件 - 取消所有节点选中，防止误删"""
+        super().focusInEvent(event)
+
+        # 获取场景并取消所有节点的选中状态
+        scene = self.scene()
+        if scene:
+            for item in scene.selectedItems():
+                item.setSelected(False)
+            _logger.debug("控件获得焦点，已取消所有节点选中")
 
     def boundingRect(self):
         """返回边界矩形"""
