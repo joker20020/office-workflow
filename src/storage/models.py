@@ -42,6 +42,7 @@ class PluginRecord(Base):
         name: 插件名称（唯一）
         version: 插件版本
         enabled: 是否启用
+        config_json: 插件配置（JSON格式存储）
         created_at: 创建时间
         updated_at: 更新时间
     """
@@ -52,6 +53,8 @@ class PluginRecord(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="1.0.0")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 插件配置，以JSON格式存储，默认为空对象
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

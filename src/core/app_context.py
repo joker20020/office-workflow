@@ -33,6 +33,7 @@ from src.core.permission_manager import Permission, PermissionManager, Permissio
 from src.core.plugin_manager import PluginManager
 from src.engine.node_engine import NodeEngine
 from src.storage.database import Database
+from src.storage.repositories import PluginPermissionRepository
 from src.utils.logger import get_logger
 
 # 模块日志记录器
@@ -173,7 +174,12 @@ class AppContext:
         _logger.debug("事件总线初始化完成")
 
         # 4. 初始化权限管理器
-        self._permission_manager = PermissionManager()
+        from src.storage.repositories import PluginPermissionRepository, PluginRepository
+
+        permission_repo = PluginPermissionRepository(self._database)
+        plugin_repo = PluginRepository(self._database)
+        self._permission_manager = PermissionManager(repository=permission_repo)
+        self._permission_manager.load_permissions()
         _logger.debug("权限管理器初始化完成")
 
         # 5. 初始化插件管理器
@@ -181,11 +187,13 @@ class AppContext:
             plugins_dir=self.plugins_dir,
             event_bus=self._event_bus,
             permission_manager=self._permission_manager,
+            repository=permission_repo,
+            plugin_repository=plugin_repo,
         )
         _logger.debug("插件管理器初始化完成")
 
         # 6. 初始化节点引擎
-        self._node_engine = NodeEngine()
+        self._node_engine = NodeEngine(event_bus=self._event_bus)
         _logger.debug("节点引擎初始化完成")
 
         # 7. 标记为已初始化
@@ -215,7 +223,7 @@ class AppContext:
 
         # 1. 卸载所有插件
         if self._plugin_manager:
-            self._plugin_manager.unload_all()
+            self._plugin_manager.unload_all_plugins()
 
         # 2. 发布应用关闭事件
         if self._event_bus:

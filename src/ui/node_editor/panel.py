@@ -47,14 +47,27 @@ class NodeEditorPanel(QWidget):
     workflow_executed = Signal(bool)
     workflow_saved = Signal(str)
 
-    def __init__(self, engine: Optional[NodeEngine] = None, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        engine: Optional[NodeEngine] = None,
+        event_bus: Optional["EventBus"] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self._engine = engine or NodeEngine()
+        self._event_bus = event_bus
+        self._subscription_id: Optional[str] = None
         self._graph: Optional[NodeGraph] = None
         self._setup_ui()
         self._connect_signals()
+        if event_bus:
+            from src.core.event_bus import EventBus, EventType
+
+            self._subscription_id = event_bus.subscribe(
+                EventType.NODE_REGISTERED, self._on_node_registered
+            )
+            _logger.debug("NodeEditorPanel 已订阅 NODE_REGISTERED 事件")
         self._populate_node_panel()
-        _logger.debug("NodeEditorPanel 初始化完成")
 
     def _setup_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -184,6 +197,19 @@ class NodeEditorPanel(QWidget):
                 cat_item.addChild(node_item)
 
             cat_item.setExpanded(True)
+
+    def _on_node_registered(self, event) -> None:
+        """处理节点注册事件，刷新节点面板"""
+        node_type = event.data.get("node_type") if event.data else None
+        _logger.info(f"收到节点注册事件: {node_type}")
+        self._populate_node_panel()
+
+    def unsubscribe_events(self) -> None:
+        """取消订阅事件，用于清理资源"""
+        if self._event_bus and self._subscription_id:
+            self._event_bus.unsubscribe(self._subscription_id)
+            self._subscription_id = None
+            _logger.debug("NodeEditorPanel 已取消订阅节点注册事件")
 
     def _start_drag(self, supported_actions):
         item = self._node_tree.currentItem()

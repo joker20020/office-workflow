@@ -11,6 +11,7 @@ wheels/
 
 .ruff_cache/
 .*_cache/
+.sisyphus/
 
 data/
 *.db

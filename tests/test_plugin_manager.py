@@ -219,7 +219,7 @@ class TestPlugin(PluginBase):
         )
         manager.load_plugin("mock_plugin")
 
-        manager.unload_all()
+        manager.unload_all_plugins()
 
         assert not manager.is_loaded("mock_plugin")
         assert len(manager.get_loaded_plugins()) == 0

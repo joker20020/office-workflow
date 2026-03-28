@@ -34,16 +34,27 @@ from src.agent import (
     SkillManager,
 )
 from src.agent.chat_history import ChatHistory
+from src.core.app_context import AppContext
+from src.core.permission_manager import Permission, PermissionSet
 from src.engine.node_engine import NodeEngine
 from src.ui.navigation_rail import NavigationRail
 from src.ui.node_editor import NodeEditorPanel
 from src.ui.chat import ChatPanel
+from src.ui.plugins import PluginPanel
 from src.engine.node_graph import NodeGraph
 from src.storage.database import Database
-from src.storage.repositories import ChatHistoryRepository
+from src.storage.repositories import (
+    ChatHistoryRepository,
+    PluginPermissionRepository,
+    PluginRepository,
+)
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.core.plugin_manager import PluginManager
 
 _logger = get_logger(__name__)
 
@@ -51,19 +62,34 @@ _logger = get_logger(__name__)
 class MainWindow(QMainWindow):
     """主窗口 - 应用程序的核心界面"""
 
-    def __init__(self, engine: Optional[NodeEngine] = None, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        engine: Optional[NodeEngine] = None,
+        app_context: Optional[AppContext] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
 
         self._pages: dict[str, QWidget] = {}
+        self._app_context = app_context
         self._node_engine = engine or NodeEngine()
-        self._db = Database(Path("data") / "app.db")
-        self._db.create_tables()
+
+        # 如果提供了 AppContext，使用其数据库；否则创建独立的数据库
+        if app_context is not None:
+            self._db = app_context.database
+        else:
+            self._db = Database(Path("data") / "app.db")
+            self._db.create_tables()
+
         self._api_key_manager = ApiKeyManager(self._db)
         self._mcp_manager = McpServerManager(self._db)
         self._skill_manager = SkillManager(self._db)
         self._history_repository = ChatHistoryRepository(self._db)
+        self._permission_repository = PluginPermissionRepository(self._db)
+        self._plugin_repository = PluginRepository(self._db)
         self._node_graph = NodeGraph(name="默认工作流")
         self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
+
         # 使用QueuedConnection确保跨线程信号正确传递（Agent在QThread中运行）
         self._workflow_tools.graph_changed.connect(
             self._on_graph_changed, Qt.ConnectionType.QueuedConnection
@@ -130,11 +156,12 @@ class MainWindow(QMainWindow):
         welcome_page = self._create_welcome_page()
         nodes_page = self._create_nodes_page()
         agent_page = self._create_agent_page()
+        plugins_page = self._create_plugins_page()
 
         self.add_page("home", welcome_page)
         self.add_page("nodes", nodes_page)
         self.add_page("agent", agent_page)
-        self.add_page("plugins", self._create_placeholder_page("插件管理", "Phase 4"))
+        self.add_page("plugins", self._create_plugins_page())
         self.add_page("packages", self._create_placeholder_page("节点包管理", "Phase 5"))
 
         self._nav_rail.add_item("home", "首页", "🏠")
@@ -160,10 +187,10 @@ class MainWindow(QMainWindow):
         return page
 
     def _create_nodes_page(self) -> QWidget:
-        self._node_editor_panel = NodeEditorPanel(self._node_engine)
+        event_bus = self._app_context.event_bus if self._app_context else None
+        self._node_editor_panel = NodeEditorPanel(self._node_engine, event_bus)
         self._node_editor_panel.set_graph(self._node_graph)
         return self._node_editor_panel
-
 
     def _create_agent_page(self) -> QWidget:
         self._chat_panel = ChatPanel(
@@ -175,6 +202,16 @@ class MainWindow(QMainWindow):
         )
 
         return self._chat_panel
+
+    def _create_plugins_page(self) -> QWidget:
+        """创建插件管理页面"""
+        self._plugin_panel = PluginPanel()
+
+        # 连接信号
+        self._plugin_panel.plugin_enabled_changed.connect(self._on_plugin_enabled_changed)
+        self._plugin_panel.permission_edit_requested.connect(self._on_permission_edit_requested)
+
+        return self._plugin_panel
 
     def _create_placeholder_page(self, title: str, phase: str) -> QWidget:
         page = QWidget()
@@ -319,6 +356,97 @@ class MainWindow(QMainWindow):
 
         node_item.set_widget_value(port_name, value)
         _logger.info(f"已同步控件值: {port_name} = {value}")
+
+    def _on_plugin_enabled_changed(self, plugin_name: str, enabled: bool) -> None:
+        """处理插件启用状态改变事件"""
+        _logger.info(f"用户更改插件启用状态: {plugin_name} -> {enabled}")
+
+        if self._app_context is None:
+            return
+
+        plugin_manager = self._app_context.plugin_manager
+
+        if enabled:
+            plugin_manager.enable_plugin(plugin_name)
+            _logger.info(f"插件已启用: {plugin_name}")
+        else:
+            plugin_manager.disable_plugin(plugin_name)
+            _logger.info(f"插件已禁用: {plugin_name}")
+
+        self.refresh_plugin_panel()
+
+    def _on_permission_edit_requested(self, plugin_name: str) -> None:
+        _logger.info(f"用户请求修改权限: {plugin_name}")
+        self._show_permission_dialog(plugin_name)
+
+    def _show_permission_dialog(self, plugin_name: str) -> None:
+        if self._app_context is None:
+            _logger.warning("AppContext未初始化，无法显示权限对话框")
+            return
+
+        from src.ui.plugins.permission_dialog import PermissionRequestDialog
+
+        plugin_manager = self._app_context.plugin_manager
+        discovered = plugin_manager.get_discovered_plugins()
+
+        if plugin_name not in discovered:
+            _logger.warning(f"插件未发现: {plugin_name}")
+            return
+
+        plugin_info = discovered[plugin_name]
+        requested_permissions = (
+            plugin_info.plugin_class.get_required_permissions()
+            if plugin_info.plugin_class
+            else PermissionSet.empty()
+        )
+
+        # 获取当前已授权的权限
+        granted_permissions = self._permission_repository.get_permissions(plugin_name)
+
+        plugin_info_dict = {
+            "version": plugin_info.plugin_class.version if plugin_info.plugin_class else "?.?.?",
+            "description": plugin_info.plugin_class.description if plugin_info.plugin_class else "",
+            "author": plugin_info.plugin_class.author if plugin_info.plugin_class else "",
+        }
+
+        dialog = PermissionRequestDialog(
+            plugin_name=plugin_name,
+            plugin_info=plugin_info_dict,
+            permissions=requested_permissions.permissions,
+            granted_permissions=granted_permissions,
+            parent=self,
+        )
+
+        if dialog.exec():
+            granted = dialog.get_granted_permissions()
+            if granted:
+                self._permission_repository.grant_permissions(plugin_name, granted)
+                _logger.info(f"权限已更新: {plugin_name} -> {[p.value for p in granted]}")
+            else:
+                self._permission_repository.revoke_all_permissions(plugin_name)
+                _logger.info(f"已清空所有权限: {plugin_name}")
+        else:
+            _logger.debug("用户取消了权限对话框")
+
+    def refresh_plugin_panel(self) -> None:
+        if not hasattr(self, "_plugin_panel"):
+            return
+
+        if self._app_context is not None:
+            plugin_manager = self._app_context.plugin_manager
+            discovered = plugin_manager.get_discovered_plugins()
+
+            enabled_status = {}
+            permissions = {}
+            for name in discovered:
+                enabled_status[name] = self._plugin_repository.get_enabled(name)
+                permissions[name] = self._permission_repository.get_permissions(name)
+        else:
+            discovered = {}
+            enabled_status = {}
+            permissions = {}
+
+        self._plugin_panel.set_plugins(discovered, enabled_status, permissions)
 
     def closeEvent(self, event) -> None:
         _logger.info("主窗口关闭")

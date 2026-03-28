@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Optional
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.engine import Engine
 
@@ -111,7 +111,36 @@ class Database:
         如果表已存在则不会重新创建
         """
         Base.metadata.create_all(self.engine)
+        self._run_migrations()
         _logger.info(f"数据库表创建完成: {self.db_path}")
+
+    def _run_migrations(self) -> None:
+        """
+        运行数据库迁移
+
+        处理现有表的schema更新
+        """
+        with self.engine.connect() as conn:
+            self._migrate_add_config_json_column(conn)
+
+    def _migrate_add_config_json_column(self, conn) -> None:
+        """
+        迁移: 为 plugins 表添加 config_json 列
+
+        Args:
+            conn: 数据库连接
+        """
+        from sqlalchemy.exc import OperationalError
+
+        try:
+            conn.execute(text("SELECT config_json FROM plugins LIMIT 1"))
+        except OperationalError:
+            _logger.info("迁移: 为 plugins 表添加 config_json 列")
+            conn.execute(
+                text("ALTER TABLE plugins ADD COLUMN config_json TEXT NOT NULL DEFAULT '{}'")
+            )
+            conn.commit()
+            _logger.info("迁移完成: config_json 列已添加")
 
     def drop_tables(self) -> None:
         """

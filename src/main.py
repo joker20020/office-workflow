@@ -5,8 +5,9 @@
 启动应用程序：
 1. 创建 QApplication
 2. 初始化 AppContext
-3. 显示主窗口
-4. 处理应用退出
+3. 发现插件并根据启用状态加载
+4. 显示主窗口
+5. 处理应用退出
 
 使用方式：
     uv run office
@@ -16,15 +17,99 @@
 
 import sys
 from pathlib import Path
+from typing import Set, cast
 
 from PySide6.QtWidgets import QApplication
 
 from src.core.app_context import AppContext
+from src.core.permission_manager import Permission
 from src.ui.main_window import MainWindow
 from src.utils.logger import get_logger
 
 # 模块日志记录器
 _logger = get_logger(__name__)
+
+
+def _create_permission_request_callback():
+    """
+    创建权限请求回调函数
+
+    Returns:
+        权限请求回调函数，用于在插件需要权限时显示对话框
+    """
+    from src.ui.plugins.permission_dialog import PermissionRequestDialog
+
+    def on_permission_request(plugin_name: str, required_permissions: Set[Permission]) -> bool:
+        """
+        权限请求回调函数
+
+        Args:
+            plugin_name: 插件名称
+            required_permissions: 需要授权的权限集合
+
+        Returns:
+            True 表示用户授权，False 表示用户拒绝
+        """
+        _logger.info(f"插件 '{plugin_name}' 请求权限: {[p.value for p in required_permissions]}")
+
+        # 获取主窗口实例（通过 QApplication）
+        app = QApplication.instance()
+        main_window = None
+        for widget in app.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                main_window = widget
+                break
+
+        if main_window is None:
+            _logger.warning("未找到主窗口，自动授权")
+            return True
+
+        from src.ui.main_window import MainWindow as MW
+
+        main_window = cast(MW, main_window)
+
+        if main_window._app_context is None:
+            _logger.warning("主窗口未初始化 AppContext，自动授权")
+            return True
+
+        # 从 PluginManager 获取插件信息
+        plugin_manager = main_window._app_context.plugin_manager
+        plugin_info = plugin_manager.get_plugin_info_for_permission_dialog(plugin_name)
+
+        if plugin_info is None:
+            plugin_info = {
+                "version": "?.?.?",
+                "description": "",
+                "author": "",
+            }
+
+        # 获取当前已授权的权限（用于初始化对话框的勾选状态）
+        granted_permissions = main_window._permission_repository.get_permissions(plugin_name)
+
+        # 创建并显示权限对话框
+        dialog = PermissionRequestDialog(
+            plugin_name=plugin_name,
+            plugin_info=plugin_info,
+            permissions=required_permissions,
+            granted_permissions=granted_permissions,
+            parent=main_window,
+        )
+
+        if dialog.exec():
+            granted = dialog.get_granted_permissions()
+            if granted:
+                main_window._permission_repository.grant_permissions(plugin_name, granted)
+                _logger.info(f"权限已更新: {plugin_name} -> {[p.value for p in granted]}")
+                return True
+            else:
+                main_window._permission_repository.revoke_all_permissions(plugin_name)
+                _logger.info(f"已清空所有权限: {plugin_name}")
+                return False
+        else:
+            _logger.info(f"用户取消了权限对话框: {plugin_name}")
+            return False
+
+    return on_permission_request
 
 
 def main() -> int:
@@ -60,29 +145,40 @@ def main() -> int:
         _logger.error(f"AppContext 初始化失败: {e}", exc_info=True)
         return 1
 
-    # 4. 发现并加载插件
+    # 4. 发现插件
     try:
         discovered = context.plugin_manager.discover_plugins()
         _logger.info(f"发现 {len(discovered)} 个插件: {discovered}")
-
-        for plugin_name in discovered:
-            try:
-                context.plugin_manager.load_plugin(plugin_name, context)
-                _logger.info(f"插件加载成功: {plugin_name}")
-            except Exception as e:
-                _logger.error(f"插件加载失败: {plugin_name}, 错误: {e}", exc_info=True)
     except Exception as e:
         _logger.error(f"插件发现失败: {e}", exc_info=True)
+        discovered = []
 
-    # 5. 创建并显示主窗口
-    window = MainWindow(engine=context.node_engine)
+    # 5. 创建并显示主窗口（需要在加载插件之前创建，以便权限对话框有父窗口）
+    window = MainWindow(engine=context.node_engine, app_context=context)
     window.show()
     _logger.info("主窗口显示")
 
-    # 6. 运行事件循环
+    # 6. 创建权限请求回调并加载启用的插件
+    try:
+        on_permission_request = _create_permission_request_callback()
+
+        results = context.plugin_manager.load_enabled_plugins(
+            context=context,
+            on_permission_request=on_permission_request,
+        )
+
+        success_count = sum(1 for v in results.values() if v)
+        _logger.info(f"插件加载完成: {success_count}/{len(results)} 个成功")
+    except Exception as e:
+        _logger.error(f"插件加载失败: {e}", exc_info=True)
+
+    # 7. 刷新插件面板数据
+    window.refresh_plugin_panel()
+
+    # 8. 运行事件循环
     exit_code = app.exec()
 
-    # 7. 清理
+    # 9. 清理
     _logger.info("应用关闭中...")
     context.shutdown()
     _logger.info("AppContext 已关闭")

@@ -32,7 +32,15 @@ from sqlalchemy.orm import Session
 from src.engine.node_graph import NodeGraph
 from src.engine.serialization import deserialize_graph, serialize_graph
 from src.storage.database import Database
-from src.storage.models import WorkflowRecord, ChatSessionRecord, ChatMessageRecord
+from src.storage.models import (
+    WorkflowRecord,
+    ChatSessionRecord,
+    ChatMessageRecord,
+    PluginRecord,
+    PluginPermissionRecord,
+    SettingRecord,
+)
+from src.core.permission_manager import Permission
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -549,3 +557,520 @@ class ChatHistoryRepository:
         except Exception as e:
             _logger.error(f"更新会话标题失败: {e}", exc_info=True)
             return False
+
+
+class PluginPermissionRepository:
+    """
+    插件权限存储库
+
+    提供插件权限的持久化操作：
+    - get_permissions: 获取插件已授权的权限
+    - grant_permission: 授权单个权限
+    - grant_permissions: 批量授权权限
+    - revoke_permission: 撤销单个权限
+    - revoke_all_permissions: 撤销所有权限
+    - get_all_plugins: 获取所有插件及其权限
+
+    Example:
+        >>> repo = PluginPermissionRepository(database)
+        >>> repo.grant_permission("my_plugin", Permission.FILE_READ)
+        >>> perms = repo.get_permissions("my_plugin")
+        >>> Permission.FILE_READ in perms
+        True
+    """
+
+    def __init__(self, database: Database):
+        """
+        初始化存储库
+
+        Args:
+            database: 数据库实例
+        """
+        self._database = database
+
+    def get_permissions(self, plugin_name: str) -> set[Permission]:
+        """
+        获取插件已授权的所有权限
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            已授权的权限集合
+
+        Example:
+            >>> perms = repo.get_permissions("my_plugin")
+            >>> Permission.FILE_READ in perms
+            True
+        """
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginPermissionRecord.permission).where(
+                    PluginPermissionRecord.plugin_name == plugin_name
+                )
+                results = session.execute(stmt).scalars().all()
+
+                permissions = set()
+                for perm_str in results:
+                    try:
+                        permissions.add(Permission(perm_str))
+                    except ValueError:
+                        _logger.warning(f"无效的权限值: {perm_str}")
+
+                _logger.debug(f"获取插件权限: {plugin_name}, 数量: {len(permissions)}")
+                return permissions
+
+        except Exception as e:
+            _logger.error(f"获取插件权限失败: {e}", exc_info=True)
+            return set()
+
+    def grant_permission(
+        self,
+        plugin_name: str,
+        permission: Permission,
+        granted_by_user: Optional[str] = None,
+    ) -> bool:
+        """
+        授权单个权限给插件
+
+        Args:
+            plugin_name: 插件名称
+            permission: 要授权的权限
+            granted_by_user: 授权用户（可选）
+
+        Returns:
+            是否授权成功
+
+        Example:
+            >>> repo.grant_permission("my_plugin", Permission.FILE_READ)
+            True
+        """
+        try:
+            with self._database.session() as session:
+                # 确保插件记录存在
+                self._ensure_plugin_exists(session, plugin_name)
+
+                # 检查是否已授权
+                stmt = select(PluginPermissionRecord).where(
+                    PluginPermissionRecord.plugin_name == plugin_name,
+                    PluginPermissionRecord.permission == permission.value,
+                )
+                existing = session.execute(stmt).scalar_one_or_none()
+
+                if existing:
+                    _logger.debug(f"权限已存在: {plugin_name} -> {permission.value}")
+                    return True
+
+                # 创建新的权限记录
+                record = PluginPermissionRecord(
+                    plugin_name=plugin_name,
+                    permission=permission.value,
+                    granted_by_user=granted_by_user,
+                )
+                session.add(record)
+
+                _logger.info(f"授权权限: {plugin_name} -> {permission.value}")
+                return True
+
+        except Exception as e:
+            _logger.error(f"授权权限失败: {e}", exc_info=True)
+            return False
+
+    def grant_permissions(
+        self,
+        plugin_name: str,
+        permissions: set[Permission],
+        granted_by_user: Optional[str] = None,
+    ) -> bool:
+        """
+        批量授权权限给插件
+
+        Args:
+            plugin_name: 插件名称
+            permissions: 要授权的权限集合
+            granted_by_user: 授权用户（可选）
+
+        Returns:
+            是否全部授权成功
+
+        Example:
+            >>> repo.grant_permissions("my_plugin", {Permission.FILE_READ, Permission.NETWORK})
+            True
+        """
+        try:
+            with self._database.session() as session:
+                # 确保插件记录存在
+                self._ensure_plugin_exists(session, plugin_name)
+
+                # 获取已授权的权限
+                stmt = select(PluginPermissionRecord.permission).where(
+                    PluginPermissionRecord.plugin_name == plugin_name
+                )
+                existing_perms = set(session.execute(stmt).scalars().all())
+
+                # 添加新权限
+                for permission in permissions:
+                    if permission.value not in existing_perms:
+                        record = PluginPermissionRecord(
+                            plugin_name=plugin_name,
+                            permission=permission.value,
+                            granted_by_user=granted_by_user,
+                        )
+                        session.add(record)
+
+                perm_values = [p.value for p in permissions]
+                _logger.info(f"批量授权权限: {plugin_name} -> {perm_values}")
+                return True
+
+        except Exception as e:
+            _logger.error(f"批量授权权限失败: {e}", exc_info=True)
+            return False
+
+    def revoke_permission(self, plugin_name: str, permission: Permission) -> bool:
+        """
+        撤销插件的单个权限
+
+        Args:
+            plugin_name: 插件名称
+            permission: 要撤销的权限
+
+        Returns:
+            是否撤销成功
+
+        Example:
+            >>> repo.revoke_permission("my_plugin", Permission.FILE_READ)
+            True
+        """
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginPermissionRecord).where(
+                    PluginPermissionRecord.plugin_name == plugin_name,
+                    PluginPermissionRecord.permission == permission.value,
+                )
+                record = session.execute(stmt).scalar_one_or_none()
+
+                if record:
+                    session.delete(record)
+                    _logger.info(f"撤销权限: {plugin_name} -> {permission.value}")
+                    return True
+                else:
+                    _logger.debug(f"权限不存在，无需撤销: {plugin_name} -> {permission.value}")
+                    return True
+
+        except Exception as e:
+            _logger.error(f"撤销权限失败: {e}", exc_info=True)
+            return False
+
+    def revoke_all_permissions(self, plugin_name: str) -> bool:
+        """
+        撤销插件的所有权限
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            是否撤销成功
+        """
+        try:
+            with self._database.session() as session:
+                stmt = delete(PluginPermissionRecord).where(
+                    PluginPermissionRecord.plugin_name == plugin_name
+                )
+                result = session.execute(stmt)
+                deleted_count = result.rowcount
+
+                _logger.info(f"撤销所有权限: {plugin_name}, 删除 {deleted_count} 条记录")
+                return True
+
+        except Exception as e:
+            _logger.error(f"撤销所有权限失败: {e}", exc_info=True)
+            return False
+
+    def get_all_plugins(self) -> list[dict]:
+        """
+        获取所有插件及其权限信息
+
+        Returns:
+            插件列表，每项包含 name, version, enabled, permissions
+        """
+        try:
+            with self._database.session() as session:
+                # 获取所有插件记录
+                stmt = select(PluginRecord).order_by(PluginRecord.name)
+                plugins = session.execute(stmt).scalars().all()
+
+                result = []
+                for plugin in plugins:
+                    # 获取该插件的权限
+                    perm_stmt = select(PluginPermissionRecord.permission).where(
+                        PluginPermissionRecord.plugin_name == plugin.name
+                    )
+                    perm_values = session.execute(perm_stmt).scalars().all()
+
+                    permissions = set()
+                    for perm_str in perm_values:
+                        try:
+                            permissions.add(Permission(perm_str))
+                        except ValueError:
+                            pass
+
+                    result.append(
+                        {
+                            "name": plugin.name,
+                            "version": plugin.version,
+                            "enabled": plugin.enabled,
+                            "permissions": permissions,
+                            "created_at": plugin.created_at.isoformat(),
+                            "updated_at": plugin.updated_at.isoformat(),
+                        }
+                    )
+
+                _logger.debug(f"获取所有插件: {len(result)} 个")
+                return result
+
+        except Exception as e:
+            _logger.error(f"获取所有插件失败: {e}", exc_info=True)
+            return []
+
+    def set_plugin_enabled(self, plugin_name: str, enabled: bool) -> bool:
+        """
+        设置插件启用/禁用状态
+
+        Args:
+            plugin_name: 插件名称
+            enabled: 是否启用
+
+        Returns:
+            是否设置成功
+        """
+        try:
+            with self._database.session() as session:
+                # 确保插件记录存在
+                self._ensure_plugin_exists(session, plugin_name)
+
+                # 更新启用状态
+                stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+                record = session.execute(stmt).scalar_one_or_none()
+
+                if record:
+                    record.enabled = enabled
+                    _logger.info(f"设置插件状态: {plugin_name} -> {'启用' if enabled else '禁用'}")
+                    return True
+                else:
+                    # 创建新记录
+                    new_record = PluginRecord(
+                        name=plugin_name,
+                        enabled=enabled,
+                    )
+                    session.add(new_record)
+                    _logger.info(f"创建插件记录: {plugin_name} -> {'启用' if enabled else '禁用'}")
+                    return True
+
+        except Exception as e:
+            _logger.error(f"设置插件状态失败: {e}", exc_info=True)
+            return False
+
+    def get_plugin_enabled(self, plugin_name: str) -> bool:
+        """
+        获取插件启用状态
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            是否启用（默认为 True）
+        """
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginRecord.enabled).where(PluginRecord.name == plugin_name)
+                result = session.execute(stmt).scalar_one_or_none()
+
+                # 默认启用
+                return result if result is not None else True
+
+        except Exception as e:
+            _logger.error(f"获取插件状态失败: {e}", exc_info=True)
+            return True
+
+    def _ensure_plugin_exists(self, session: Session, plugin_name: str) -> None:
+        """
+        确保插件记录存在（内部方法）
+
+        Args:
+            session: 数据库会话
+            plugin_name: 插件名称
+        """
+        stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+        existing = session.execute(stmt).scalar_one_or_none()
+
+        if not existing:
+            # 创建新的插件记录
+            new_record = PluginRecord(name=plugin_name)
+            session.add(new_record)
+            _logger.debug(f"创建插件记录: {plugin_name}")
+
+
+class PluginRepository:
+    """
+    插件状态和配置统一存储库
+
+    提供插件状态（启用/禁用）和配置（JSON）的统一管理：
+    - get_enabled: 获取插件启用状态
+    - set_enabled: 设置插件启用状态
+    - get_config: 获取插件配置
+    - set_config: 设置插件配置（覆盖）
+    - update_config: 更新插件配置（合并）
+
+    Example:
+        >>> repo = PluginRepository(database)
+        >>> repo.set_enabled("my_plugin", True)
+        >>> repo.set_config("my_plugin", {"api_key": "xxx"})
+        >>> config = repo.get_config("my_plugin")
+    """
+
+    def __init__(self, database: Database):
+        """
+        初始化存储库
+
+        Args:
+            database: 数据库实例
+        """
+        self._database = database
+
+    # ==================== 状态管理 ====================
+
+    def get_enabled(self, plugin_name: str) -> bool:
+        """
+        获取插件启用状态
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            是否启用（默认为 True）
+        """
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginRecord.enabled).where(PluginRecord.name == plugin_name)
+                result = session.execute(stmt).scalar_one_or_none()
+                return result if result is not None else True
+        except Exception as e:
+            _logger.error(f"获取插件状态失败: {e}", exc_info=True)
+            return True
+
+    def set_enabled(self, plugin_name: str, enabled: bool) -> bool:
+        """
+        设置插件启用状态
+
+        Args:
+            plugin_name: 插件名称
+            enabled: 是否启用
+
+        Returns:
+            是否设置成功
+        """
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+                record = session.execute(stmt).scalar_one_or_none()
+
+                if record:
+                    record.enabled = enabled
+                    _logger.info(f"设置插件状态: {plugin_name} -> {'启用' if enabled else '禁用'}")
+                else:
+                    new_record = PluginRecord(name=plugin_name, enabled=enabled)
+                    session.add(new_record)
+                    _logger.info(f"创建插件记录: {plugin_name} -> {'启用' if enabled else '禁用'}")
+
+                return True
+
+        except Exception as e:
+            _logger.error(f"设置插件状态失败: {e}", exc_info=True)
+            return False
+
+    def _ensure_plugin_exists(self, session: Session, plugin_name: str) -> None:
+        """
+        确保插件记录存在（内部方法）
+
+        Args:
+            session: 数据库会话
+            plugin_name: 插件名称
+        """
+        stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+        existing = session.execute(stmt).scalar_one_or_none()
+
+        if not existing:
+            new_record = PluginRecord(name=plugin_name)
+            session.add(new_record)
+            session.flush()
+            _logger.debug(f"创建插件记录: {plugin_name}")
+
+    # ==================== 配置管理（使用 PluginRecord.config_json）====================
+
+    def get_config(self, plugin_name: str) -> dict:
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginRecord.config_json).where(PluginRecord.name == plugin_name)
+                result = session.execute(stmt).scalar_one_or_none()
+
+                if result is None:
+                    return {}
+
+                return json.loads(result) if result else {}
+
+        except Exception as e:
+            _logger.error(f"获取插件配置失败: {e}", exc_info=True)
+            return {}
+
+    def set_config(self, plugin_name: str, config: dict) -> bool:
+        try:
+            with self._database.session() as session:
+                config_json = json.dumps(config, ensure_ascii=False)
+
+                stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+                record = session.execute(stmt).scalar_one_or_none()
+
+                if record:
+                    record.config_json = config_json
+                    _logger.info(f"更新插件配置: {plugin_name}")
+                else:
+                    new_record = PluginRecord(name=plugin_name, config_json=config_json)
+                    session.add(new_record)
+                    _logger.info(f"创建插件配置: {plugin_name}")
+
+                return True
+
+        except Exception as e:
+            _logger.error(f"设置插件配置失败: {e}", exc_info=True)
+            return False
+
+    def update_config(self, plugin_name: str, updates: dict) -> bool:
+        try:
+            current_config = self.get_config(plugin_name)
+            current_config.update(updates)
+            return self.set_config(plugin_name, current_config)
+        except Exception as e:
+            _logger.error(f"更新插件配置失败: {e}", exc_info=True)
+            return False
+
+    def delete_config(self, plugin_name: str) -> bool:
+        try:
+            with self._database.session() as session:
+                stmt = select(PluginRecord).where(PluginRecord.name == plugin_name)
+                record = session.execute(stmt).scalar_one_or_none()
+
+                if record:
+                    record.config_json = "{}"
+                    _logger.info(f"删除插件配置: {plugin_name}")
+                return True
+
+        except Exception as e:
+            _logger.error(f"删除插件配置失败: {e}", exc_info=True)
+            return False
+
+    def get_config_value(self, plugin_name: str, key: str, default: Any = None) -> Any:
+        config = self.get_config(plugin_name)
+        return config.get(key, default)
+
+    def set_config_value(self, plugin_name: str, key: str, value: Any) -> bool:
+        return self.update_config(plugin_name, {key: value})

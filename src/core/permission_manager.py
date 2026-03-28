@@ -19,7 +19,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Set, Union
+from typing import Dict, Set, Union, Optional
 
 from src.utils.logger import get_logger
 
@@ -250,12 +250,49 @@ class PermissionManager:
         pm.revoke("my_plugin", Permission.FILE_READ)
     """
 
-    def __init__(self):
-        """初始化权限管理器"""
+    def __init__(self, repository: Optional["PluginPermissionRepository"] = None):
+        """
+        初始化权限管理器
+
+        Args:
+            repository: 权限持久化存储库（可选）
+        """
         # 插件权限映射：插件名 -> 权限集合
         self._granted: Dict[str, Set[Permission]] = {}
 
+        # 持久化存储库（可选）
+        self._repository = repository
+
         _logger.debug("权限管理器初始化完成")
+
+    def load_permissions(self) -> None:
+        """
+        从数据库加载已持久化的权限（应用启动时调用）
+
+        如果设置了repository，则从数据库加载所有已授权的权限到内存中。
+        这样可以在内存中快速检查权限，同时保持数据库的持久化。
+        """
+        if self._repository is None:
+            _logger.debug("未设置repository，跳过权限加载")
+            return
+
+        try:
+            # 获取所有插件及其权限
+            plugins = self._repository.get_all_plugins()
+
+            for plugin in plugins:
+                plugin_name = plugin["name"]
+                permissions = plugin.get("permissions", set())
+
+                if permissions:
+                    self._granted[plugin_name] = permissions
+                    perm_values = [p.value for p in permissions]
+                    _logger.debug(f"从数据库加载权限: {plugin_name} -> {perm_values}")
+
+            _logger.info(f"权限加载完成: {len(plugins)} 个插件")
+
+        except Exception as e:
+            _logger.error(f"加载权限失败: {e}", exc_info=True)
 
     def grant(self, plugin_name: str, permission: Permission) -> None:
         """
@@ -273,6 +310,10 @@ class PermissionManager:
 
         self._granted[plugin_name].add(permission)
 
+        # 持久化到数据库
+        if self._repository:
+            self._repository.grant_permission(plugin_name, permission)
+
         _logger.info(f"授权: 插件 '{plugin_name}' 获得权限 '{permission.value}'")
 
     def grant_all(self, plugin_name: str, permissions: Set[Permission]) -> None:
@@ -287,6 +328,10 @@ class PermissionManager:
             self._granted[plugin_name] = set()
 
         self._granted[plugin_name].update(permissions)
+
+        # 持久化到数据库
+        if self._repository:
+            self._repository.grant_permissions(plugin_name, permissions)
 
         perm_values = [p.value for p in permissions]
         _logger.info(f"批量授权: 插件 '{plugin_name}' 获得权限: {perm_values}")
@@ -307,6 +352,11 @@ class PermissionManager:
 
         if permission in self._granted[plugin_name]:
             self._granted[plugin_name].remove(permission)
+
+            # 从数据库删除
+            if self._repository:
+                self._repository.revoke_permission(plugin_name, permission)
+
             _logger.info(f"撤销: 插件 '{plugin_name}' 失去权限 '{permission.value}'")
             return True
 

@@ -27,11 +27,15 @@ import importlib.util
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Type, cast
+
+if TYPE_CHECKING:
+    from src.core.app_context import AppContext
 
 from src.core.event_bus import EventBus, EventType
 from src.core.permission_manager import Permission, PermissionManager, PermissionSet
 from src.core.plugin_base import PluginBase
+from src.storage.repositories import PluginPermissionRepository, PluginRepository
 from src.utils.logger import get_logger
 
 # 模块日志记录器
@@ -101,6 +105,8 @@ class PluginManager:
         plugins_dir: Path,
         event_bus: Optional[EventBus] = None,
         permission_manager: Optional[PermissionManager] = None,
+        repository: Optional[PluginPermissionRepository] = None,
+        plugin_repository: Optional[PluginRepository] = None,
     ):
         """
         初始化插件管理器
@@ -109,14 +115,19 @@ class PluginManager:
             plugins_dir: 插件目录路径
             event_bus: 事件总线（可选，用于发布插件事件）
             permission_manager: 权限管理器（可选，用于权限检查）
+            repository: 持久化存储库（可选，用于持久化插件权限）
+            plugin_repository: 持久化存储库（可选，用于持久化插件状态）
         """
         self.plugins_dir = Path(plugins_dir)
         self.event_bus = event_bus
         self.permission_manager = permission_manager
+        self._repository = repository
+        self._plugin_repository = plugin_repository
+        self._context: Optional["AppContext"] = None
 
-        # 已发现的插件：插件名 -> PluginInfo
+        # 已发现的插件:插件名 -> PluginInfo
         self._discovered: Dict[str, PluginInfo] = {}
-        # 已加载的插件：插件名 -> 插件实例
+        # 已加载的插件:插件名 -> 插件实例
         self._loaded: Dict[str, PluginBase] = {}
 
         # 确保插件目录存在
@@ -266,29 +277,41 @@ class PluginManager:
             if self.permission_manager:
                 required_perms = info.plugin_class.get_required_permissions()
                 self._check_and_grant_permissions(name, required_perms)
+                granted_permissions = self.permission_manager.get_granted_permissions(name)
+            else:
+                granted_permissions = set()
 
             # 设置加载状态
             instance._set_loaded(True, context)
 
-            # 调用 on_load
-            instance.on_load(context)
+            # 调用插件的 on_load 方法
+            if context is not None:
+                from src.core.permission_proxy import PermissionProxy
+
+                proxy = PermissionProxy(
+                    context=context,
+                    plugin_name=name,
+                    granted_permissions=granted_permissions,
+                    config_repository=self._plugin_repository,
+                )
+                instance.on_load(proxy)
+            else:
+                # 没有上下文时直接调用（测试场景）
+                instance.on_load(context)
 
             # 记录已加载
             self._loaded[name] = instance
-            info.instance = instance
             info.loaded = True
-
-            _logger.info(f"插件加载成功: {name}")
+            info.instance = instance
 
             # 发布事件
             if self.event_bus:
                 self.event_bus.publish(
                     EventType.PLUGIN_LOADED,
-                    {
-                        "name": name,
-                        "version": info.plugin_class.version,
-                    },
+                    {"name": name},
                 )
+
+            _logger.info(f"插件加载成功: {name}")
 
             return instance
 
@@ -312,6 +335,10 @@ class PluginManager:
             Phase 1 简化实现：自动授权所有请求的权限
             Phase 4 将实现用户确认对话框
         """
+        if self.permission_manager is None:
+            _logger.warning("权限管理器未初始化，跳过权限检查")
+            return
+
         # 获取已授权的权限
         granted = self.permission_manager.get_granted_permissions(plugin_name)
 
@@ -413,16 +440,212 @@ class PluginManager:
         """
         return name in self._loaded
 
+    def enable_plugin(self, name: str) -> bool:
+        """
+        启用插件
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            是否成功启用
+        """
+        if name not in self._discovered:
+            _logger.warning(f"插件未发现: {name}")
+            return False
+
+        # 先保存启用状态到数据库
+        if self._repository:
+            self._repository.set_plugin_enabled(name, True)
+
+        if name in self._loaded:
+            _logger.debug(f"插件已加载: {name}")
+            return True
+
+        try:
+            self.load_plugin(name, self._context)
+            _logger.info(f"插件已启用: {name}")
+            return True
+        except Exception as e:
+            _logger.error(f"启用插件失败: {name}", exc_info=True)
+            return False
+
+    def disable_plugin(self, name: str) -> bool:
+        """
+        禁用插件
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            是否成功禁用
+        """
+        # 先保存禁用状态到数据库
+        if self._repository:
+            self._repository.set_plugin_enabled(name, False)
+
+        if name not in self._loaded:
+            _logger.debug(f"插件未加载: {name}")
+            return True
+
+        try:
+            self.unload_plugin(name)
+            _logger.info(f"插件已禁用: {name}")
+            return True
+        except Exception as e:
+            _logger.error(f"禁用插件失败: {name}", exc_info=True)
+            return False
+
     def unload_all(self) -> None:
         """
         卸载所有插件
 
         用于应用关闭时清理资源
         """
-        # 复制键列表，避免在迭代时修改
         plugin_names = list(self._loaded.keys())
 
         for name in plugin_names:
             self.unload_plugin(name)
 
         _logger.info("所有插件已卸载")
+
+    def check_permissions_needed(self, name: str) -> Optional[Set[Permission]]:
+        """
+        检查插件是否需要新的权限授权
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            需要授权的权限集合，如果不需要或插件不存在则返回 None
+        """
+        if name not in self._discovered:
+            return None
+
+        info = self._discovered[name]
+        if info.plugin_class is None:
+            return None
+
+        if self.permission_manager is None:
+            return None
+
+        required_perms = info.plugin_class.get_required_permissions()
+        granted = self.permission_manager.get_granted_permissions(name)
+
+        new_perms = set(required_perms.permissions) - granted
+
+        return new_perms if new_perms else None
+
+    def get_plugin_info_for_permission_dialog(self, name: str) -> Optional[dict]:
+        """
+        获取插件信息用于权限对话框显示
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            插件信息字典，包含 version、description、author 等字段
+        """
+        if name not in self._discovered:
+            return None
+
+        info = self._discovered[name]
+        if info.plugin_class is None:
+            return None
+
+        return {
+            "version": info.plugin_class.version,
+            "description": info.plugin_class.description,
+            "author": info.plugin_class.author,
+        }
+
+    def get_plugin_required_permissions(self, name: str) -> Optional[Set[Permission]]:
+        """
+        获取插件所需的权限集合
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            所需权限集合，如果插件不存在则返回 None
+        """
+        if name not in self._discovered:
+            return None
+
+        info = self._discovered[name]
+        if info.plugin_class is None:
+            return None
+
+        return set(info.plugin_class.get_required_permissions().permissions)
+
+    def load_enabled_plugins(
+        self,
+        context: Optional["AppContext"] = None,
+        on_permission_request: Optional[Callable[[str, Set[Permission]], bool]] = None,
+    ) -> Dict[str, bool]:
+        """
+        根据数据库中的启用状态加载插件
+
+        Args:
+            context: 应用上下文
+            on_permission_request: 权限请求回调函数
+                - 参数: plugin_name, required_permissions
+                - 返回: True 表示授权，False 表示拒绝
+                - 如果为 None，则自动授权所有权限
+
+        Returns:
+            插件名 -> 是否成功加载的映射
+
+        Note:
+            - 从数据库读取每个插件的启用状态
+            - 只加载启用状态的插件
+            - 对于需要新权限的插件，调用 on_permission_request 回调
+        """
+        results: Dict[str, bool] = {}
+
+        if self._repository is None:
+            _logger.warning("未设置 repository，无法读取启用状态")
+            return results
+
+        # 保存 context 供 enable_plugin 使用
+        self._context = context
+
+        for name, info in self._discovered.items():
+            # 从数据库读取启用状态
+            enabled = self._repository.get_plugin_enabled(name)
+
+            if not enabled:
+                _logger.debug(f"插件 '{name}' 未启用，跳过加载")
+                results[name] = False
+                continue
+
+            # 检查是否需要新的权限授权
+            needed_perms = self.check_permissions_needed(name)
+
+            if needed_perms:
+                # 需要新权限
+                if on_permission_request is not None:
+                    # 调用回调函数请求用户确认
+                    granted = on_permission_request(name, needed_perms)
+
+                    if not granted:
+                        _logger.info(f"用户拒绝授权插件 '{name}' 的权限")
+                        results[name] = False
+                        continue
+                else:
+                    # 没有回调函数，自动授权
+                    _logger.info(f"自动授权插件 '{name}' 的权限: {[p.value for p in needed_perms]}")
+
+            # 加载插件
+            try:
+                self.load_plugin(name, context)
+                results[name] = True
+                _logger.info(f"插件 '{name}' 加载成功")
+            except Exception as e:
+                _logger.error(f"插件 '{name}' 加载失败: {e}", exc_info=True)
+                results[name] = False
+
+        return results
+
+    # Alias for backward compatibility
+    unload_all_plugins = unload_all

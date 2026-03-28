@@ -135,7 +135,7 @@ class TestGlobalContext:
         try:
             shutdown_context()
         except RuntimeError:
-            pass  # 如果未初始化则忽略
+            pass
 
     def test_init_context(self, tmp_path: Path):
         """测试初始化全局上下文"""

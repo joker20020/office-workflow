@@ -33,13 +33,16 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from src.core.permission_manager import Permission, PermissionSet
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.core.app_context import AppContext
+    from src.core.permission_proxy import PermissionProxy
+
+    PluginContext = Union[AppContext, PermissionProxy]
 
 # 模块日志记录器
 _logger = get_logger(__name__)
@@ -131,7 +134,7 @@ class PluginBase(ABC):
         }
 
     @abstractmethod
-    def on_load(self, context: "AppContext") -> None:
+    def on_load(self, context: "PluginContext") -> None:
         """
         插件加载时调用
 
