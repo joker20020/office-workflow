@@ -135,6 +135,7 @@ class PluginPanel(QWidget):
 
     plugin_enabled_changed = Signal(str, bool)
     permission_edit_requested = Signal(str)
+    refresh_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -190,6 +191,7 @@ class PluginPanel(QWidget):
 
     def _on_refresh(self) -> None:
         _logger.debug("用户请求刷新插件列表")
+        self.refresh_requested.emit()
 
     def set_plugins(
         self,

@@ -961,7 +961,7 @@ class TestWidgetsPlugin(PluginBase):
     Example:
         >>> from plugins.test_widgets import TestWidgetsPlugin
         >>> plugin = TestWidgetsPlugin()
-        >>> plugin.on_load(context)
+        >>> plugin.on_enable(context)
     """
 
     name = "test_widgets"
@@ -975,16 +975,16 @@ class TestWidgetsPlugin(PluginBase):
         ]
     )
 
-    def on_load(self, context):
-        """插件加载时注册所有测试节点"""
+    def on_enable(self, context):
+        """插件启用时注册所有测试节点"""
         for node_def in _ALL_DEFINITIONS:
             context.node_engine.register_node_type(node_def)
             _logger.info(f"注册测试节点: {node_def.node_type}")
 
         _logger.info(f"共注册 {len(_ALL_DEFINITIONS)} 个测试节点")
 
-    def on_unload(self):
-        """插件卸载时清理"""
+    def on_disable(self):
+        """插件禁用时清理"""
         pass
 
 

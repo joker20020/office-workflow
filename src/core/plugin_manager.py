@@ -312,12 +312,11 @@ class PluginManager:
         name: str,
         context: Optional["AppContext"] = None,
     ) -> PluginBase:
-        """
-        加载插件
+        """加载插件
 
         Args:
             name: 插件名称
-            context: 应用上下文（传递给插件的 on_load 方法）
+            context: 应用上下文（传递给插件的 on_enable/on_load 方法）
 
         Returns:
             加载的插件实例
@@ -327,7 +326,7 @@ class PluginManager:
 
         Note:
             - 如果插件未发现，会先调用 discover_plugins
-            - 权限检查在插件 on_load 之前进行
+            - 权限检查在插件 on_enable/on_load 之前进行，尽量使用 on_enable
         """
         # 检查是否已加载
         if name in self._loaded:
@@ -357,7 +356,7 @@ class PluginManager:
             # 设置加载状态
             instance._set_loaded(True, context)
 
-            # 调用插件的 on_load 方法
+            # 调用插件的生命周期方法（优先 on_enable，如不存在则回退到 on_load）
             if context is not None:
                 from src.core.permission_proxy import PermissionProxy
 
@@ -367,10 +366,25 @@ class PluginManager:
                     granted_permissions=granted_permissions,
                     config_repository=self._plugin_repository,
                 )
-                instance.on_load(proxy)
+                if callable(getattr(instance, "on_enable", None)):
+                    instance.on_enable(proxy)
+                else:
+                    # 回退到兼容的 on_load
+                    on_load = getattr(instance, "on_load", None)
+                    if callable(on_load):
+                        on_load(proxy)
+                    else:
+                        _logger.warning(f"Plugin {name} has no on_enable/on_load(proxy) method.")
             else:
                 # 没有上下文时直接调用（测试场景）
-                instance.on_load(context)
+                if callable(getattr(instance, "on_enable", None)):
+                    instance.on_enable(None)
+                else:
+                    on_load = getattr(instance, "on_load", None)
+                    if callable(on_load):
+                        on_load(None)
+                    else:
+                        _logger.warning(f"Plugin {name} has no on_enable/on_load(None) method.")
 
             # 记录已加载
             self._loaded[name] = instance
@@ -442,8 +456,15 @@ class PluginManager:
         instance = self._loaded[name]
 
         try:
-            # 调用 on_unload
-            instance.on_unload()
+            # 调用生命周期卸载方法：优先 on_disable，其次兼容 on_unload
+            if callable(getattr(instance, "on_disable", None)):
+                instance.on_disable()
+            else:
+                on_unload = getattr(instance, "on_unload", None)
+                if callable(on_unload):
+                    on_unload()
+                else:
+                    _logger.debug(f"插件 {name} 未实现 on_disable/on_unload() 方法")
 
             # 清理状态
             instance._set_loaded(False, None)
@@ -581,6 +602,65 @@ class PluginManager:
             self.unload_plugin(name)
 
         _logger.info("所有插件已卸载")
+
+    def refresh_plugins(self, context: Optional["AppContext"] = None) -> Dict[str, bool]:
+        """
+        Refresh all plugins by disabling, re-discovering, and re-enabling.
+
+        This is useful for syncing plugin modifications during development.
+
+        Steps:
+        1. Remember currently enabled plugins
+        2. Disable all loaded plugins
+        3. Clear discovered plugins cache
+        4. Re-discover plugins from filesystem
+        5. Re-enable plugins that were enabled before refresh
+
+        Args:
+            context: Application context for plugin initialization
+
+        Returns:
+            Dict mapping plugin names to success status
+        """
+        # Step 0: Save context for enable_plugin to use
+        self._context = context
+
+        # Step 1: Remember which plugins were enabled
+        previously_enabled = set(self._loaded.keys())
+        _logger.info(
+            f"Starting plugin refresh, {len(previously_enabled)} plugins currently enabled"
+        )
+
+        # Step 2: Disable all loaded plugins
+        for name in list(self._loaded.keys()):
+            try:
+                self.disable_plugin(name)
+                _logger.debug(f"Disabled plugin: {name}")
+            except Exception as e:
+                _logger.error(f"Failed to disable plugin {name}: {e}")
+
+        # Step 3: Clear discovered cache to force re-scan
+        self._discovered.clear()
+        _logger.debug("Cleared discovered plugins cache")
+
+        # Step 4: Re-discover plugins from filesystem
+        discovered = self.discover_plugins()
+        _logger.info(f"Re-discovered {len(discovered)} plugins")
+
+        # Step 5: Re-enable previously enabled plugins
+        results: Dict[str, bool] = {}
+        for name in discovered:
+            if name in previously_enabled:
+                try:
+                    self.enable_plugin(name)
+                    results[name] = True
+                    _logger.info(f"Re-enabled plugin: {name}")
+                except Exception as e:
+                    _logger.error(f"Failed to re-enable plugin {name}: {e}")
+                    results[name] = False
+
+        _logger.info(f"Plugin refresh complete: {len(results)} plugins processed")
+        return results
 
     def check_permissions_needed(self, name: str) -> Optional[Set[Permission]]:
         """

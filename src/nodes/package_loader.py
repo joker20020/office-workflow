@@ -190,9 +190,11 @@ class PackageLoader:
             _logger.warning(f"__init__.py not found in nodes directory: {nodes_dir}")
             return []
 
+        module_prefix = _sanitize_module_name(manifest.id)
+
         try:
             spec = importlib.util.spec_from_file_location(
-                f"{manifest.id}._nodes_init",
+                f"{module_prefix}._nodes_init",
                 init_file,
             )
             if spec is None or spec.loader is None:
@@ -218,7 +220,7 @@ class PackageLoader:
             if py_file.name.startswith("_"):
                 continue
 
-            module_name = f"{manifest.id}.nodes.{py_file.stem}"
+            module_name = f"{module_prefix}.nodes.{py_file.stem}"
 
             try:
                 spec = importlib.util.spec_from_file_location(module_name, py_file)
@@ -268,6 +270,23 @@ class PackageLoader:
         except Exception as e:
             _logger.error(f"Failed to read requirements.txt: {e}")
             return None
+
+
+def _sanitize_module_name(package_id: str) -> str:
+    """
+    Convert package ID to a valid Python module name.
+
+    Reverse domain notation (e.g., "com.example.data-helpers") contains
+    dots and hyphens which are invalid in module names. This function
+    converts them to underscores.
+
+    Args:
+        package_id: Package ID to sanitize
+
+    Returns:
+        Sanitized module name (e.g., "com_example_data_helpers")
+    """
+    return package_id.replace(".", "_").replace("-", "_")
 
 
 def _is_valid_package_id(package_id: str) -> bool:

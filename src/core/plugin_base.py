@@ -52,7 +52,11 @@ class PluginBase(ABC):
     """
     插件抽象基类
 
-    所有插件必须继承此类并实现抽象方法。
+    生命周期设计：
+      - on_enable / on_disable：插件启用与禁用的核心生命周期方法（为未来的统一入口，向后兼容其他接口）
+      - on_load / on_unload：向后兼容的加载/卸载接口，内部会调用 on_enable / on_disable 以保持兼容性
+
+    All plugins must inherit from this class and implement the abstract methods.
 
     Class Attributes:
         name: 插件唯一标识（必填）
@@ -62,8 +66,12 @@ class PluginBase(ABC):
         permissions: 所需权限集合（默认为空）
 
     Abstract Methods:
-        on_load: 插件加载时调用
-        on_unload: 插件卸载时调用
+        on_enable: 插件启用时调用（主生命周期入口）
+        on_disable: 插件禁用时调用
+
+    Backward-compatibility:
+        on_load: 已废弃的加载入口，默认实现会调用 on_enable 以保持向后兼容
+        on_unload: 已废弃的卸载入口，默认实现会调用 on_disable 以保持向后兼容
 
     Example:
         class MyPlugin(PluginBase):
@@ -76,14 +84,12 @@ class PluginBase(ABC):
                 Permission.FILE_READ,
             ])
 
-            def on_load(self, context: AppContext):
-                context.event_bus.subscribe(
-                    EventType.APP_STARTED,
-                    self.on_app_started
-                )
+            def on_enable(self, context: AppContext) -> None:
+                # 插件启用时执行
+                pass
 
-            def on_unload(self):
-                # 清理资源
+            def on_disable(self) -> None:
+                # 插件禁用时执行
                 pass
 
             def on_app_started(self, event):
@@ -134,53 +140,28 @@ class PluginBase(ABC):
         }
 
     @abstractmethod
-    def on_load(self, context: "PluginContext") -> None:
+    def on_enable(self, context: "PluginContext") -> None:
         """
-        插件加载时调用
-
-        Args:
-            context: 应用上下文，提供访问程序功能的接口
-
-        Note:
-            - 此方法在插件加载时调用一次
-            - 可以通过 context 访问已授权的功能
-            - 应在此方法中完成插件的初始化工作
-
-        Example:
-            def on_load(self, context: AppContext):
-                # 订阅事件
-                context.event_bus.subscribe(
-                    EventType.PLUGIN_LOADED,
-                    self.on_other_plugin_loaded
-                )
-
-                # 注册工具
-                if context.check_permission(Permission.AGENT_TOOL):
-                    context.agent.register_tool("my_tool", self.my_func)
+        Called when the plugin is enabled. This is the primary lifecycle hook.
         """
         pass
 
     @abstractmethod
-    def on_unload(self) -> None:
+    def on_disable(self) -> None:
         """
-        插件卸载时调用
-
-        Note:
-            - 此方法在插件卸载时调用一次
-            - 应在此方法中清理所有资源
-            - 取消所有事件订阅
-            - 注销所有注册的工具
-
-        Example:
-            def on_unload(self):
-                # 取消事件订阅
-                if self._subscription_id:
-                    self.context.event_bus.unsubscribe(self._subscription_id)
-
-                # 注销工具
-                # ...
+        Called when the plugin is disabled.
         """
         pass
+
+    # 兼容旧接口：加载时调用，内部会委托到 on_enable 以保持向后兼容
+    def on_load(self, context: "PluginContext") -> None:
+        """Deprecated: Use on_enable instead. Calls on_enable for backward compatibility."""
+        self.on_enable(context)
+
+    # 兼容旧接口：卸载时调用，内部会委托到 on_disable 以保持向后兼容
+    def on_unload(self) -> None:
+        """Deprecated: Use on_disable instead. Calls on_disable for backward compatibility."""
+        self.on_disable()
 
     @property
     def is_loaded(self) -> bool:

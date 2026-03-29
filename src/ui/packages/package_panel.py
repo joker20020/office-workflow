@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -50,6 +51,8 @@ class InstallWorker(QThread):
         package_id: Optional[str] = None,
         repository_url: Optional[str] = None,
         branch: str = "main",
+        local_path: Optional[str] = None,
+        copy_mode: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -58,6 +61,8 @@ class InstallWorker(QThread):
         self._package_id = package_id
         self._repository_url = repository_url
         self._branch = branch
+        self._local_path = local_path
+        self._copy_mode = copy_mode
 
     def run(self):
         try:
@@ -65,6 +70,19 @@ class InstallWorker(QThread):
                 result = self._manager.install(
                     self._repository_url,
                     self._branch,
+                    progress_callback=lambda p, m: self.progress.emit(p, m),
+                )
+                self.finished.emit(result.success, result.message)
+            elif self._action == "install_local":
+                from pathlib import Path
+
+                if self._local_path is None:
+                    self.finished.emit(False, "本地路径未设置")
+                    return
+
+                result = self._manager.install_local(
+                    Path(self._local_path),
+                    copy=self._copy_mode,
                     progress_callback=lambda p, m: self.progress.emit(p, m),
                 )
                 self.finished.emit(result.success, result.message)
@@ -126,6 +144,86 @@ class InstallDialog(QDialog):
 
     def get_branch(self) -> str:
         return self._branch_input.text().strip() or "main"
+
+
+class LocalInstallDialog(QDialog):
+    """Dialog for installing packages from local directory"""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("从本地安装节点包")
+        self.setFixedSize(500, 180)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        path_label = QLabel("本地包目录:")
+        layout.addWidget(path_label)
+
+        path_layout = QHBoxLayout()
+        self._path_input = QLineEdit()
+        self._path_input.setPlaceholderText("选择包含 package.json 的目录")
+        path_layout.addWidget(self._path_input)
+
+        browse_btn = QPushButton("浏览...")
+        browse_btn.setFixedWidth(70)
+        browse_btn.clicked.connect(self._on_browse)
+        path_layout.addWidget(browse_btn)
+        layout.addLayout(path_layout)
+
+        option_layout = QHBoxLayout()
+        self._copy_radio = QCheckBox("复制到包目录")
+        self._copy_radio.setChecked(True)
+        self._copy_radio.setToolTip(
+            "勾选：复制文件到 node_packages 目录\n不勾选：创建符号链接（开发模式推荐）"
+        )
+        option_layout.addWidget(self._copy_radio)
+        option_layout.addStretch()
+        layout.addLayout(option_layout)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        install_btn = QPushButton("安装")
+        install_btn.clicked.connect(self._on_install)
+        install_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        btn_layout.addWidget(install_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _on_browse(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择节点包目录", "", QFileDialog.Option.ShowDirsOnly
+        )
+        if folder:
+            self._path_input.setText(folder)
+
+    def _on_install(self) -> None:
+        path = self._path_input.text().strip()
+        if not path:
+            QMessageBox.warning(self, "错误", "请选择本地包目录")
+            return
+        from pathlib import Path
+
+        if not Path(path).exists():
+            QMessageBox.warning(self, "错误", f"目录不存在: {path}")
+            return
+        if not (Path(path) / "package.json").exists():
+            QMessageBox.warning(self, "错误", "所选目录不包含 package.json 文件")
+            return
+        self.accept()
+
+    def get_local_path(self) -> str:
+        return self._path_input.text().strip()
+
+    def get_copy_mode(self) -> bool:
+        return self._copy_radio.isChecked()
 
 
 class PackageItemWidget(QWidget):
@@ -330,6 +428,13 @@ class PackagePanel(QWidget):
         install_btn.clicked.connect(self._on_install_clicked)
         layout.addWidget(install_btn)
 
+        install_local_btn = QPushButton("本地安装")
+        install_local_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; padding: 4px 12px; }"
+        )
+        install_local_btn.clicked.connect(self._on_install_local_clicked)
+        layout.addWidget(install_local_btn)
+
         refresh_btn = QPushButton("刷新")
         refresh_btn.setFixedWidth(60)
         refresh_btn.clicked.connect(self._on_refresh)
@@ -383,6 +488,35 @@ class PackagePanel(QWidget):
             "install",
             repository_url=url,
             branch=branch,
+        )
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_install_finished)
+        self._worker.start()
+
+    def _on_install_local_clicked(self) -> None:
+        dialog = LocalInstallDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            local_path = dialog.get_local_path()
+            copy_mode = dialog.get_copy_mode()
+
+            if not local_path:
+                QMessageBox.warning(self, "错误", "请选择本地包目录")
+                return
+
+            self._start_install_local(local_path, copy_mode)
+
+    def _start_install_local(self, local_path: str, copy_mode: bool) -> None:
+        if not self._package_manager:
+            QMessageBox.warning(self, "错误", "包管理器未初始化")
+            return
+
+        self._show_progress("正在从本地安装...")
+
+        self._worker = InstallWorker(
+            self._package_manager,
+            "install_local",
+            local_path=local_path,
+            copy_mode=copy_mode,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_install_finished)

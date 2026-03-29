@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
         # 连接信号
         self._plugin_panel.plugin_enabled_changed.connect(self._on_plugin_enabled_changed)
         self._plugin_panel.permission_edit_requested.connect(self._on_permission_edit_requested)
+        self._plugin_panel.refresh_requested.connect(self._on_plugin_refresh_requested)
 
         return self._plugin_panel
 
@@ -447,6 +448,20 @@ class MainWindow(QMainWindow):
     def _on_permission_edit_requested(self, plugin_name: str) -> None:
         _logger.info(f"用户请求修改权限: {plugin_name}")
         self._show_permission_dialog(plugin_name)
+
+    def _on_plugin_refresh_requested(self) -> None:
+        """Handle plugin refresh request"""
+        _logger.info("用户请求刷新插件列表")
+        if self._app_context is None:
+            _logger.warning("AppContext未初始化，无法刷新插件")
+            return
+        plugin_manager = self._app_context.plugin_manager
+        results = plugin_manager.refresh_plugins(self._app_context)
+        self.refresh_plugin_panel()
+        success_count = sum(1 for v in results.values() if v)
+        total_count = len(results)
+        self._status_bar.showMessage(f"插件刷新完成: {success_count}/{total_count} 成功")
+        _logger.info(f"插件刷新完成: {success_count}/{total_count} 成功")
 
     def _show_permission_dialog(self, plugin_name: str) -> None:
         if self._app_context is None:
