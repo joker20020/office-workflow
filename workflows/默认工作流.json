@@ -1,0 +1,16 @@
+{
+  "id": "9ec1c7f7-c467-46af-a246-240e43083a69",
+  "name": "默认工作流",
+  "nodes": [
+    {
+      "id": "7652a509-276a-4c1c-a39c-7521107644df",
+      "node_type": "math.subtract",
+      "position": [
+        -65.0,
+        -240.0
+      ],
+      "widget_values": {}
+    }
+  ],
+  "connections": []
+}

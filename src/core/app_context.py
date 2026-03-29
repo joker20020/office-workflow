@@ -284,7 +284,7 @@ class AppContext:
         # 7. 额外的单例管理器（如果实现了）
         engine_for_dependencies = get_node_engine()
         if init_package_manager is not None and get_package_manager is not None:
-            packages_dir = self.data_dir / "node_packages"
+            packages_dir = Path("node_packages")
             init_package_manager(
                 packages_dir=packages_dir,
                 database=self._database,

@@ -25,8 +25,8 @@ from src.core.app_context import AppContext
 from src.core.permission_manager import Permission
 from src.ui.main_window import MainWindow
 from src.utils.logger import get_logger
+from src.utils.error_handler import install_error_handler
 
-# 模块日志记录器
 _logger = get_logger(__name__)
 
 

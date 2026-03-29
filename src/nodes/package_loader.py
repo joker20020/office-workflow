@@ -16,6 +16,8 @@ Structure:
 
 import importlib.util
 import json
+import sys
+import types
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -193,6 +195,13 @@ class PackageLoader:
         module_prefix = _sanitize_module_name(manifest.id)
 
         try:
+            # Register parent module in sys.modules for relative imports to work
+            if module_prefix not in sys.modules:
+                parent_module = types.ModuleType(module_prefix)
+                parent_module.__file__ = None
+                parent_module.__path__ = [str(nodes_dir.parent)]
+                sys.modules[module_prefix] = parent_module
+
             spec = importlib.util.spec_from_file_location(
                 f"{module_prefix}._nodes_init",
                 init_file,
@@ -201,6 +210,7 @@ class PackageLoader:
                 return []
 
             init_module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = init_module
             spec.loader.exec_module(init_module)
 
             for attr_name in dir(init_module):

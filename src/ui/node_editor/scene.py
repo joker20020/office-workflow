@@ -261,20 +261,51 @@ class NodeEditorScene(QGraphicsScene):
         _logger.debug(f"添加连接图形项: {conn_item.connection_id[:8]}...")
 
     def remove_connection_item(self, connection_id: str) -> None:
-        """
-        移除连接图形项
+        """移除连接图形项并并重新启用目标节点的输入控件（LiteGraph模式）
 
-        Args:
-            connection_id: 连接ID
+        当连接被移除时，目标端口的Widget应该重新启用，允许用户再次手动输入值。
         """
         if connection_id not in self._connection_items:
             return
 
-        conn_item = self._connection_items.pop(connection_id)
-        self.removeItem(conn_item)
-        self.connection_removed.emit(connection_id)
+        conn_item = self._connection_items[connection_id]
 
-        _logger.debug(f"移除连接图形项: {connection_id[:8]}...")
+        # 获取连接信息用于恢复控件状态
+        conn = conn_item.connection
+        target_node_id = conn.target_node
+        target_port_name = conn.target_port
+
+        # 从端口移除连接引用
+        source_port = conn_item.source_port
+        target_port = conn_item.target_port
+        source_port.remove_connection(conn_item)
+        target_port.remove_connection(conn_item)
+
+        # 移除图形项
+        self.removeItem(conn_item)
+        del self._connection_items[connection_id]
+
+        # 重新启用目标节点的输入控件
+        target_node_item = self.get_node_item(target_node_id)
+        if target_node_item:
+            target_node_item.update_input_widget_state(target_port_name, has_connection=False)
+
+        self.connection_removed.emit(connection_id)
+        _logger.debug(f"移除连接图形项并恢复控件: {connection_id[:8]}...")
+
+    def _re_enable_widget_for_connection(self, connection: "Connection") -> None:
+        """
+        Re-enable widget for a connection being removed
+
+        Used when connection is removed without going through remove_connection_item(),
+        """
+        target_node_id = connection.target_node
+        target_port_name = connection.target_port
+
+        target_node_item = self.get_node_item(target_node_id)
+        if target_node_item:
+            target_node_item.update_input_widget_state(target_port_name, has_connection=False)
+            _logger.debug(f"通过helper恢复控件状态: {target_port_name}")
 
     def get_connection_item(self, connection_id: str) -> Optional["ConnectionGraphicsItem"]:
         """
@@ -435,7 +466,7 @@ class NodeEditorScene(QGraphicsScene):
                 if existing_conn:
                     # 保存已有连接信息，用于取消时恢复或删除
                     self._drag_existing_connection = existing_conn
-                    # 删除已有连接的UI（数据层暂时保留）
+                    self._re_enable_widget_for_connection(existing_conn)
                     conn_item = self._connection_items.pop(existing_conn.id, None)
                     if conn_item:
                         conn_item.cleanup()
@@ -489,6 +520,7 @@ class NodeEditorScene(QGraphicsScene):
         if end_port is None:
             # 如果从 input 端拖拽了已有连接，现在取消了，需要删除该连接
             if existing_conn and self._graph:
+                self._re_enable_widget_for_connection(existing_conn)
                 self._graph.remove_connection(existing_conn.id)
                 _logger.info(f"取消拖拽，删除已有连接: {existing_conn.id[:8]}...")
             else:
@@ -499,6 +531,7 @@ class NodeEditorScene(QGraphicsScene):
         if not self._can_connect(start_port, end_port):
             # 如果从 input 端拖拽了已有连接但连接失败，也需要删除
             if existing_conn and self._graph:
+                self._re_enable_widget_for_connection(existing_conn)
                 self._graph.remove_connection(existing_conn.id)
                 _logger.debug(f"连接失败，删除已有连接: {existing_conn.id[:8]}...")
             else:
@@ -543,6 +576,7 @@ class NodeEditorScene(QGraphicsScene):
                     # 删除UI连接
                     conn_item = self._connection_items.pop(conn.id, None)
                     if conn_item:
+                        self._re_enable_widget_for_connection(conn)
                         conn_item.cleanup()
                         self.removeItem(conn_item)
                     # 删除数据层连接

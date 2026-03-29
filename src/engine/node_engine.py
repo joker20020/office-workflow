@@ -36,10 +36,14 @@
     shutdown_node_engine()
 """
 
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+import hashlib
+import json
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set
 
 from src.core.event_bus import EventBus, EventType
 from src.engine.definitions import NodeDefinition, PortDefinition, PortType
@@ -52,7 +56,6 @@ from src.engine.node_graph import (
 )
 from src.utils.logger import get_logger
 
-# 模块日志记录器
 _logger = get_logger(__name__)
 
 
@@ -187,32 +190,56 @@ class ExecutionResult:
     """
     执行结果
 
-    封装单个节点的执行结果，包括：
-    - 执行状态（成功/失败）
-    - 输出值
-    - 错误信息
-    - 执行耗时
-
-    Attributes:
-        success: 是否执行成功
-        node_id: 节点ID
-        outputs: 输出值字典（成功时填充）
-        error: 错误信息（失败时填充）
-        duration_ms: 执行耗时（毫秒）
-
-    Example:
-        >>> result = engine.execute_node(node, graph)
-        >>> if result.success:
-        ...     print(f"输出: {result.outputs}")
-        ... else:
-        ...     print(f"错误: {result.error}")
-    """
+    封装单个节点的执行结果，"""
 
     success: bool
     node_id: str
     outputs: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     duration_ms: float = 0.0
+
+
+class ExecutionCache:
+    """
+    执行结果缓存
+
+    避免重复计算，"""
+
+    def __init__(self, ttl_seconds: int = 3600):
+        self._cache: Dict[str, Tuple[datetime, ExecutionResult]] = {}
+        self._ttl = ttl_seconds
+
+    def set(self, node_type: str, inputs: Dict, result: ExecutionResult) -> None:
+        key = self._make_cache_key(node_type, inputs)
+        self._cache[key] = (datetime.now(), result)
+
+    def get(self, node_type: str, inputs: Dict) -> Optional[ExecutionResult]:
+        key = self._make_cache_key(node_type, inputs)
+        if key not in self._cache:
+            return None
+        timestamp, result = self._cache.get(key)
+        if timestamp and result:
+            if datetime.now() - timestamp < timedelta(seconds=self._ttl):
+                return result
+        return None
+
+    def invalidate(self, node_type: str) -> None:
+        keys_to_remove = [k for k in self._cache if k.startswith(node_type)]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+    def _make_cache_key(self, node_type: str, inputs: Dict) -> str:
+        content = json.dumps(
+            {
+                "type": node_type,
+                "inputs": {k: str(v) for k, v in sorted(inputs.items()) if v is not None},
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(content.encode()).hexdigest()
 
 
 class NodeEngine:
@@ -627,6 +654,108 @@ class NodeEngine:
         )
 
         return results
+
+    def _get_execution_layers(self, graph: NodeGraph) -> List[List[Node]]:
+        """
+        获取执行层级（基于依赖关系的拓扑排序）
+
+        返回执行层级列表， 每层包含可并行执行的节点
+
+        使用Kahn算法进行拓扑排序
+        """
+        if not graph.nodes:
+            return []
+
+        # 构建依赖图
+        dependencies: Dict[str, Set[str]] = {}  # node_id -> 依赖的节点ID集合
+        in_degree: Dict[str, int] = {}  # node_id -> 入度
+
+        for node_id in graph.nodes:
+            in_degree[node_id] = 0
+            dependencies[node_id] = set()
+
+        for conn in graph.connections.values():
+            target = conn.target_node
+            source = conn.source_node
+            if target in dependencies:
+                dependencies[target].add(source)
+                in_degree[target] += 1
+
+        # Kahn算法进行拓扑排序
+        layers: List[List[Node]] = []
+        remaining = set(in_degree.keys())
+
+        while remaining:
+            ready = [nid for nid in remaining if in_degree[nid] == 0]
+
+            if not ready:
+                break  # 存在循环依赖
+
+            layers.append([graph.nodes[nid] for nid in ready])
+            remaining -= set(ready)
+
+            for nid in ready:
+                for dep in dependencies[nid]:
+                    if dep in remaining:
+                        in_degree[dep] -= 1
+
+        return layers
+
+    def execute_graph_parallel(
+        self,
+        graph: NodeGraph,
+        max_workers: int = 4,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, ExecutionResult]:
+        """
+        并行执行工作流图（优化版）
+
+        Args:
+            graph: 工作流图
+            max_workers: 最大并行工作数
+            progress_callback: 进度回调 (current, total)
+
+        Returns:
+            节点执行结果映射
+        """
+        if not graph.nodes:
+            return {}
+
+        layers = self._get_execution_layers(graph)
+        total_nodes = sum(len(layer) for layer in layers)
+        completed = 0
+        results: Dict[str, ExecutionResult] = {}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for layer_idx, layer in enumerate(layers):
+                _logger.info(f"执行层级 {layer_idx + 1}/{len(layers)}")
+
+                layer_results = []
+                for node in layer:
+                    future = executor.submit(self._execute_node_safe, node, graph)
+                    layer_results.append((node.id, future))
+
+                for node_id, future in layer_results:
+                    try:
+                        result = future.result()
+                        results[node_id] = result
+                        completed += 1
+                    except Exception as e:
+                        results[node_id] = ExecutionResult(
+                            success=False, node_id=node_id, error=str(e), duration_ms=0.0
+                        )
+
+                if progress_callback:
+                    progress_callback(completed, total_nodes)
+
+        return results
+
+    def _execute_node_safe(self, node: Node, graph: NodeGraph) -> ExecutionResult:
+        """安全执行单个节点（用于并行执行）"""
+        try:
+            return self.execute_node(node, graph)
+        except Exception as e:
+            return ExecutionResult(success=False, node_id=node.id, error=str(e), duration_ms=0.0)
 
     # ==================== 辅助方法 ====================
 
