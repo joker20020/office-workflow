@@ -1,0 +1,10 @@
+{
+    "id": "com.example.text-tools",
+    "name": "文本工具",
+    "version": "1.0.0",
+    "author": "测试作者",
+    "description": "文本处理工具包，包含文本拼接、大小写转换、字符串替换等节点",
+    "repository": "https://github.com/example/text-tools",
+    "branch": "main",
+    "nodes": ["text.join", "text.uppercase", "text.lowercase", "text.replace"]
+}

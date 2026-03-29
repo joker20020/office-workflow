@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Skill管理器 - 管理Agent技能包"""
+"""Skill管理器 - 管理Agent技能包
 
+注意：该类的实例采用模块级单例模式访问。请使用以下函数获取单例：
+- get_skill_manager()
+- init_skill_manager(db=None)
+- shutdown_skill_manager()
+- reset_skill_manager_for_testing()
+"""
+
+import threading
 import json
 from pathlib import Path
 from typing import Optional, List
@@ -27,6 +35,17 @@ class SkillManager:
     """
 
     def __init__(self, db: Optional[Database] = None):
+        """
+        Initialize SkillManager.
+
+        Deprecated: This constructor is deprecated for direct usage. Use
+        get_skill_manager() or init_skill_manager(db) to access the singleton
+        instance instead.
+
+        Args:
+            db: Optional Database instance. If None, a per-user default database
+                will be created.
+        """
         if db is None:
             db_path = Path.home() / ".office_tools" / "data.db"
             db = Database(db_path)
@@ -295,3 +314,40 @@ class SkillManager:
                 description_lines.append(desc)
 
         return " ".join(description_lines) if description_lines else ""
+
+
+# Singleton pattern implementation
+_global_SkillManager_instance: Optional["SkillManager"] = None
+_global_lock = threading.Lock()
+
+
+def get_skill_manager() -> "SkillManager":
+    """Get the singleton SkillManager instance."""
+    global _global_SkillManager_instance, _global_lock
+    if _global_SkillManager_instance is None:
+        with _global_lock:
+            if _global_SkillManager_instance is None:
+                _global_SkillManager_instance = SkillManager()
+    return _global_SkillManager_instance
+
+
+def init_skill_manager(db: Optional[Database] = None) -> "SkillManager":
+    """Initialize the singleton SkillManager with custom parameters."""
+    global _global_SkillManager_instance, _global_lock
+    with _global_lock:
+        if _global_SkillManager_instance is not None:
+            raise RuntimeError("SkillManager already initialized")
+        _global_SkillManager_instance = SkillManager(db=db)
+    return _global_SkillManager_instance
+
+
+def shutdown_skill_manager() -> None:
+    """Shutdown the singleton SkillManager."""
+    global _global_SkillManager_instance, _global_lock
+    with _global_lock:
+        _global_SkillManager_instance = None
+
+
+def reset_skill_manager_for_testing() -> None:
+    """Reset the singleton for testing purposes."""
+    shutdown_skill_manager()

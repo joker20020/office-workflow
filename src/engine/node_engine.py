@@ -17,19 +17,26 @@
    d. 存储输出
    e. 更新状态
 
-使用方式：
-    from src.engine.node_engine import NodeEngine, NodeRegistry
+使用方式（推荐使用单例模式）：
+    from src.engine.node_engine import get_node_engine, init_node_engine
 
-    # 创建引擎
-    engine = NodeEngine(event_bus=event_bus)
+    # 初始化全局引擎
+    engine = init_node_engine(event_bus=event_bus)
+
+    # 或获取已初始化的引擎
+    engine = get_node_engine()
 
     # 注册节点类型
     engine.register_node_type(text_join_definition)
 
     # 执行工作流
     results = engine.execute_graph(graph)
+
+    # 关闭
+    shutdown_node_engine()
 """
 
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -244,6 +251,13 @@ class NodeEngine:
 
         Args:
             event_bus: 事件总线（可选，用于发布执行事件）
+
+        Note:
+            推荐使用单例模式获取引擎实例：
+            - get_node_engine(): 获取全局实例
+            - init_node_engine(event_bus): 初始化全局实例
+
+            直接构造 NodeEngine() 仍可用于测试场景。
         """
         self._registry = NodeRegistry()
         self._event_bus = event_bus
@@ -702,3 +716,89 @@ class NodeEngine:
             >>> print(f"共有 {len(nodes)} 个可用节点")
         """
         return self._registry.get_all_for_agent()
+
+
+# ==================== 全局单例 ====================
+
+# 全局节点引擎实例
+_global_node_engine: Optional[NodeEngine] = None
+
+# 线程锁，确保单例初始化的线程安全
+_global_lock = threading.Lock()
+
+
+def get_node_engine() -> NodeEngine:
+    """
+    获取全局节点引擎实例
+
+    如果实例不存在，会自动创建一个默认实例（无 event_bus）。
+
+    Returns:
+        全局 NodeEngine 实例
+
+    Example:
+        >>> engine = get_node_engine()
+        >>> engine.register_node_type(my_node_def)
+    """
+    global _global_node_engine
+    if _global_node_engine is None:
+        with _global_lock:
+            # 双重检查锁定
+            if _global_node_engine is None:
+                _global_node_engine = NodeEngine()
+                _logger.info("全局节点引擎已自动创建")
+    return _global_node_engine
+
+
+def init_node_engine(event_bus: Optional[EventBus] = None) -> NodeEngine:
+    """
+    初始化全局节点引擎
+
+    Args:
+        event_bus: 事件总线（可选，用于发布执行事件）
+
+    Returns:
+        初始化后的全局节点引擎实例
+
+    Raises:
+        RuntimeError: 如果全局引擎已初始化
+
+    Example:
+        >>> from src.core.event_bus import EventBus
+        >>> event_bus = EventBus()
+        >>> engine = init_node_engine(event_bus=event_bus)
+    """
+    global _global_node_engine
+    with _global_lock:
+        if _global_node_engine is not None:
+            raise RuntimeError(
+                "全局节点引擎已初始化，请先调用 shutdown_node_engine() 或 reset_node_engine_for_testing()"
+            )
+        _global_node_engine = NodeEngine(event_bus=event_bus)
+        _logger.info("全局节点引擎初始化完成")
+        return _global_node_engine
+
+
+def shutdown_node_engine() -> None:
+    """
+    关闭全局节点引擎
+
+    清理全局实例，释放资源。
+    """
+    global _global_node_engine
+    with _global_lock:
+        if _global_node_engine is not None:
+            _global_node_engine = None
+            _logger.info("全局节点引擎已关闭")
+
+
+def reset_node_engine_for_testing() -> None:
+    """
+    重置全局节点引擎（仅用于测试）
+
+    强制清除全局实例，用于测试场景下的隔离。
+    """
+    global _global_node_engine
+    with _global_lock:
+        _global_node_engine = None
+        _logger.debug("全局节点引擎已重置（测试模式）")

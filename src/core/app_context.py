@@ -30,11 +30,66 @@ from typing import Optional
 
 from src.core.event_bus import EventBus, EventType
 from src.core.permission_manager import Permission, PermissionManager, PermissionSet
-from src.core.plugin_manager import PluginManager
-from src.engine.node_engine import NodeEngine
+from src.core.plugin_manager import (
+    PluginManager,
+    get_plugin_manager,
+    init_plugin_manager,
+    shutdown_plugin_manager,
+)
+from src.engine.node_engine import (
+    NodeEngine,
+    get_node_engine,
+    init_node_engine,
+    shutdown_node_engine,
+)
 from src.storage.database import Database
 from src.storage.repositories import PluginPermissionRepository
 from src.utils.logger import get_logger
+
+# Optional singletons (best-effort imports)
+try:
+    from src.nodes.package_manager import (
+        get_package_manager,
+        init_package_manager,
+        shutdown_package_manager,
+    )
+except Exception:
+    get_package_manager = None  # type: ignore
+    init_package_manager = None  # type: ignore
+    shutdown_package_manager = None  # type: ignore
+
+try:
+    from src.agent.api_key_manager import (
+        get_api_key_manager,
+        init_api_key_manager,
+        shutdown_api_key_manager,
+    )
+except Exception:
+    get_api_key_manager = None  # type: ignore
+    init_api_key_manager = None  # type: ignore
+    shutdown_api_key_manager = None  # type: ignore
+
+try:
+    from src.agent.mcp_server_manager import (
+        get_mcp_server_manager,
+        init_mcp_server_manager,
+        shutdown_mcp_server_manager,
+    )
+except Exception:
+    get_mcp_server_manager = None  # type: ignore
+    init_mcp_server_manager = None  # type: ignore
+    shutdown_mcp_server_manager = None  # type: ignore
+
+try:
+    from src.agent.skill_manager import (
+        get_skill_manager,
+        init_skill_manager,
+        shutdown_skill_manager,
+    )
+except Exception:
+    get_skill_manager = None  # type: ignore
+    init_skill_manager = None  # type: ignore
+    shutdown_skill_manager = None  # type: ignore
 
 # 模块日志记录器
 _logger = get_logger(__name__)
@@ -93,6 +148,11 @@ class AppContext:
         self._plugin_manager: Optional[PluginManager] = None
         self._database: Optional[Database] = None
         self._node_engine: Optional[NodeEngine] = None
+        # 后向兼容的单例引用容器（在后续通过单例 Getter 使用）
+        self._package_manager = None
+        self._api_key_manager = None
+        self._mcp_server_manager = None
+        self._skill_manager = None
 
         # 状态
         self._initialized: bool = False
@@ -115,10 +175,36 @@ class AppContext:
 
     @property
     def plugin_manager(self) -> PluginManager:
-        """获取插件管理器"""
-        if self._plugin_manager is None:
-            raise RuntimeError("AppContext 未初始化，请先调用 initialize()")
-        return self._plugin_manager
+        """获取插件管理器（单例）"""
+        return get_plugin_manager()
+
+    @property
+    def package_manager(self):
+        """获取节点包管理器（单例）"""
+        if get_package_manager is None:
+            raise RuntimeError("PackageManager 单例接口不可用")
+        return get_package_manager()
+
+    @property
+    def api_key_manager(self):
+        """获取 API Key 管理器（单例）"""
+        if get_api_key_manager is None:
+            raise RuntimeError("ApiKeyManager 单例接口不可用")
+        return get_api_key_manager()
+
+    @property
+    def mcp_server_manager(self):
+        """获取 MCP 服务器管理器（单例）"""
+        if get_mcp_server_manager is None:
+            raise RuntimeError("McpServerManager 单例接口不可用")
+        return get_mcp_server_manager()
+
+    @property
+    def skill_manager(self):
+        """获取 Skill 管理器（单例）"""
+        if get_skill_manager is None:
+            raise RuntimeError("SkillManager 单例接口不可用")
+        return get_skill_manager()
 
     @property
     def database(self) -> Database:
@@ -129,10 +215,8 @@ class AppContext:
 
     @property
     def node_engine(self) -> NodeEngine:
-        """获取节点引擎"""
-        if self._node_engine is None:
-            raise RuntimeError("AppContext 未初始化，请先调用 initialize()")
-        return self._node_engine
+        """获取节点引擎（单例）"""
+        return get_node_engine()
 
     @property
     def is_initialized(self) -> bool:
@@ -173,7 +257,12 @@ class AppContext:
         self._event_bus = EventBus()
         _logger.debug("事件总线初始化完成")
 
-        # 4. 初始化权限管理器
+        # 4. 初始化节点引擎单例（需要事件总线）
+        init_node_engine(event_bus=self._event_bus)
+        self._node_engine = get_node_engine()
+        _logger.debug("节点引擎单例初始化完成")
+
+        # 5. 初始化权限管理器
         from src.storage.repositories import PluginPermissionRepository, PluginRepository
 
         permission_repo = PluginPermissionRepository(self._database)
@@ -182,8 +271,8 @@ class AppContext:
         self._permission_manager.load_permissions()
         _logger.debug("权限管理器初始化完成")
 
-        # 5. 初始化插件管理器
-        self._plugin_manager = PluginManager(
+        # 6. 初始化插件管理器（使用单例初始化接口）
+        self._plugin_manager = init_plugin_manager(
             plugins_dir=self.plugins_dir,
             event_bus=self._event_bus,
             permission_manager=self._permission_manager,
@@ -192,9 +281,33 @@ class AppContext:
         )
         _logger.debug("插件管理器初始化完成")
 
-        # 6. 初始化节点引擎
-        self._node_engine = NodeEngine(event_bus=self._event_bus)
-        _logger.debug("节点引擎初始化完成")
+        # 7. 额外的单例管理器（如果实现了）
+        engine_for_dependencies = get_node_engine()
+        if init_package_manager is not None and get_package_manager is not None:
+            packages_dir = self.data_dir / "node_packages"
+            init_package_manager(
+                packages_dir=packages_dir,
+                database=self._database,
+                node_engine=engine_for_dependencies,
+                event_bus=self._event_bus,
+            )
+            self._package_manager = get_package_manager()
+            _logger.debug("包管理器初始化完成")
+
+        if init_api_key_manager is not None and get_api_key_manager is not None:
+            init_api_key_manager(db=self._database)
+            self._api_key_manager = get_api_key_manager()
+            _logger.debug("API Key 管理器初始化完成")
+
+        if init_mcp_server_manager is not None and get_mcp_server_manager is not None:
+            init_mcp_server_manager(db=self._database)
+            self._mcp_server_manager = get_mcp_server_manager()
+            _logger.debug("MCP Server 管理器初始化完成")
+
+        if init_skill_manager is not None and get_skill_manager is not None:
+            init_skill_manager(db=self._database)
+            self._skill_manager = get_skill_manager()
+            _logger.debug("Skill 管理器初始化完成")
 
         # 7. 标记为已初始化
         self._initialized = True
@@ -234,7 +347,25 @@ class AppContext:
         if self._database:
             self._database.close()
 
+        # 按照逆序关闭全局单例（避免引用问题）
+        if shutdown_skill_manager:
+            shutdown_skill_manager()
+        if shutdown_mcp_server_manager:
+            shutdown_mcp_server_manager()
+        if shutdown_api_key_manager:
+            shutdown_api_key_manager()
+        if shutdown_package_manager:
+            shutdown_package_manager()
+        if shutdown_plugin_manager:
+            shutdown_plugin_manager()
+        if shutdown_node_engine:
+            shutdown_node_engine()
+
         # 清理状态
+        self._package_manager = None
+        self._skill_manager = None
+        self._mcp_server_manager = None
+        self._api_key_manager = None
         self._plugin_manager = None
         self._node_engine = None
         self._database = None

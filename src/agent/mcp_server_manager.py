@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
-"""MCP服务配置管理器"""
+"""MCP服务配置管理器
 
+注意：该类的实例采用模块级单例模式访问。请使用以下函数获取单例：
+- get_mcp_server_manager()
+- init_mcp_server_manager(db=None)
+- shutdown_mcp_server_manager()
+- reset_mcp_server_manager_for_testing()
+"""
+
+import threading
 import json
 from typing import Optional, List
 
@@ -18,6 +26,17 @@ class McpServerManager:
     """MCP服务配置管理器"""
 
     def __init__(self, db: Optional[Database] = None):
+        """
+        Initialize McpServerManager.
+
+        Deprecated: This constructor is deprecated for direct usage. Use
+        get_mcp_server_manager() or init_mcp_server_manager(db) to access the
+        singleton instance instead.
+
+        Args:
+            db: Optional Database instance. If None, a per-user default database
+                will be created.
+        """
         if db is None:
             from pathlib import Path
 
@@ -242,3 +261,40 @@ class McpServerManager:
                 "transport": server.get("transport", "streamable_http"),
                 "url": server["url"],
             }
+
+
+# Singleton pattern implementation
+_global_McpServerManager_instance: Optional["McpServerManager"] = None
+_global_lock = threading.Lock()
+
+
+def get_mcp_server_manager() -> "McpServerManager":
+    """Get the singleton McpServerManager instance."""
+    global _global_lock, _global_McpServerManager_instance
+    if _global_McpServerManager_instance is None:
+        with _global_lock:
+            if _global_McpServerManager_instance is None:
+                _global_McpServerManager_instance = McpServerManager()
+    return _global_McpServerManager_instance
+
+
+def init_mcp_server_manager(db: Optional[Database] = None) -> "McpServerManager":
+    """Initialize the singleton McpServerManager with custom parameters."""
+    global _global_lock, _global_McpServerManager_instance
+    with _global_lock:
+        if _global_McpServerManager_instance is not None:
+            raise RuntimeError("McpServerManager already initialized")
+        _global_McpServerManager_instance = McpServerManager(db=db)
+    return _global_McpServerManager_instance
+
+
+def shutdown_mcp_server_manager() -> None:
+    """Shutdown the singleton McpServerManager."""
+    global _global_lock, _global_McpServerManager_instance
+    with _global_lock:
+        _global_McpServerManager_instance = None
+
+
+def reset_mcp_server_manager_for_testing() -> None:
+    """Reset the singleton for testing purposes."""
+    shutdown_mcp_server_manager()

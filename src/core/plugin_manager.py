@@ -24,6 +24,7 @@
 """
 
 import importlib.util
+import threading
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,75 @@ from src.utils.logger import get_logger
 
 # 模块日志记录器
 _logger = get_logger(__name__)
+
+_logger = get_logger(__name__)
+
+# ================================================================
+# Global singleton management for PluginManager
+# ================================================================
+_global_plugin_manager: Optional["PluginManager"] = None
+_global_lock = threading.Lock()
+
+
+def get_plugin_manager() -> "PluginManager":
+    """Return the global PluginManager singleton.
+
+    The singleton must be initialized via init_plugin_manager(...) first.
+    This function will raise a RuntimeError if called before initialization.
+    """
+    with _global_lock:
+        if _global_plugin_manager is None:
+            raise RuntimeError(
+                "PluginManager is not initialized. Call init_plugin_manager(...) to initialize the singleton before use."
+            )
+        return _global_plugin_manager
+
+
+def init_plugin_manager(
+    plugins_dir,
+    event_bus: Optional[EventBus] = None,
+    permission_manager: Optional[PermissionManager] = None,
+    repository: Optional[PluginPermissionRepository] = None,
+    plugin_repository: Optional[PluginRepository] = None,
+) -> "PluginManager":
+    """Initialize and return the global PluginManager singleton.
+
+    This should be called once during application startup before any use of
+    the singleton via get_plugin_manager(). Subsequent calls will re-create the
+    singleton (with a warning).
+    """
+    global _global_plugin_manager
+
+    with _global_lock:
+        if _global_plugin_manager is not None:
+            _logger.warning("PluginManager singleton is already initialized. Reinitializing...")
+
+        _global_plugin_manager = PluginManager(
+            plugins_dir=Path(plugins_dir),
+            event_bus=event_bus,
+            permission_manager=permission_manager,
+            repository=repository,
+            plugin_repository=plugin_repository,
+        )
+
+        _logger.info(f"PluginManager singleton initialized: {_global_plugin_manager.plugins_dir}")
+        return _global_plugin_manager
+
+
+def shutdown_plugin_manager() -> None:
+    """Shut down (clear) the global PluginManager singleton."""
+    global _global_plugin_manager
+    with _global_lock:
+        _global_plugin_manager = None
+        _logger.info("PluginManager singleton has been shut down.")
+
+
+def reset_plugin_manager_for_testing() -> None:
+    """Reset the global PluginManager singleton for testing purposes."""
+    with _global_lock:
+        global _global_plugin_manager
+        _global_plugin_manager = None
+        _logger.info("PluginManager singleton reset for testing.")
 
 
 @dataclass
@@ -108,8 +178,11 @@ class PluginManager:
         repository: Optional[PluginPermissionRepository] = None,
         plugin_repository: Optional[PluginRepository] = None,
     ):
-        """
-        初始化插件管理器
+        """Deprecated: Direct construction of PluginManager is discouraged.
+
+        This constructor remains for backward compatibility, but the preferred
+        workflow is to create a singleton via init_plugin_manager(...) and
+        access it via get_plugin_manager().
 
         Args:
             plugins_dir: 插件目录路径

@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from src.engine.definitions import NodeDefinition
 from src.engine.node_graph import NodeGraph, NodeState
-from src.engine.node_engine import NodeEngine
+from src.engine.node_engine import NodeEngine, get_node_engine
 from src.engine.serialization import serialize_graph, deserialize_graph
 from src.ui.node_editor.scene import NodeEditorScene
 from src.ui.node_editor.view import NodeEditorView
@@ -54,9 +54,11 @@ class NodeEditorPanel(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        self._engine = engine or NodeEngine()
+        # 使用全局单例引擎，若未提供 engine，则通过单例工厂获取
+        self._engine = engine or get_node_engine()
         self._event_bus = event_bus
         self._subscription_id: Optional[str] = None
+        self._unsubscription_id: Optional[str] = None
         self._graph: Optional[NodeGraph] = None
         self._setup_ui()
         self._connect_signals()
@@ -66,7 +68,10 @@ class NodeEditorPanel(QWidget):
             self._subscription_id = event_bus.subscribe(
                 EventType.NODE_REGISTERED, self._on_node_registered
             )
-            _logger.debug("NodeEditorPanel 已订阅 NODE_REGISTERED 事件")
+            self._unsubscription_id = event_bus.subscribe(
+                EventType.NODE_UNREGISTERED, self._on_node_unregistered
+            )
+            _logger.debug("NodeEditorPanel 已订阅 NODE_REGISTERED 和 NODE_UNREGISTERED 事件")
         self._populate_node_panel()
 
     def _setup_ui(self) -> None:
@@ -182,6 +187,7 @@ class NodeEditorPanel(QWidget):
             "math": "数学运算",
             "io": "输入输出",
             "general": "通用",
+            "data": "数据处理",
         }
 
         for cat, nodes in sorted(categories.items()):
@@ -204,12 +210,22 @@ class NodeEditorPanel(QWidget):
         _logger.info(f"收到节点注册事件: {node_type}")
         self._populate_node_panel()
 
+    def _on_node_unregistered(self, event) -> None:
+        """处理节点注销事件，刷新节点面板"""
+        node_type = event.data.get("node_type") if event.data else None
+        _logger.info(f"收到节点注销事件: {node_type}")
+        self._populate_node_panel()
+
     def unsubscribe_events(self) -> None:
         """取消订阅事件，用于清理资源"""
-        if self._event_bus and self._subscription_id:
-            self._event_bus.unsubscribe(self._subscription_id)
-            self._subscription_id = None
-            _logger.debug("NodeEditorPanel 已取消订阅节点注册事件")
+        if self._event_bus:
+            if self._subscription_id:
+                self._event_bus.unsubscribe(self._subscription_id)
+                self._subscription_id = None
+            if hasattr(self, "_unsubscription_id") and self._unsubscription_id:
+                self._event_bus.unsubscribe(self._unsubscription_id)
+                self._unsubscription_id = None
+            _logger.debug("NodeEditorPanel 已取消订阅节点事件")
 
     def _start_drag(self, supported_actions):
         item = self._node_tree.currentItem()

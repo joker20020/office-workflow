@@ -34,6 +34,44 @@ from src.utils.logger import get_logger
 _logger = get_logger(__name__)
 
 
+import threading
+
+
+from typing import Any, Callable, Dict, List, Optional
+
+
+_global_EventBus_instance: Optional["EventBus"] = None
+_global_lock = threading.Lock()
+
+
+def get_event_bus() -> "EventBus":
+    global _global_lock, _global_EventBus_instance
+    if _global_EventBus_instance is None:
+        with _global_lock:
+            if _global_EventBus_instance is None:
+                _global_EventBus_instance = EventBus()
+    return _global_EventBus_instance
+
+
+def init_event_bus() -> "EventBus":
+    global _global_lock, _global_EventBus_instance
+    with _global_lock:
+        if _global_EventBus_instance is not None:
+            raise RuntimeError("EventBus already initialized")
+        _global_EventBus_instance = EventBus()
+    return _global_EventBus_instance
+
+
+def shutdown_event_bus() -> None:
+    global _global_lock, _global_EventBus_instance
+    with _global_lock:
+        _global_EventBus_instance = None
+
+
+def reset_event_bus_for_testing() -> None:
+    shutdown_event_bus()
+
+
 class EventType(Enum):
     """
     事件类型枚举

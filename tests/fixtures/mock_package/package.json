@@ -1,0 +1,10 @@
+{
+    "id": "com.test.mock-nodes",
+    "name": "Mock Test Nodes",
+    "version": "1.0.0",
+    "author": "Test Author",
+    "description": "Test nodes for package manager tests",
+    "repository": "https://github.com/test/mock-nodes",
+    "branch": "main",
+    "nodes": ["mock.process", "mock.transform"]
+}

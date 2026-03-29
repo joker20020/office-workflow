@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""
-API密钥管理器
+"""API密钥管理器
 
-提供API密钥的加密存储和访问功能：
+提供API密钥的加密存储和访问功能。
+
 - 使用Fernet对称加密保护密钥
 - 基于机器特征生成加密密钥
 - 集成到SQLite数据库
 
-使用方式:
-    from src.agent.api_key_manager import ApiKeyManager
+注意：该类的实例采用模块级单例模式访问。请使用以下函数获取单例：
+- get_api_key_manager()
+- init_api_key_manager(db=None)
+- shutdown_api_key_manager()
+- reset_api_key_manager_for_testing()
 
-    manager = ApiKeyManager()
-    manager.store_key("openai", "sk-xxxxx")
-    key = manager.get_key("openai")
+使用方式示例请参考仓库内其他管理器的使用模式。
 """
 
+import threading
 import hashlib
 import os
 import platform
@@ -48,6 +50,18 @@ class ApiKeyManager:
     """
 
     def __init__(self, db: Optional[Database] = None):
+        """
+        Initialize ApiKeyManager.
+
+        Deprecated: This constructor is deprecated for direct usage. Use
+        get_api_key_manager() or init_api_key_manager(db) to access the
+        singleton instance instead.
+
+        Args:
+            db: Optional Database instance. If None, a per-user default database
+                will be created.
+        """
+        # Backward compatibility: keep existing constructor working
         if db is None:
             from pathlib import Path
 
@@ -325,3 +339,40 @@ class ApiKeyManager:
             session.commit()
             _logger.info(f"更新API密钥配置: {provider}/{model_name or 'default'} - {update_fields}")
             return True
+
+
+# Singleton pattern implementation
+_global_ApiKeyManager_instance: Optional["ApiKeyManager"] = None
+_global_lock = threading.Lock()
+
+
+def get_api_key_manager() -> "ApiKeyManager":
+    """Get the singleton ApiKeyManager instance."""
+    global _global_lock, _global_ApiKeyManager_instance
+    if _global_ApiKeyManager_instance is None:
+        with _global_lock:
+            if _global_ApiKeyManager_instance is None:
+                _global_ApiKeyManager_instance = ApiKeyManager()
+    return _global_ApiKeyManager_instance
+
+
+def init_api_key_manager(db: Optional[Database] = None) -> "ApiKeyManager":
+    """Initialize the singleton ApiKeyManager with custom parameters."""
+    global _global_lock, _global_ApiKeyManager_instance
+    with _global_lock:
+        if _global_ApiKeyManager_instance is not None:
+            raise RuntimeError("ApiKeyManager already initialized")
+        _global_ApiKeyManager_instance = ApiKeyManager(db=db)
+    return _global_ApiKeyManager_instance
+
+
+def shutdown_api_key_manager() -> None:
+    """Shutdown the singleton ApiKeyManager."""
+    global _global_lock, _global_ApiKeyManager_instance
+    with _global_lock:
+        _global_ApiKeyManager_instance = None
+
+
+def reset_api_key_manager_for_testing() -> None:
+    """Reset the singleton for testing purposes."""
+    shutdown_api_key_manager()

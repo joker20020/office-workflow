@@ -1,0 +1,10 @@
+{
+    "id": "com.example.data-helpers",
+    "name": "数据助手",
+    "version": "2.0.0",
+    "author": "测试作者",
+    "description": "数据处理助手包，包含列表操作、字典处理、类型转换等实用节点",
+    "repository": "https://github.com/example/data-helpers",
+    "branch": "main",
+    "nodes": ["data.list_length", "data.list_merge", "data.dict_get", "data.to_string"]
+}

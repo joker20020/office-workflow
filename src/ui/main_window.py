@@ -28,11 +28,22 @@ from PySide6.QtWidgets import (
 
 from src.agent import (
     AgentIntegration,
-    ApiKeyManager,
     WorkflowTools,
-    McpServerManager,
-    SkillManager,
 )
+from src.agent.api_key_manager import get_api_key_manager  # singleton getter
+from src.agent.mcp_server_manager import get_mcp_server_manager  # singleton getter
+from src.agent.skill_manager import get_skill_manager  # singleton getter
+from src.engine.node_engine import get_node_engine  # singleton getter
+
+try:
+    # Optional: try to import a package manager singleton if available
+    from src.nodes.package_manager import NodePackageManager, get_node_package_manager
+
+    _HAS_PACKAGE_MANAGER_SINGLETON = True
+except Exception:
+    NodePackageManager = None  # type: ignore
+    get_node_package_manager = None  # type: ignore
+    _HAS_PACKAGE_MANAGER_SINGLETON = False
 from src.agent.chat_history import ChatHistory
 from src.core.app_context import AppContext
 from src.core.permission_manager import Permission, PermissionSet
@@ -41,6 +52,8 @@ from src.ui.navigation_rail import NavigationRail
 from src.ui.node_editor import NodeEditorPanel
 from src.ui.chat import ChatPanel
 from src.ui.plugins import PluginPanel
+from src.ui.packages import PackagePanel
+from src.nodes.package_manager import NodePackageManager
 from src.engine.node_graph import NodeGraph
 from src.storage.database import Database
 from src.storage.repositories import (
@@ -72,7 +85,20 @@ class MainWindow(QMainWindow):
 
         self._pages: dict[str, QWidget] = {}
         self._app_context = app_context
-        self._node_engine = engine or NodeEngine()
+        event_bus = app_context.event_bus if app_context else None
+        # 使用全局单例引擎：若未传入 engine，则从单例工厂获取
+        if engine is not None:
+            self._node_engine = engine
+            # 将传入的引擎设置为全局单例，确保后续通过 singleton 获取到同一实例
+            try:
+                import src.engine.node_engine as _ne
+
+                with getattr(_ne, "_global_lock", threading.Lock()):
+                    _ne._global_node_engine = engine
+            except Exception:
+                pass
+        else:
+            self._node_engine = get_node_engine()
 
         # 如果提供了 AppContext，使用其数据库；否则创建独立的数据库
         if app_context is not None:
@@ -81,14 +107,41 @@ class MainWindow(QMainWindow):
             self._db = Database(Path("data") / "app.db")
             self._db.create_tables()
 
-        self._api_key_manager = ApiKeyManager(self._db)
-        self._mcp_manager = McpServerManager(self._db)
-        self._skill_manager = SkillManager(self._db)
+        # 使用单例获取各管理器，避免重复实例化
+        self._api_key_manager = get_api_key_manager()
+        self._mcp_manager = get_mcp_server_manager()
+        self._skill_manager = get_skill_manager()
         self._history_repository = ChatHistoryRepository(self._db)
         self._permission_repository = PluginPermissionRepository(self._db)
         self._plugin_repository = PluginRepository(self._db)
         self._node_graph = NodeGraph(name="默认工作流")
         self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
+
+        # 节点包管理器
+        packages_dir = Path("node_packages")
+        # 尝试使用全局单例的包管理器；若不存在则回退到本地实例化
+        if _HAS_PACKAGE_MANAGER_SINGLETON and get_node_package_manager is not None:
+            try:
+                self._package_manager = get_node_package_manager()
+            except Exception:
+                self._package_manager = NodePackageManager(
+                    packages_dir=packages_dir,
+                    database=self._db,
+                    node_engine=self._node_engine,
+                    event_bus=event_bus,
+                )
+        else:
+            self._package_manager = NodePackageManager(
+                packages_dir=packages_dir,
+                database=self._db,
+                node_engine=self._node_engine,
+                event_bus=event_bus,
+            )
+
+        # 启动时同步并加载已启用的节点包
+        self._package_manager.discover_packages()
+        loaded_count = self._package_manager.load_all_enabled()
+        _logger.info(f"已加载 {loaded_count} 个节点包")
 
         # 使用QueuedConnection确保跨线程信号正确传递（Agent在QThread中运行）
         self._workflow_tools.graph_changed.connect(
@@ -162,7 +215,7 @@ class MainWindow(QMainWindow):
         self.add_page("nodes", nodes_page)
         self.add_page("agent", agent_page)
         self.add_page("plugins", self._create_plugins_page())
-        self.add_page("packages", self._create_placeholder_page("节点包管理", "Phase 5"))
+        self.add_page("packages", self._create_packages_page())
 
         self._nav_rail.add_item("home", "首页", "🏠")
         self._nav_rail.add_item("nodes", "节点编辑器", "🔧")
@@ -212,6 +265,22 @@ class MainWindow(QMainWindow):
         self._plugin_panel.permission_edit_requested.connect(self._on_permission_edit_requested)
 
         return self._plugin_panel
+
+    def _create_packages_page(self) -> QWidget:
+        """创建节点包管理页面"""
+        self._package_panel = PackagePanel(package_manager=self._package_manager)
+
+        # 连接信号
+        self._package_panel.package_enabled_changed.connect(self._on_package_enabled_changed)
+        self._package_panel.package_installed.connect(self._on_package_installed)
+        self._package_panel.package_updated.connect(self._on_package_updated)
+        self._package_panel.package_deleted.connect(self._on_package_deleted)
+
+        # 初始加载包列表
+        packages = self._package_manager.discover_packages()
+        self._package_panel.set_packages(packages)
+
+        return self._package_panel
 
     def _create_placeholder_page(self, title: str, phase: str) -> QWidget:
         page = QWidget()
@@ -447,6 +516,25 @@ class MainWindow(QMainWindow):
             permissions = {}
 
         self._plugin_panel.set_plugins(discovered, enabled_status, permissions)
+
+    def _on_package_enabled_changed(self, package_id: str, enabled: bool) -> None:
+        """处理包启用状态改变事件"""
+        _logger.info(f"用户更改包启用状态: {package_id} -> {enabled}")
+
+    def _on_package_installed(self, package_id: str) -> None:
+        """处理包安装完成事件"""
+        _logger.info(f"包安装完成: {package_id}")
+        self._status_bar.showMessage(f"包已安装: {package_id}")
+
+    def _on_package_updated(self, package_id: str) -> None:
+        """处理包更新完成事件"""
+        _logger.info(f"包更新完成: {package_id}")
+        self._status_bar.showMessage(f"包已更新: {package_id}")
+
+    def _on_package_deleted(self, package_id: str) -> None:
+        """处理包删除完成事件"""
+        _logger.info(f"包已删除: {package_id}")
+        self._status_bar.showMessage(f"包已删除: {package_id}")
 
     def closeEvent(self, event) -> None:
         _logger.info("主窗口关闭")

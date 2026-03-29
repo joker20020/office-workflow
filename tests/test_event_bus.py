@@ -3,7 +3,7 @@
 
 import pytest
 
-from src.core.event_bus import EventBus, Event, EventType
+from src.core.event_bus import EventBus, Event, EventType, get_event_bus
 
 
 class TestEventType:
