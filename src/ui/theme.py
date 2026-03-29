@@ -364,25 +364,187 @@ class Theme:
 
     @classmethod
     def get_welcome_page_stylesheet(cls) -> str:
-        """获取欢迎页面样式表"""
+        """获取欢迎页面样式表（兼容旧代码）"""
+        return cls.get_home_page_stylesheet()
+
+    @classmethod
+    def get_home_page_stylesheet(cls) -> str:
+        """获取首页样式表"""
         return f"""
-            QLabel {{
-                padding: 40px;
+            HomePage {{
+                background-color: {cls.hex("background_primary")};
             }}
-            h1 {{
-                color: {cls.hex("accent_primary")};
-                font-size: 28px;
+        """
+
+    @classmethod
+    def get_home_header_stylesheet(cls) -> str:
+        """获取首页头部样式表"""
+        return f"""
+            QFrame#homeHeader {{
+                background-color: {cls.hex("background_secondary")};
+                border-bottom: 1px solid {cls.hex("border_primary")};
+                padding: 32px 48px;
             }}
-            h2 {{
+        """
+
+    @classmethod
+    def get_home_title_stylesheet(cls) -> str:
+        """获取首页标题样式表"""
+        return f"""
+            QLabel#homeTitle {{
                 color: {cls.hex("text_primary")};
-                font-size: 24px;
+                font-size: 32px;
+                font-weight: bold;
+                background-color: transparent;
             }}
-            p {{
+        """
+
+    @classmethod
+    def get_home_subtitle_stylesheet(cls) -> str:
+        """获取首页副标题样式表"""
+        return f"""
+            QLabel#homeSubtitle {{
+                color: {cls.hex("text_secondary")};
+                font-size: 14px;
+                background-color: transparent;
+                margin-top: 8px;
+            }}
+        """
+
+    @classmethod
+    def get_home_section_title_stylesheet(cls) -> str:
+        """获取首页区块标题样式表"""
+        return f"""
+            QLabel#sectionTitle {{
+                color: {cls.hex("text_primary")};
+                font-size: 18px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 16px 0 8px 0;
+            }}
+        """
+
+    @classmethod
+    def get_quick_action_card_stylesheet(cls, is_hover: bool = False) -> str:
+        """获取快速操作卡片样式表"""
+        bg = cls.hex("background_hover") if is_hover else cls.hex("background_secondary")
+        border = cls.hex("border_focus") if is_hover else cls.hex("border_primary")
+        return f"""
+            QFrame#quickActionCard {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 12px;
+                padding: 20px;
+            }}
+            QFrame#quickActionCard:hover {{
+                background-color: {cls.hex("background_hover")};
+                border-color: {cls.hex("border_focus")};
+            }}
+        """
+
+    @classmethod
+    def get_quick_action_icon_stylesheet(cls) -> str:
+        """获取快速操作图标样式表"""
+        return f"""
+            QLabel#quickActionIcon {{
+                font-size: 32px;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_quick_action_title_stylesheet(cls) -> str:
+        """获取快速操作标题样式表"""
+        return f"""
+            QLabel#quickActionTitle {{
+                color: {cls.hex("text_primary")};
+                font-size: 16px;
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_quick_action_desc_stylesheet(cls) -> str:
+        """获取快速操作描述样式表"""
+        return f"""
+            QLabel#quickActionDesc {{
+                color: {cls.hex("text_secondary")};
+                font-size: 12px;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_recent_item_stylesheet(cls, is_hover: bool = False) -> str:
+        """获取最近工作流项样式表"""
+        bg = cls.hex("background_hover") if is_hover else cls.hex("background_secondary")
+        return f"""
+            QFrame#recentItem {{
+                background-color: {bg};
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 8px;
+                padding: 12px 16px;
+            }}
+            QFrame#recentItem:hover {{
+                background-color: {cls.hex("background_hover")};
+            }}
+        """
+
+    @classmethod
+    def get_recent_item_title_stylesheet(cls) -> str:
+        """获取最近工作流标题样式表"""
+        return f"""
+            QLabel#recentItemTitle {{
+                color: {cls.hex("text_primary")};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_recent_item_meta_stylesheet(cls) -> str:
+        """获取最近工作流元信息样式表"""
+        return f"""
+            QLabel#recentItemMeta {{
                 color: {cls.hex("text_hint")};
+                font-size: 11px;
+                background-color: transparent;
             }}
-            .hint {{
+        """
+
+    @classmethod
+    def get_empty_state_stylesheet(cls) -> str:
+        """获取空状态样式表"""
+        return f"""
+            QLabel#emptyState {{
+                color: {cls.hex("text_hint")};
+                font-size: 14px;
+                padding: 40px;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_footer_stylesheet(cls) -> str:
+        """获取页脚样式表"""
+        return f"""
+            QFrame#homeFooter {{
+                background-color: {cls.hex("background_secondary")};
+                border-top: 1px solid {cls.hex("border_primary")};
+                padding: 12px 24px;
+            }}
+        """
+
+    @classmethod
+    def get_footer_status_stylesheet(cls) -> str:
+        """获取页脚状态样式表"""
+        return f"""
+            QLabel#footerStatus {{
                 color: {cls.hex("text_hint")};
                 font-size: 12px;
+                background-color: transparent;
             }}
         """
 

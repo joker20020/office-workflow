@@ -2,11 +2,11 @@
 """
 主窗口模块
 
-应用程序的主窗口， - NavigationRail: 左侧导航栏
+应用程序的主窗口，- NavigationRail: 左侧导航栏
  - QStackedWidget: 右侧内容区域
  - 状态栏
 
-使用方式：
+使用方式:
     from src.ui.main_window import MainWindow
 
     window = MainWindow()
@@ -14,6 +14,7 @@
 """
 
 from typing import Optional, Any
+from pathlib import Path
 
 import threading
 from PySide6.QtCore import Qt
@@ -30,19 +31,18 @@ from src.agent import (
     AgentIntegration,
     WorkflowTools,
 )
-from src.agent.api_key_manager import get_api_key_manager  # singleton getter
-from src.agent.mcp_server_manager import get_mcp_server_manager  # singleton getter
-from src.agent.skill_manager import get_skill_manager  # singleton getter
-from src.engine.node_engine import get_node_engine  # singleton getter
+from src.agent.api_key_manager import get_api_key_manager
+from src.agent.mcp_server_manager import get_mcp_server_manager
+from src.agent.skill_manager import get_skill_manager
+from src.engine.node_engine import get_node_engine
 
 try:
-    # Optional: try to import a package manager singleton if available
     from src.nodes.package_manager import NodePackageManager, get_node_package_manager
 
     _HAS_PACKAGE_MANAGER_SINGLETON = True
 except Exception:
-    NodePackageManager = None  # type: ignore
-    get_node_package_manager = None  # type: ignore
+    NodePackageManager = None
+    get_node_package_manager = None
     _HAS_PACKAGE_MANAGER_SINGLETON = False
 from src.agent.chat_history import ChatHistory
 from src.core.app_context import AppContext
@@ -51,6 +51,7 @@ from src.engine.node_engine import NodeEngine
 from src.ui.navigation_rail import NavigationRail
 from src.ui.node_editor import NodeEditorPanel
 from src.ui.chat import ChatPanel
+from src.ui.home_page import HomePage
 from src.ui.plugins import PluginPanel
 from src.ui.packages import PackagePanel
 from src.nodes.package_manager import NodePackageManager
@@ -64,11 +65,6 @@ from src.storage.repositories import (
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
 from src.ui.theme_manager import ThemeManager
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.core.plugin_manager import PluginManager
 
 _logger = get_logger(__name__)
 
@@ -87,10 +83,9 @@ class MainWindow(QMainWindow):
         self._pages: dict[str, QWidget] = {}
         self._app_context = app_context
         event_bus = app_context.event_bus if app_context else None
-        # 使用全局单例引擎：若未传入 engine，则从单例工厂获取
+
         if engine is not None:
             self._node_engine = engine
-            # 将传入的引擎设置为全局单例，确保后续通过 singleton 获取到同一实例
             try:
                 import src.engine.node_engine as _ne
 
@@ -101,14 +96,12 @@ class MainWindow(QMainWindow):
         else:
             self._node_engine = get_node_engine()
 
-        # 如果提供了 AppContext，使用其数据库；否则创建独立的数据库
         if app_context is not None:
             self._db = app_context.database
         else:
             self._db = Database(Path("data") / "app.db")
             self._db.create_tables()
 
-        # 使用单例获取各管理器，避免重复实例化
         self._api_key_manager = get_api_key_manager()
         self._mcp_manager = get_mcp_server_manager()
         self._skill_manager = get_skill_manager()
@@ -118,9 +111,7 @@ class MainWindow(QMainWindow):
         self._node_graph = NodeGraph(name="默认工作流")
         self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
 
-        # 节点包管理器
         packages_dir = Path("node_packages")
-        # 尝试使用全局单例的包管理器；若不存在则回退到本地实例化
         if _HAS_PACKAGE_MANAGER_SINGLETON and get_node_package_manager is not None:
             try:
                 self._package_manager = get_node_package_manager()
@@ -139,21 +130,12 @@ class MainWindow(QMainWindow):
                 event_bus=event_bus,
             )
 
-        # 启动时同步并加载已启用的节点包
-        self._package_manager.discover_packages()
+        # 加载所有已启用的节点包
         loaded_count = self._package_manager.load_all_enabled()
         _logger.info(f"已加载 {loaded_count} 个节点包")
 
-        # 使用QueuedConnection确保跨线程信号正确传递（Agent在QThread中运行）
-        self._workflow_tools.graph_changed.connect(
-            self._on_graph_changed, Qt.ConnectionType.QueuedConnection
-        )
-        _logger.info("graph_changed信号已连接（使用QueuedConnection）")
+        self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
 
-        # 连接节点值变化信号， 用于同步控件显示
-        self._workflow_tools.node_value_changed.connect(
-            self._on_node_value_changed, Qt.ConnectionType.QueuedConnection
-        )
         self._agent_integration = AgentIntegration(
             api_key_manager=self._api_key_manager,
             node_engine=self._node_engine,
@@ -172,50 +154,41 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         """设置UI"""
-        # 窗口属性
         self.setWindowTitle("办公小工具整合平台")
         self.setMinimumSize(1200, 800)
         self.resize(1280, 900)
 
-        # 中央组件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # 主布局
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(0, 1, 0, 0)
         main_layout.setSpacing(0)
 
-        # 左侧导航栏
         self._nav_rail = NavigationRail()
         self._nav_rail.currentChanged.connect(self._on_nav_changed)
         main_layout.addWidget(self._nav_rail)
 
-        # 右侧内容区域
         self._content_stack = QStackedWidget()
         self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         main_layout.addWidget(self._content_stack, 1)
 
-        # 状态栏（必须在 _setup_default_nav_items 之前创建）
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("就绪")
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
 
-        # 添加默认导航项
         self._setup_default_nav_items()
 
-        # 应用窗口样式 - 暗色主题
         self.setStyleSheet(Theme.get_main_window_stylesheet())
 
     def _setup_default_nav_items(self) -> None:
         """设置默认导航项"""
-        welcome_page = self._create_welcome_page()
+        home_page = self._create_home_page()
         nodes_page = self._create_nodes_page()
         agent_page = self._create_agent_page()
-        plugins_page = self._create_plugins_page()
 
-        self.add_page("home", welcome_page)
+        self.add_page("home", home_page)
         self.add_page("nodes", nodes_page)
         self.add_page("agent", agent_page)
         self.add_page("plugins", self._create_plugins_page())
@@ -229,26 +202,18 @@ class MainWindow(QMainWindow):
         self._nav_rail.add_item("packages", "节点包", "📦")
         self._nav_rail.add_item("settings", "设置", "⚙️")
 
-    def _create_welcome_page(self) -> QWidget:
-        page = QWidget()
-        layout = QHBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        welcome_label = QLabel(
-            "<h1>欢迎使用办公小工具整合平台</h1>"
-            "<p>这是一个基于节点编辑器的办公工具整合平台</p>"
-            "<p class='hint'>Phase 3: Agent集成已完成</p>"
-        )
-        welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        welcome_label.setStyleSheet(Theme.get_welcome_page_stylesheet())
-        layout.addWidget(welcome_label)
-
-        return page
+    def _create_home_page(self) -> QWidget:
+        """创建首页"""
+        self._home_page = HomePage()
+        self._home_page.navigate_requested.connect(self._on_home_navigate)
+        self._home_page.load_workflow_requested.connect(self._on_load_workflow_requested)
+        return self._home_page
 
     def _create_nodes_page(self) -> QWidget:
         event_bus = self._app_context.event_bus if self._app_context else None
         self._node_editor_panel = NodeEditorPanel(self._node_engine, event_bus)
         self._node_editor_panel.set_graph(self._node_graph)
+        self._node_editor_panel.workflow_saved.connect(self._on_workflow_saved)
         return self._node_editor_panel
 
     def _create_agent_page(self) -> QWidget:
@@ -266,7 +231,6 @@ class MainWindow(QMainWindow):
         """创建插件管理页面"""
         self._plugin_panel = PluginPanel()
 
-        # 连接信号
         self._plugin_panel.plugin_enabled_changed.connect(self._on_plugin_enabled_changed)
         self._plugin_panel.permission_edit_requested.connect(self._on_permission_edit_requested)
         self._plugin_panel.refresh_requested.connect(self._on_plugin_refresh_requested)
@@ -277,13 +241,11 @@ class MainWindow(QMainWindow):
         """创建节点包管理页面"""
         self._package_panel = PackagePanel(package_manager=self._package_manager)
 
-        # 连接信号
         self._package_panel.package_enabled_changed.connect(self._on_package_enabled_changed)
         self._package_panel.package_installed.connect(self._on_package_installed)
         self._package_panel.package_updated.connect(self._on_package_updated)
         self._package_panel.package_deleted.connect(self._on_package_deleted)
 
-        # 初始加载包列表
         packages = self._package_manager.discover_packages()
         self._package_panel.set_packages(packages)
 
@@ -294,17 +256,6 @@ class MainWindow(QMainWindow):
 
         self._settings_panel = SettingsPanel(theme_manager=self._theme_manager)
         return self._settings_panel
-
-    def _create_placeholder_page(self, title: str, phase: str) -> QWidget:
-        page = QWidget()
-        layout = QHBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        label = QLabel(f"<h2>{title}</h2><p class='hint'>将在 {phase} 实现</p>")
-        label.setStyleSheet(Theme.get_welcome_page_stylesheet())
-        layout.addWidget(label)
-
-        return page
 
     def add_page(self, page_id: str, page: QWidget) -> None:
         """
@@ -322,26 +273,6 @@ class MainWindow(QMainWindow):
         self._content_stack.addWidget(page)
 
         _logger.debug(f"添加页面: {page_id}")
-
-    def remove_page(self, page_id: str) -> bool:
-        """
-        移除页面
-
-        Args:
-            page_id: 页面ID
-
-        Returns:
-            是否成功移除
-        """
-        if page_id not in self._pages:
-            return False
-
-        page = self._pages.pop(page_id)
-        self._content_stack.removeWidget(page)
-        page.deleteLater()
-
-        _logger.debug(f"移除页面: {page_id}")
-        return True
 
     def show_page(self, page_id: str) -> None:
         """
@@ -362,9 +293,48 @@ class MainWindow(QMainWindow):
         self.show_page(item_id)
         self._status_bar.showMessage(f"当前: {item_id}")
 
-        # 切换到节点编辑器时，强制刷新显示
         if item_id == "nodes" and hasattr(self, "_node_editor_panel") and self._node_editor_panel:
             self._node_editor_panel.set_graph(self._node_graph)
+
+    def _on_home_navigate(self, item_id: str) -> None:
+        """处理首页导航请求"""
+        self._nav_rail.set_current(item_id)
+        self.show_page(item_id)
+        self._status_bar.showMessage(f"当前: {item_id}")
+
+    def _on_load_workflow_requested(self, page_id: str, file_path: str) -> None:
+        """处理加载工作流请求"""
+        if not Path(file_path).exists():
+            _logger.warning(f"工作流文件不存在: {file_path}")
+            return
+
+        self._nav_rail.set_current("nodes")
+        self._node_editor_panel.load_workflow(file_path)
+        self._status_bar.showMessage(f"已加载: {Path(file_path).name}")
+
+        if hasattr(self, "_home_page") and self._node_graph:
+            node_count = len(self._node_graph.nodes)
+            self._home_page.add_recent_workflow(
+                self._node_graph.id,
+                title=self._node_graph.name or "未命名工作流",
+                node_count=node_count,
+                file_path=file_path,
+            )
+
+    def _on_workflow_saved(self, workflow_id: str, file_path: str) -> None:
+        """处理工作流保存事件"""
+        if hasattr(self, "_home_page"):
+            node_count = len(self._node_graph.nodes) if self._node_graph else 0
+            self._home_page.add_recent_workflow(
+                workflow_id,
+                title=self._node_graph.name or "未命名工作流",
+                node_count=node_count,
+                file_path=file_path,
+            )
+        else:
+            _logger.info(f"工作流已保存: {self._node_graph.name or '未命名工作流'}")
+
+        self._status_bar.showMessage(f"工作流已保存: {self._node_graph.name or '未命名工作流'}")
 
     def set_status(self, message: str) -> None:
         """
@@ -483,6 +453,7 @@ class MainWindow(QMainWindow):
         from src.ui.plugins.permission_dialog import PermissionRequestDialog
 
         plugin_manager = self._app_context.plugin_manager
+
         discovered = plugin_manager.get_discovered_plugins()
 
         if plugin_name not in discovered:
@@ -496,13 +467,12 @@ class MainWindow(QMainWindow):
             else PermissionSet.empty()
         )
 
-        # 获取当前已授权的权限
         granted_permissions = self._permission_repository.get_permissions(plugin_name)
 
         plugin_info_dict = {
             "version": plugin_info.plugin_class.version if plugin_info.plugin_class else "?.?.?",
             "description": plugin_info.plugin_class.description if plugin_info.plugin_class else "",
-            "author": plugin_info.plugin_class.author if plugin_info.plugin_class else "",
+            "author": plugin_info.plugin_class.author if plugin_info.plugin_class else "Unknown",
         }
 
         dialog = PermissionRequestDialog(
@@ -517,7 +487,9 @@ class MainWindow(QMainWindow):
             granted = dialog.get_granted_permissions()
             if granted:
                 self._permission_repository.grant_permissions(plugin_name, granted)
-                _logger.info(f"权限已更新: {plugin_name} -> {[p.value for p in granted]}")
+                _logger.info(
+                    f"权限已更新: {plugin_name} -> {[p.value for p in granted_permissions]}"
+                )
             else:
                 self._permission_repository.revoke_all_permissions(plugin_name)
                 _logger.info(f"已清空所有权限: {plugin_name}")
@@ -570,10 +542,29 @@ class MainWindow(QMainWindow):
     def _on_theme_changed(self, theme_name: str) -> None:
         """主题变更时刷新UI"""
         self.setStyleSheet(Theme.get_main_window_stylesheet())
-        self._nav_rail.setStyleSheet(Theme.get_navigation_rail_stylesheet())
         self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
+
+        if hasattr(self, "_nav_rail"):
+            self._nav_rail.refresh_theme()
+
+        if hasattr(self, "_home_page") and self._home_page:
+            self._home_page.refresh_theme()
+
         if hasattr(self, "_settings_panel") and self._settings_panel:
             self._settings_panel.refresh_theme()
+
+        if hasattr(self, "_node_editor_panel") and self._node_editor_panel:
+            self._node_editor_panel.refresh_theme()
+
+        if hasattr(self, "_chat_panel") and self._chat_panel:
+            self._chat_panel.refresh_theme()
+
+        if hasattr(self, "_plugin_panel") and self._plugin_panel:
+            self._plugin_panel.refresh_theme()
+
+        if hasattr(self, "_package_panel") and self._package_panel:
+            self._package_panel.refresh_theme()
+
         theme_display = "深色" if theme_name == "dark" else "浅色"
         self._status_bar.showMessage(f"主题已切换为: {theme_display}")

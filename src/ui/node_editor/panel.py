@@ -45,7 +45,7 @@ class NodeEditorPanel(QWidget):
     """节点编辑器面板"""
 
     workflow_executed = Signal(bool)
-    workflow_saved = Signal(str)
+    workflow_saved = Signal(str, str)  # 添加保存完成信号
 
     def __init__(
         self,
@@ -338,6 +338,7 @@ class NodeEditorPanel(QWidget):
         # 默认保存路径
         workflows_dir = Path("workflows")
         workflows_dir.mkdir(parents=True, exist_ok=True)
+
         default_file = workflows_dir / f"{self._graph.name or '未命名工作流'}.json"
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -359,7 +360,7 @@ class NodeEditorPanel(QWidget):
             Path(file_path).write_text(json_str, encoding="utf-8")
 
             self._status_label.setText(f"已保存: {Path(file_path).name}")
-            self.workflow_saved.emit(self._graph.id)
+            self.workflow_saved.emit(self._graph.id, file_path)
             _logger.info(f"工作流已保存: {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存失败: {str(e)}")
@@ -456,3 +457,45 @@ class NodeEditorPanel(QWidget):
     @property
     def view(self) -> NodeEditorView:
         return self._view
+
+    def load_workflow(self, file_path: str) -> None:
+        """从文件加载工作流"""
+        from pathlib import Path
+
+        from src.engine.serialization import deserialize_graph
+
+        try:
+            json_str = Path(file_path).read_text(encoding="utf-8")
+            graph = deserialize_graph(json_str)
+            self.set_graph(graph)
+            self._status_label.setText(f"已加载: {Path(file_path).name}")
+            _logger.info(f"工作流已加载: {file_path}")
+        except json.JSONDecodeError as e:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(self, "错误", f"JSON格式无效: {str(e)}")
+            _logger.error(f"加载工作流失败: {e}", exc_info=True)
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(self, "错误", f"加载失败: {str(e)}")
+            _logger.error(f"加载工作流失败: {e}", exc_info=True)
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式"""
+        # 刷新工具栏
+        if hasattr(self, "_toolbar"):
+            self._toolbar.setStyleSheet(Theme.get_toolbar_stylesheet())
+
+        # 刷新节点面板
+        if hasattr(self, "_node_panel"):
+            self._node_panel.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {Theme.hex("background_secondary")};
+                    border-right: 1px solid {Theme.hex("border_primary")};
+                }}
+            """)
+
+        # 刷新状态标签
+        if hasattr(self, "_status_label"):
+            self._status_label.setStyleSheet(Theme.get_status_label_stylesheet())

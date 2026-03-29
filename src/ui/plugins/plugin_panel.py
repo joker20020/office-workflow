@@ -238,3 +238,19 @@ class PluginPanel(QWidget):
     def set_plugin_enabled(self, plugin_name: str, enabled: bool) -> None:
         if plugin_name in self._plugin_widgets:
             self._plugin_widgets[plugin_name].set_enabled(enabled)
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式"""
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.hex("background_primary")};
+            }}
+        """)
+        # 刷新标题
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+
+        # 刷新所有插件项
+        for widget in self._plugin_widgets.values():
+            if hasattr(widget, "refresh_theme"):
+                widget.refresh_theme()

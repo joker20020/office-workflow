@@ -88,20 +88,35 @@ class NavItem(QPushButton):
         layout.setContentsMargins(16, 0, 16, 0)
         layout.setSpacing(12)
 
-        # 图标标签
+        # 图标标签 - 存储为实例变量以便主题刷新
         if self._icon:
-            icon_label = QLabel(self._icon)
-            icon_label.setStyleSheet("font-size: 18px;")
-            layout.addWidget(icon_label)
+            self._icon_label = QLabel(self._icon)
+            self._icon_label.setStyleSheet("font-size: 18px;")
+            layout.addWidget(self._icon_label)
 
-        # 文字标签
-        text_label = QLabel(self._text)
-        layout.addWidget(text_label)
+        # 文字标签 - 存储为实例变量以便主题刷新
+        self._text_label = QLabel(self._text)
+        layout.addWidget(self._text_label)
 
         layout.addStretch()
 
         # 应用样式
         self._apply_style()
+
+    def refresh_theme(self) -> None:
+        """
+        刷新主题样式
+
+        当主题切换时调用此方法，更新导航项的样式和字体颜色。
+        """
+        # 重新应用导航项样式
+        self._apply_style()
+
+        # 刷新内部标签的样式（清除缓存，让父样式生效）
+        if hasattr(self, "_icon_label"):
+            self._icon_label.setStyleSheet("font-size: 18px;")
+        if hasattr(self, "_text_label"):
+            self._text_label.setStyleSheet("")  # 清除样式，继承父样式
 
     def _apply_style(self) -> None:
         """应用样式 - 使用主题系统"""
@@ -169,16 +184,16 @@ class NavigationRail(QWidget):
         main_layout.setContentsMargins(8, 16, 8, 16)
         main_layout.setSpacing(4)
 
-        # 标题区域
-        title_label = QLabel("办公小工具")
-        title_label.setStyleSheet(Theme.get_title_label_stylesheet())
-        main_layout.addWidget(title_label)
+        # 标题区域 - 存储为实例变量以便主题刷新
+        self._title_label = QLabel("办公小工具")
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        main_layout.addWidget(self._title_label)
 
-        # 分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet(Theme.get_separator_stylesheet())
-        main_layout.addWidget(separator)
+        # 分隔线 - 存储为实例变量以便主题刷新
+        self._separator = QFrame()
+        self._separator.setFrameShape(QFrame.Shape.HLine)
+        self._separator.setStyleSheet(Theme.get_separator_stylesheet())
+        main_layout.addWidget(self._separator)
 
         # 导航项容器
         self._items_widget = QWidget()
@@ -286,3 +301,26 @@ class NavigationRail(QWidget):
     def sizeHint(self) -> QSize:
         """建议尺寸"""
         return QSize(200, 600)
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式 - 更新所有子组件的样式和字体颜色"""
+        # 刷新导航栏容器样式
+        self.setStyleSheet(Theme.get_navigation_rail_stylesheet())
+
+        # 刷新标题标签
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+
+        # 刷新分隔线
+        if hasattr(self, "_separator"):
+            self._separator.setStyleSheet(Theme.get_separator_stylesheet())
+
+        # 刷新导航项容器
+        if hasattr(self, "_items_widget"):
+            self._items_widget.setStyleSheet(Theme.get_navigation_rail_container_stylesheet())
+
+        # 刷新所有导航项
+        for item in self._items.values():
+            item.refresh_theme()
+
+        _logger.debug("NavigationRail 主题已刷新")

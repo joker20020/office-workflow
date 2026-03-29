@@ -635,3 +635,18 @@ class PackagePanel(QWidget):
     def set_package_enabled(self, package_id: str, enabled: bool) -> None:
         if package_id in self._package_widgets:
             self._package_widgets[package_id].set_enabled(enabled)
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式"""
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.hex("background_primary")};
+            }}
+        """)
+        # 刷新标题
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+
+        # 刷新所有包项
+        for widget in self._package_widgets.values():
+            widget.refresh_theme()
