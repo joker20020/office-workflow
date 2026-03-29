@@ -153,18 +153,15 @@ def main() -> int:
         _logger.error(f"插件发现失败: {e}", exc_info=True)
         discovered = []
 
-    # 5. 创建并显示主窗口（需要在加载插件之前创建，以便权限对话框有父窗口）
+    # 5. 创建并显示主窗口
     window = MainWindow(engine=context.node_engine, app_context=context)
     window.show()
     _logger.info("主窗口显示")
 
-    # 6. 创建权限请求回调并加载启用的插件
+    # 6. 加载启用的插件（静默加载,
     try:
-        on_permission_request = _create_permission_request_callback()
-
         results = context.plugin_manager.load_enabled_plugins(
-            context=context,
-            on_permission_request=on_permission_request,
+            on_permission_request=None,
         )
 
         success_count = sum(1 for v in results.values() if v)

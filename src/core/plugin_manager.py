@@ -71,6 +71,7 @@ def init_plugin_manager(
     permission_manager: Optional[PermissionManager] = None,
     repository: Optional[PluginPermissionRepository] = None,
     plugin_repository: Optional[PluginRepository] = None,
+    context: Optional["AppContext"] = None,
 ) -> "PluginManager":
     """Initialize and return the global PluginManager singleton.
 
@@ -90,6 +91,7 @@ def init_plugin_manager(
             permission_manager=permission_manager,
             repository=repository,
             plugin_repository=plugin_repository,
+            context=context,
         )
 
         _logger.info(f"PluginManager singleton initialized: {_global_plugin_manager.plugins_dir}")
@@ -173,6 +175,7 @@ class PluginManager:
     def __init__(
         self,
         plugins_dir: Path,
+        context: Optional["AppContext"] = None,
         event_bus: Optional[EventBus] = None,
         permission_manager: Optional[PermissionManager] = None,
         repository: Optional[PluginPermissionRepository] = None,
@@ -186,17 +189,18 @@ class PluginManager:
 
         Args:
             plugins_dir: 插件目录路径
+            context: 应用上下文（初始化时设置，之后不可修改）
             event_bus: 事件总线（可选，用于发布插件事件）
             permission_manager: 权限管理器（可选，用于权限检查）
             repository: 持久化存储库（可选，用于持久化插件权限）
             plugin_repository: 持久化存储库（可选，用于持久化插件状态）
         """
         self.plugins_dir = Path(plugins_dir)
+        self._context = context
         self.event_bus = event_bus
         self.permission_manager = permission_manager
         self._repository = repository
         self._plugin_repository = plugin_repository
-        self._context: Optional["AppContext"] = None
 
         # 已发现的插件:插件名 -> PluginInfo
         self._discovered: Dict[str, PluginInfo] = {}
@@ -347,8 +351,8 @@ class PluginManager:
 
             # 权限检查（如果提供了权限管理器）
             if self.permission_manager:
-                required_perms = info.plugin_class.get_required_permissions()
-                self._check_and_grant_permissions(name, required_perms)
+                # required_perms = info.plugin_class.get_required_permissions()
+                # self._check_and_grant_permissions(name, required_perms)
                 granted_permissions = self.permission_manager.get_granted_permissions(name)
             else:
                 granted_permissions = set()
@@ -419,25 +423,21 @@ class PluginManager:
             required_perms: 所需权限集合
 
         Note:
-            Phase 1 简化实现：自动授权所有请求的权限
-            Phase 4 将实现用户确认对话框
+            权限必须由用户明确授权，不再自动授权。
+            如果插件没有所需权限，加载会失败。
         """
         if self.permission_manager is None:
             _logger.warning("权限管理器未初始化，跳过权限检查")
             return
 
-        # 获取已授权的权限
         granted = self.permission_manager.get_granted_permissions(plugin_name)
 
-        # 计算需要新授权的权限
-        new_perms = set(required_perms.permissions) - granted
+        missing_perms = set(required_perms.permissions) - granted
 
-        if new_perms:
-            # Phase 1: 自动授权（Phase 4 将添加用户确认）
-            self.permission_manager.grant_all(plugin_name, new_perms)
-
-            perm_values = [p.value for p in new_perms]
-            _logger.info(f"插件 '{plugin_name}' 获得权限: {perm_values}")
+        if missing_perms:
+            perm_values = [p.value for p in missing_perms]
+            _logger.warning(f"插件 '{plugin_name}' 缺少权限: {perm_values}。请通过权限对话框授权。")
+            raise PluginLoadError(f"插件 '{plugin_name}' 缺少权限: {perm_values}")
 
     def unload_plugin(self, name: str) -> bool:
         """
@@ -456,30 +456,42 @@ class PluginManager:
         instance = self._loaded[name]
 
         try:
-            # 调用生命周期卸载方法：优先 on_disable，其次兼容 on_unload
+            if self.permission_manager:
+                granted_permissions = self.permission_manager.get_granted_permissions(name)
+            else:
+                granted_permissions = set()
+
+            context = self._context
+            proxy = None
+            if context is not None:
+                from src.core.permission_proxy import PermissionProxy
+
+                proxy = PermissionProxy(
+                    context=context,
+                    plugin_name=name,
+                    granted_permissions=granted_permissions,
+                    config_repository=self._plugin_repository,
+                )
+
             if callable(getattr(instance, "on_disable", None)):
-                instance.on_disable()
+                instance.on_disable(proxy)
             else:
                 on_unload = getattr(instance, "on_unload", None)
                 if callable(on_unload):
-                    on_unload()
+                    on_unload(proxy)
                 else:
                     _logger.debug(f"插件 {name} 未实现 on_disable/on_unload() 方法")
 
-            # 清理状态
             instance._set_loaded(False, None)
 
-            # 从已加载列表移除
             del self._loaded[name]
 
-            # 更新发现信息
             if name in self._discovered:
                 self._discovered[name].instance = None
                 self._discovered[name].loaded = False
 
             _logger.info(f"插件卸载成功: {name}")
 
-            # 发布事件
             if self.event_bus:
                 self.event_bus.publish(
                     EventType.PLUGIN_UNLOADED,
@@ -603,7 +615,7 @@ class PluginManager:
 
         _logger.info("所有插件已卸载")
 
-    def refresh_plugins(self, context: Optional["AppContext"] = None) -> Dict[str, bool]:
+    def refresh_plugins(self) -> Dict[str, bool]:
         """
         Refresh all plugins by disabling, re-discovering, and re-enabling.
 
@@ -616,15 +628,9 @@ class PluginManager:
         4. Re-discover plugins from filesystem
         5. Re-enable plugins that were enabled before refresh
 
-        Args:
-            context: Application context for plugin initialization
-
         Returns:
             Dict mapping plugin names to success status
         """
-        # Step 0: Save context for enable_plugin to use
-        self._context = context
-
         # Step 1: Remember which plugins were enabled
         previously_enabled = set(self._loaded.keys())
         _logger.info(
@@ -733,7 +739,6 @@ class PluginManager:
 
     def load_enabled_plugins(
         self,
-        context: Optional["AppContext"] = None,
         on_permission_request: Optional[Callable[[str, Set[Permission]], bool]] = None,
     ) -> Dict[str, bool]:
         """
@@ -760,9 +765,6 @@ class PluginManager:
             _logger.warning("未设置 repository，无法读取启用状态")
             return results
 
-        # 保存 context 供 enable_plugin 使用
-        self._context = context
-
         for name, info in self._discovered.items():
             # 从数据库读取启用状态
             enabled = self._repository.get_plugin_enabled(name)
@@ -775,23 +777,18 @@ class PluginManager:
             # 检查是否需要新的权限授权
             needed_perms = self.check_permissions_needed(name)
 
-            if needed_perms:
-                # 需要新权限
-                if on_permission_request is not None:
-                    # 调用回调函数请求用户确认
-                    granted = on_permission_request(name, needed_perms)
+            if needed_perms and on_permission_request is not None:
+                # 有回调函数时，请求用户确认
+                granted = on_permission_request(name, needed_perms)
 
-                    if not granted:
-                        _logger.info(f"用户拒绝授权插件 '{name}' 的权限")
-                        results[name] = False
-                        continue
-                else:
-                    # 没有回调函数，自动授权
-                    _logger.info(f"自动授权插件 '{name}' 的权限: {[p.value for p in needed_perms]}")
+                if not granted:
+                    _logger.info(f"用户拒绝授权插件 '{name}' 的权限")
+                    results[name] = False
+                    continue
 
-            # 加载插件
+            # 加载插件（使用已有权限）
             try:
-                self.load_plugin(name, context)
+                self.load_plugin(name, self._context)
                 results[name] = True
                 _logger.info(f"插件 '{name}' 加载成功")
             except Exception as e:

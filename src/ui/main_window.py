@@ -63,6 +63,7 @@ from src.storage.repositories import (
 )
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
+from src.ui.theme_manager import ThemeManager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -162,6 +163,9 @@ class MainWindow(QMainWindow):
             history_repository=self._history_repository,
         )
 
+        self._theme_manager = ThemeManager.instance()
+        self._theme_manager.theme_changed.connect(self._on_theme_changed)
+
         self._setup_ui()
 
         _logger.info("MainWindow 初始化完成")
@@ -216,12 +220,14 @@ class MainWindow(QMainWindow):
         self.add_page("agent", agent_page)
         self.add_page("plugins", self._create_plugins_page())
         self.add_page("packages", self._create_packages_page())
+        self.add_page("settings", self._create_settings_page())
 
         self._nav_rail.add_item("home", "首页", "🏠")
         self._nav_rail.add_item("nodes", "节点编辑器", "🔧")
         self._nav_rail.add_item("agent", "AI 助手", "🤖")
         self._nav_rail.add_item("plugins", "插件管理", "🧩")
         self._nav_rail.add_item("packages", "节点包", "📦")
+        self._nav_rail.add_item("settings", "设置", "⚙️")
 
     def _create_welcome_page(self) -> QWidget:
         page = QWidget()
@@ -282,6 +288,12 @@ class MainWindow(QMainWindow):
         self._package_panel.set_packages(packages)
 
         return self._package_panel
+
+    def _create_settings_page(self) -> QWidget:
+        from src.ui.settings.settings_panel import SettingsPanel
+
+        self._settings_panel = SettingsPanel(theme_manager=self._theme_manager)
+        return self._settings_panel
 
     def _create_placeholder_page(self, title: str, phase: str) -> QWidget:
         page = QWidget()
@@ -456,7 +468,7 @@ class MainWindow(QMainWindow):
             _logger.warning("AppContext未初始化，无法刷新插件")
             return
         plugin_manager = self._app_context.plugin_manager
-        results = plugin_manager.refresh_plugins(self._app_context)
+        results = plugin_manager.refresh_plugins()
         self.refresh_plugin_panel()
         success_count = sum(1 for v in results.values() if v)
         total_count = len(results)
@@ -554,3 +566,14 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         _logger.info("主窗口关闭")
         super().closeEvent(event)
+
+    def _on_theme_changed(self, theme_name: str) -> None:
+        """主题变更时刷新UI"""
+        self.setStyleSheet(Theme.get_main_window_stylesheet())
+        self._nav_rail.setStyleSheet(Theme.get_navigation_rail_stylesheet())
+        self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
+        self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
+        if hasattr(self, "_settings_panel") and self._settings_panel:
+            self._settings_panel.refresh_theme()
+        theme_display = "深色" if theme_name == "dark" else "浅色"
+        self._status_bar.showMessage(f"主题已切换为: {theme_display}")

@@ -93,6 +93,20 @@ def reset_all_singletons():
     except ImportError:
         pass
 
+    try:
+        from src.core.config_manager import reset_config_manager_for_testing
+
+        reset_config_manager_for_testing()
+    except ImportError:
+        pass
+
+    try:
+        from src.ui.theme_manager import reset_theme_manager_for_testing
+
+        reset_theme_manager_for_testing()
+    except ImportError:
+        pass
+
 
 @pytest.fixture
 def tmp_path_fixture(tmp_path):

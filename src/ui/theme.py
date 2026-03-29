@@ -1,20 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-暗色主题配置模块
+主题配置模块
 
-集中管理所有UI组件的颜色常量和QSS样式，方便统一修改和维护。
+集中管理所有UI组件的颜色常量和QSS样式，支持暗色和亮色主题切换。
 
 使用方式：
-    from src.ui.theme import Theme
+    from src.ui.theme import Theme, ThemeType
+
+    # 切换主题
+    Theme.set_theme(ThemeType.LIGHT)
 
     # 获取颜色
-    color = Theme.COLORS['background']
+    color = Theme.hex('background_primary')
 
     # 获取样式表
     stylesheet = Theme.get_toolbar_stylesheet()
 """
 
+from enum import Enum
 from PySide6.QtGui import QColor
+
+
+class ThemeType(Enum):
+    """主题类型枚举"""
+
+    DARK = "dark"
+    LIGHT = "light"
 
 
 class Theme:
@@ -27,40 +38,88 @@ class Theme:
 
     # ==================== 颜色常量 ====================
 
-    COLORS = {
-        # 背景色
-        "background_primary": "#1e1e1e",  # 主背景色（最深）
-        "background_secondary": "#2d2d2d",  # 次级背景色
-        "background_tertiary": "#3d3d3d",  # 三级背景色
-        "background_hover": "#3a3a3a",  # 悬停背景色
-        "background_selected": "#454545",  # 选中背景色
-        "background_pressed": "#505050",  # 按下背景色
-        # 边框色
-        "border_primary": "#404040",  # 主边框色
-        "border_secondary": "#555555",  # 次级边框色
-        "border_focus": "#0078d4",  # 焦点边框色（蓝色）
-        # 文字色
-        "text_primary": "#e0e0e0",  # 主文字色（最亮）
-        "text_secondary": "#b0b0b0",  # 次级文字色
-        "text_disabled": "#666666",  # 禁用文字色
-        "text_hint": "#999999",  # 提示文字色
-        # 强调色
-        "accent_primary": "#90CAF9",  # 主强调色（浅蓝）
-        "accent_secondary": "#64B5F6",  # 次级强调色
-        "accent_hover": "#BBDEFB",  # 悬停强调色
-        # 状态色
-        "state_idle": "#616161",  # 空闲状态（灰色）
-        "state_running": "#FFC107",  # 运行状态（黄色）
-        "state_success": "#4CAF50",  # 成功状态（绿色）
-        "state_error": "#F44336",  # 错误状态（红色）
-        # 网格色
-        "grid_minor": "#2d2d2d",  # 细网格线
-        "grid_major": "#3c3c3c",  # 粗网格线
-        "grid_background": "#232326",  # 网格背景
+    DARK_COLORS = {
+        "background_primary": "#1e1e1e",
+        "background_secondary": "#2d2d2d",
+        "background_tertiary": "#3d3d3d",
+        "background_hover": "#3a3a3a",
+        "background_selected": "#454545",
+        "background_pressed": "#505050",
+        "border_primary": "#404040",
+        "border_secondary": "#555555",
+        "border_focus": "#0078d4",
+        "text_primary": "#e0e0e0",
+        "text_secondary": "#b0b0b0",
+        "text_disabled": "#666666",
+        "text_hint": "#999999",
+        "accent_primary": "#90CAF9",
+        "accent_secondary": "#64B5F6",
+        "accent_hover": "#BBDEFB",
+        "state_idle": "#616161",
+        "state_running": "#FFC107",
+        "state_success": "#4CAF50",
+        "state_error": "#F44336",
+        "grid_minor": "#2d2d2d",
+        "grid_major": "#3c3c3c",
+        "grid_background": "#232326",
     }
 
-    # QColor 对象缓存
-    _QCOLORS = {}
+    LIGHT_COLORS = {
+        "background_primary": "#f5f5f5",
+        "background_secondary": "#ffffff",
+        "background_tertiary": "#e8e8e8",
+        "background_hover": "#e0e0e0",
+        "background_selected": "#d0d0d0",
+        "background_pressed": "#c0c0c0",
+        "border_primary": "#d0d0d0",
+        "border_secondary": "#c0c0c0",
+        "border_focus": "#0078d4",
+        "text_primary": "#1a1a1a",
+        "text_secondary": "#666666",
+        "text_disabled": "#999999",
+        "text_hint": "#888888",
+        "accent_primary": "#1976D2",
+        "accent_secondary": "#2196F3",
+        "accent_hover": "#42A5F5",
+        "state_idle": "#9e9e9e",
+        "state_running": "#FFC107",
+        "state_success": "#4CAF50",
+        "state_error": "#F44336",
+        "grid_minor": "#e0e0e0",
+        "grid_major": "#c0c0c0",
+        "grid_background": "#f5f5f5",
+    }
+
+    _current_theme: ThemeType = ThemeType.DARK
+    _QCOLORS: dict = {}
+
+    @classmethod
+    def _get_colors(cls) -> dict:
+        """获取当前主题的颜色字典"""
+        if cls._current_theme == ThemeType.DARK:
+            return cls.DARK_COLORS
+        return cls.LIGHT_COLORS
+
+    @classmethod
+    def set_theme(cls, theme: ThemeType) -> None:
+        """
+        设置当前主题
+
+        Args:
+            theme: 主题类型（ThemeType.DARK 或 ThemeType.LIGHT）
+
+        Raises:
+            ValueError: 当传入无效的主题类型时
+        """
+        if not isinstance(theme, ThemeType):
+            raise ValueError(f"无效的主题类型: {theme}，必须是 ThemeType.DARK 或 ThemeType.LIGHT")
+        cls._current_theme = theme
+        cls._QCOLORS.clear()
+
+    @classmethod
+    def get_current_theme(cls) -> ThemeType:
+        """获取当前主题类型"""
+        return cls._current_theme
 
     @classmethod
     def color(cls, name: str) -> QColor:
@@ -73,10 +132,11 @@ class Theme:
         Returns:
             QColor 对象
         """
-        if name not in cls._QCOLORS:
-            hex_color = cls.COLORS.get(name, "#ffffff")
-            cls._QCOLORS[name] = QColor(hex_color)
-        return cls._QCOLORS[name]
+        cache_key = f"{cls._current_theme.value}_{name}"
+        if cache_key not in cls._QCOLORS:
+            hex_color = cls._get_colors().get(name, "#ffffff")
+            cls._QCOLORS[cache_key] = QColor(hex_color)
+        return cls._QCOLORS[cache_key]
 
     @classmethod
     def hex(cls, name: str) -> str:
@@ -89,7 +149,7 @@ class Theme:
         Returns:
             十六进制颜色字符串（如 '#2d2d2d'）
         """
-        return cls.COLORS.get(name, "#ffffff")
+        return cls._get_colors().get(name, "#ffffff")
 
     # ==================== 样式表 ====================
 

@@ -278,6 +278,7 @@ class AppContext:
             permission_manager=self._permission_manager,
             repository=permission_repo,
             plugin_repository=plugin_repo,
+            context=self,
         )
         _logger.debug("插件管理器初始化完成")
 

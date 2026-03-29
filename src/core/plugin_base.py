@@ -142,14 +142,20 @@ class PluginBase(ABC):
     @abstractmethod
     def on_enable(self, context: "PluginContext") -> None:
         """
-        Called when the plugin is enabled. This is the primary lifecycle hook.
+        Called when the plugin is enabled.
+
+        Args:
+            context: Plugin context (PermissionProxy or None), provides restricted access to app resources.
         """
         pass
 
     @abstractmethod
-    def on_disable(self) -> None:
+    def on_disable(self, context: Optional["PluginContext"] = None) -> None:
         """
         Called when the plugin is disabled.
+
+        Args:
+            context: Plugin context (PermissionProxy or None), provides restricted access to app resources.
         """
         pass
 
@@ -159,9 +165,9 @@ class PluginBase(ABC):
         self.on_enable(context)
 
     # 兼容旧接口：卸载时调用，内部会委托到 on_disable 以保持向后兼容
-    def on_unload(self) -> None:
+    def on_unload(self, context: Optional["PluginContext"] = None) -> None:
         """Deprecated: Use on_disable instead. Calls on_disable for backward compatibility."""
-        self.on_disable()
+        self.on_disable(context)
 
     @property
     def is_loaded(self) -> bool:

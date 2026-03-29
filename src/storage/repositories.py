@@ -878,19 +878,18 @@ class PluginPermissionRepository:
             plugin_name: 插件名称
 
         Returns:
-            是否启用（默认为 True）
+            是否启用（新插件默认禁用）
         """
         try:
             with self._database.session() as session:
                 stmt = select(PluginRecord.enabled).where(PluginRecord.name == plugin_name)
                 result = session.execute(stmt).scalar_one_or_none()
 
-                # 默认启用
-                return result if result is not None else True
+                return result if result is not None else False
 
         except Exception as e:
             _logger.error(f"获取插件状态失败: {e}", exc_info=True)
-            return True
+            return False
 
     def _ensure_plugin_exists(self, session: Session, plugin_name: str) -> None:
         """
@@ -947,16 +946,16 @@ class PluginRepository:
             plugin_name: 插件名称
 
         Returns:
-            是否启用（默认为 True）
+            是否启用（新插件默认禁用)
         """
         try:
             with self._database.session() as session:
                 stmt = select(PluginRecord.enabled).where(PluginRecord.name == plugin_name)
                 result = session.execute(stmt).scalar_one_or_none()
-                return result if result is not None else True
+                return result if result is not None else False
         except Exception as e:
             _logger.error(f"获取插件状态失败: {e}", exc_info=True)
-            return True
+            return False
 
     def set_enabled(self, plugin_name: str, enabled: bool) -> bool:
         """

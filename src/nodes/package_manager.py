@@ -1096,7 +1096,7 @@ _global_NodePackageManager_instance: Optional["NodePackageManager"] = None
 _global_lock = threading.Lock()
 
 
-def get_package_manager() -> "NodePackageManager":
+def get_node_package_manager() -> "NodePackageManager":
     """Get the singleton NodePackageManager instance."""
     global _global_NodePackageManager_instance, _global_lock
     if _global_NodePackageManager_instance is None:
@@ -1104,7 +1104,7 @@ def get_package_manager() -> "NodePackageManager":
     return _global_NodePackageManager_instance
 
 
-def init_package_manager(
+def init_node_package_manager(
     packages_dir: Path,
     database: Database,
     node_engine: NodeEngine,
@@ -1121,13 +1121,13 @@ def init_package_manager(
     return _global_NodePackageManager_instance
 
 
-def shutdown_package_manager() -> None:
+def shutdown_node_package_manager() -> None:
     """Shutdown the singleton NodePackageManager."""
     global _global_NodePackageManager_instance, _global_lock
     with _global_lock:
         _global_NodePackageManager_instance = None
 
 
-def reset_package_manager_for_testing() -> None:
+def reset_node_package_manager_for_testing() -> None:
     """Reset the singleton for testing purposes."""
-    shutdown_package_manager()
+    shutdown_node_package_manager()

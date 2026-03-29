@@ -977,13 +977,16 @@ class TestWidgetsPlugin(PluginBase):
 
     def on_enable(self, context):
         """插件启用时注册所有测试节点"""
-        for node_def in _ALL_DEFINITIONS:
-            context.node_engine.register_node_type(node_def)
-            _logger.info(f"注册测试节点: {node_def.node_type}")
+        try:
+            for node_def in _ALL_DEFINITIONS:
+                context.node_engine.register_node_type(node_def)
+                _logger.info(f"注册测试节点: {node_def.node_type}")
 
-        _logger.info(f"共注册 {len(_ALL_DEFINITIONS)} 个测试节点")
+            _logger.info(f"共注册 {len(_ALL_DEFINITIONS)} 个测试节点")
+        except Exception as e:
+            _logger.error(f"注册测试节点失败: {e}")
 
-    def on_disable(self):
+    def on_disable(self, context):
         """插件禁用时清理"""
         pass
 
