@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -97,31 +98,35 @@ class InstallWorker(QThread):
             self.finished.emit(False, str(e))
 
 
-class InstallDialog(QDialog):
+class InstallDialog(QDialog, ThemeAwareMixin):
     """安装新包对话框"""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self.setWindowTitle("安装节点包")
-        self.setFixedSize(450, 150)
+        self.setFixedSize(450, 170)
         self._setup_ui()
+        self._apply_styles()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        url_label = QLabel("Git 仓库地址:")
-        layout.addWidget(url_label)
+        self._url_label = QLabel("Git 仓库地址:")
+        layout.addWidget(self._url_label)
 
         self._url_input = QLineEdit()
         self._url_input.setPlaceholderText("https://github.com/user/node-package")
+        self._url_input.setMinimumHeight(28)
         layout.addWidget(self._url_input)
 
         branch_layout = QHBoxLayout()
-        branch_label = QLabel("分支:")
+        self._branch_label = QLabel("分支:")
         self._branch_input = QLineEdit("main")
         self._branch_input.setFixedWidth(100)
-        branch_layout.addWidget(branch_label)
+        self._branch_input.setMinimumHeight(28)
+        branch_layout.addWidget(self._branch_label)
         branch_layout.addWidget(self._branch_input)
         branch_layout.addStretch()
         layout.addLayout(branch_layout)
@@ -129,16 +134,25 @@ class InstallDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
+        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self._cancel_btn)
 
-        install_btn = QPushButton("安装")
-        install_btn.clicked.connect(self.accept)
-        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
-        btn_layout.addWidget(install_btn)
+        self._install_btn = QPushButton("安装")
+        self._install_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self._install_btn)
 
         layout.addLayout(btn_layout)
+
+    def _apply_styles(self):
+        self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+        self._url_label.setStyleSheet(f"color: {Theme.hex('text_primary')};")
+        self._branch_label.setStyleSheet(f"color: {Theme.hex('text_primary')};")
+        self._cancel_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
+
+    def refresh_theme(self):
+        self._apply_styles()
 
     def get_repository_url(self) -> str:
         return self._url_input.text().strip()
@@ -147,14 +161,16 @@ class InstallDialog(QDialog):
         return self._branch_input.text().strip() or "main"
 
 
-class LocalInstallDialog(QDialog):
+class LocalInstallDialog(QDialog, ThemeAwareMixin):
     """Dialog for installing packages from local directory"""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self.setWindowTitle("从本地安装节点包")
-        self.setFixedSize(500, 180)
+        self.setFixedSize(500, 200)
         self._setup_ui()
+        self._apply_styles()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -168,10 +184,10 @@ class LocalInstallDialog(QDialog):
         self._path_input.setPlaceholderText("选择包含 package.json 的目录")
         path_layout.addWidget(self._path_input)
 
-        browse_btn = QPushButton("浏览...")
-        browse_btn.setFixedWidth(70)
-        browse_btn.clicked.connect(self._on_browse)
-        path_layout.addWidget(browse_btn)
+        self._browse_btn = QPushButton("浏览...")
+        self._browse_btn.setFixedWidth(70)
+        self._browse_btn.clicked.connect(self._on_browse)
+        path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
 
         option_layout = QHBoxLayout()
@@ -187,16 +203,22 @@ class LocalInstallDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
+        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self._cancel_btn)
 
-        install_btn = QPushButton("安装")
-        install_btn.clicked.connect(self._on_install)
-        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
-        btn_layout.addWidget(install_btn)
+        self._install_btn = QPushButton("安装")
+        self._install_btn.clicked.connect(self._on_install)
+        btn_layout.addWidget(self._install_btn)
 
         layout.addLayout(btn_layout)
+
+    def _apply_styles(self):
+        self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+        self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
+
+    def refresh_theme(self):
+        self._apply_styles()
 
     def _on_browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -263,14 +285,14 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         name_layout = QHBoxLayout()
         name_layout.setSpacing(8)
 
-        name_label = QLabel(self._package_info.get("name", "Unknown"))
-        name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
-        name_layout.addWidget(name_label)
+        self._name_label = QLabel(self._package_info.get("name", "Unknown"))
+        self._name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
+        name_layout.addWidget(self._name_label)
 
         version = self._package_info.get("version", "?.?.?")
-        version_label = QLabel(f"v{version}")
-        version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
-        name_layout.addWidget(version_label)
+        self._version_label = QLabel(f"v{version}")
+        self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
+        name_layout.addWidget(self._version_label)
 
         self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
         self._status_label.setStyleSheet(
@@ -281,10 +303,13 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         name_layout.addWidget(self._status_label)
 
         nodes_count = len(self._package_info.get("nodes", []))
+        self._nodes_label = None
         if nodes_count > 0:
-            nodes_label = QLabel(f"{nodes_count} 个节点")
-            nodes_label.setStyleSheet(f"color: {Theme.hex('accent_primary')}; font-size: 11px;")
-            name_layout.addWidget(nodes_label)
+            self._nodes_label = QLabel(f"{nodes_count} 个节点")
+            self._nodes_label.setStyleSheet(
+                f"color: {Theme.hex('accent_primary')}; font-size: 11px;"
+            )
+            name_layout.addWidget(self._nodes_label)
 
         name_layout.addStretch()
         info_layout.addLayout(name_layout)
@@ -292,9 +317,9 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         desc = self._package_info.get("description", "无描述")
         if len(desc) > 80:
             desc = desc[:77] + "..."
-        desc_label = QLabel(desc)
-        desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
-        info_layout.addWidget(desc_label)
+        self._desc_label = QLabel(desc)
+        self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
+        info_layout.addWidget(self._desc_label)
 
         layout.addLayout(info_layout, 1)
 
@@ -338,7 +363,28 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         self._update_btn.setText("更新中..." if updating else "更新")
 
     def refresh_theme(self) -> None:
-        pass
+        """刷新主题样式"""
+        self.setStyleSheet(Theme.get_item_widget_base_stylesheet())
+        if hasattr(self, "_name_label"):
+            self._name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
+        if hasattr(self, "_version_label"):
+            self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
+        if hasattr(self, "_status_label"):
+            self._status_label.setStyleSheet(
+                Theme.get_item_status_enabled_stylesheet()
+                if self._is_enabled
+                else Theme.get_item_status_disabled_stylesheet()
+            )
+        if hasattr(self, "_nodes_label"):
+            self._nodes_label.setStyleSheet(
+                f"color: {Theme.hex('accent_primary')}; font-size: 11px;"
+            )
+        if hasattr(self, "_desc_label"):
+            self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
+        if hasattr(self, "_update_btn"):
+            self._update_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
+        if hasattr(self, "_delete_btn"):
+            self._delete_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
 
     @property
     def package_id(self) -> str:
@@ -388,51 +434,52 @@ class PackagePanel(QWidget, ThemeAwareMixin):
         )
         layout.addWidget(self._status_label)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
 
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
         self._list_layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout.setSpacing(0)
         self._list_layout.addStretch()
+        self._list_container.setStyleSheet(Theme.get_transparent_background_stylesheet())
 
-        scroll.setWidget(self._list_container)
-        layout.addWidget(scroll, 1)
+        self._scroll.setWidget(self._list_container)
+        layout.addWidget(self._scroll, 1)
 
         self.setStyleSheet(Theme.get_content_stack_stylesheet())
 
     def _create_header(self) -> QWidget:
-        header = QFrame()
-        header.setStyleSheet(Theme.get_header_frame_stylesheet())
-        header.setFixedHeight(50)
+        self._header = QFrame()
+        self._header.setStyleSheet(Theme.get_header_frame_stylesheet())
+        self._header.setFixedHeight(50)
 
-        layout = QHBoxLayout(header)
+        layout = QHBoxLayout(self._header)
         layout.setContentsMargins(16, 0, 16, 0)
 
-        title = QLabel("节点包管理")
-        title.setStyleSheet(Theme.get_title_label_stylesheet())
-        layout.addWidget(title)
+        self._title_label = QLabel("节点包管理")
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        layout.addWidget(self._title_label)
 
         layout.addStretch()
 
-        install_btn = QPushButton("安装新包")
-        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
-        install_btn.clicked.connect(self._on_install_clicked)
-        layout.addWidget(install_btn)
+        self._install_btn = QPushButton("安装新包")
+        self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
+        self._install_btn.clicked.connect(self._on_install_clicked)
+        layout.addWidget(self._install_btn)
 
-        install_local_btn = QPushButton("本地安装")
-        install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
-        install_local_btn.clicked.connect(self._on_install_local_clicked)
-        layout.addWidget(install_local_btn)
+        self._install_local_btn = QPushButton("本地安装")
+        self._install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
+        self._install_local_btn.clicked.connect(self._on_install_local_clicked)
+        layout.addWidget(self._install_local_btn)
 
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setFixedWidth(60)
-        refresh_btn.clicked.connect(self._on_refresh)
-        layout.addWidget(refresh_btn)
+        self._refresh_btn = QPushButton("刷新")
+        self._refresh_btn.setFixedWidth(60)
+        self._refresh_btn.clicked.connect(self._on_refresh)
+        layout.addWidget(self._refresh_btn)
 
-        return header
+        return self._header
 
     def set_package_manager(self, manager) -> None:
         self._package_manager = manager
@@ -629,6 +676,26 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             self._package_widgets[package_id].set_enabled(enabled)
 
     def refresh_theme(self) -> None:
+        """刷新主题样式"""
         self.setStyleSheet(Theme.get_content_stack_stylesheet())
+        if hasattr(self, "_header"):
+            self._header.setStyleSheet(Theme.get_header_frame_stylesheet())
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        if hasattr(self, "_progress_bar"):
+            self._progress_bar.setStyleSheet(Theme.get_progress_bar_stylesheet())
+        if hasattr(self, "_status_label"):
+            self._status_label.setStyleSheet(
+                f"color: {Theme.hex('accent_primary')}; padding: 4px 16px; "
+                f"background-color: {Theme.hex('background_secondary')};"
+            )
+        if hasattr(self, "_install_btn"):
+            self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
+        if hasattr(self, "_install_local_btn"):
+            self._install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
+        if hasattr(self, "_scroll"):
+            self._scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        if hasattr(self, "_list_container"):
+            self._list_container.setStyleSheet(Theme.get_transparent_background_stylesheet())
         for widget in self._package_widgets.values():
             widget.refresh_theme()

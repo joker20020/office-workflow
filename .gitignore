@@ -15,6 +15,7 @@ wheels/
 .opencode/
 
 data/
+docs/
 *.db
 *.sqlite3
 

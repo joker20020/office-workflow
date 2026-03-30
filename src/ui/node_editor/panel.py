@@ -152,9 +152,9 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        title = QLabel("节点")
-        title.setStyleSheet(Theme.get_node_panel_title_stylesheet())
-        layout.addWidget(title)
+        self._node_panel_title = QLabel("节点")
+        self._node_panel_title.setStyleSheet(Theme.get_node_panel_title_stylesheet())
+        layout.addWidget(self._node_panel_title)
 
         self._node_tree = QTreeWidget()
         self._node_tree.setHeaderHidden(True)
@@ -164,10 +164,10 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         self._node_tree.startDrag = self._start_drag
         layout.addWidget(self._node_tree)
 
-        hint = QLabel("双击或拖拽添加节点")
-        hint.setStyleSheet(Theme.get_hint_label_stylesheet())
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
+        self._node_panel_hint = QLabel("双击或拖拽添加节点")
+        self._node_panel_hint.setStyleSheet(Theme.get_hint_label_stylesheet())
+        self._node_panel_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._node_panel_hint)
 
         panel.setMinimumWidth(180)
         panel.setMaximumWidth(300)
@@ -485,14 +485,15 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
-        # 刷新工具栏
         if hasattr(self, "_toolbar"):
             self._toolbar.setStyleSheet(Theme.get_toolbar_stylesheet())
-
-        # 刷新节点面板
         if hasattr(self, "_node_panel"):
             self._node_panel.setStyleSheet(Theme.get_node_panel_container_stylesheet())
-
-        # 刷新状态标签
+        if hasattr(self, "_node_panel_title"):
+            self._node_panel_title.setStyleSheet(Theme.get_node_panel_title_stylesheet())
+        if hasattr(self, "_node_tree"):
+            self._node_tree.setStyleSheet(Theme.get_node_tree_stylesheet())
+        if hasattr(self, "_node_panel_hint"):
+            self._node_panel_hint.setStyleSheet(Theme.get_hint_label_stylesheet())
         if hasattr(self, "_status_label"):
             self._status_label.setStyleSheet(Theme.get_status_label_stylesheet())

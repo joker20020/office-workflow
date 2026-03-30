@@ -75,9 +75,9 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header = QFrame()
-        header.setStyleSheet(Theme.get_session_list_header_stylesheet())
-        header_layout = QHBoxLayout(header)
+        self._header = QFrame()
+        self._header.setStyleSheet(Theme.get_session_list_header_stylesheet())
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(12, 8, 12, 8)
 
         self._title_label = QLabel("会话历史")
@@ -86,13 +86,13 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
 
         header_layout.addStretch()
 
-        new_btn = QPushButton("+ 新建")
-        new_btn.setFixedSize(60, 24)
-        new_btn.clicked.connect(self.new_session_requested.emit)
-        new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
-        header_layout.addWidget(new_btn)
+        self._new_btn = QPushButton("+ 新建")
+        self._new_btn.setFixedSize(60, 24)
+        self._new_btn.clicked.connect(self.new_session_requested.emit)
+        self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
+        header_layout.addWidget(self._new_btn)
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         self._list_widget = QListWidget()
         self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
@@ -105,10 +105,10 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         delete_layout = QHBoxLayout(self._delete_area)
         delete_layout.setContentsMargins(8, 8, 8, 8)
 
-        delete_btn = QPushButton("删除选中会话")
-        delete_btn.clicked.connect(self._on_delete_clicked)
-        delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
-        delete_layout.addWidget(delete_btn)
+        self._delete_btn = QPushButton("删除选中会话")
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        self._delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
+        delete_layout.addWidget(self._delete_btn)
 
         layout.addWidget(self._delete_area)
 
@@ -146,21 +146,19 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             self._list_widget.addItem(item)
 
     def refresh_theme(self) -> None:
-        if hasattr(self, "_title_label"):
-            self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
-        if hasattr(self, "_list_widget"):
-            self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
-        if hasattr(self, "_delete_area"):
-            self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
-
-    def refresh_theme(self) -> None:
         """刷新主题样式"""
+        if hasattr(self, "_header"):
+            self._header.setStyleSheet(Theme.get_session_list_header_stylesheet())
         if hasattr(self, "_title_label"):
             self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
+        if hasattr(self, "_new_btn"):
+            self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
         if hasattr(self, "_list_widget"):
             self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
         if hasattr(self, "_delete_area"):
             self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
+        if hasattr(self, "_delete_btn"):
+            self._delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
 
 
 class ChatPanel(QWidget, ThemeAwareMixin):
@@ -212,32 +210,33 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             splitter.addWidget(self._session_list)
 
         # 右侧：聊天区域
-        chat_widget = QWidget()
-        chat_layout = QVBoxLayout(chat_widget)
+        self._chat_widget = QWidget()
+        chat_layout = QVBoxLayout(self._chat_widget)
         chat_layout.setContentsMargins(0, 0, 0, 0)
         chat_layout.setSpacing(0)
 
-        header = self._create_header()
-        chat_layout.addWidget(header)
+        self._header = self._create_header()
+        chat_layout.addWidget(self._header)
 
         self._scroll_area = QScrollArea()
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setStyleSheet(Theme.get_chat_scroll_area_stylesheet())
 
-        messages_widget = QWidget()
-        self._messages_layout = QVBoxLayout(messages_widget)
+        self._messages_widget = QWidget()
+        self._messages_layout = QVBoxLayout(self._messages_widget)
         self._messages_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._messages_layout.setSpacing(8)
         self._messages_layout.setContentsMargins(12, 12, 12, 12)
+        self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
 
-        self._scroll_area.setWidget(messages_widget)
+        self._scroll_area.setWidget(self._messages_widget)
         chat_layout.addWidget(self._scroll_area, 1)
 
-        input_area = self._create_input_area()
-        chat_layout.addWidget(input_area)
+        self._input_area = self._create_input_area()
+        chat_layout.addWidget(self._input_area)
 
-        chat_widget.setStyleSheet(Theme.get_chat_panel_stylesheet())
-        splitter.addWidget(chat_widget)
+        self._chat_widget.setStyleSheet(Theme.get_chat_panel_stylesheet())
+        splitter.addWidget(self._chat_widget)
 
         # 设置分割比例
         splitter.setSizes([200, 600])
@@ -245,10 +244,10 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         main_layout.addWidget(splitter)
 
     def _create_header(self) -> QWidget:
-        header = QFrame()
-        header.setFixedHeight(50)
-        header.setStyleSheet(Theme.get_chat_header_stylesheet())
-        layout = QHBoxLayout(header)
+        self._header_frame = QFrame()
+        self._header_frame.setFixedHeight(50)
+        self._header_frame.setStyleSheet(Theme.get_chat_header_stylesheet())
+        layout = QHBoxLayout(self._header_frame)
         layout.setContentsMargins(16, 0, 16, 0)
 
         title_layout = QVBoxLayout()
@@ -270,26 +269,26 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         layout.addStretch()
 
-        settings_btn = QPushButton("⚙ 设置")
-        settings_btn.setFixedHeight(28)
-        settings_btn.clicked.connect(self._open_settings)
-        settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._settings_btn = QPushButton("⚙ 设置")
+        self._settings_btn.setFixedHeight(28)
+        self._settings_btn.clicked.connect(self._open_settings)
+        self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        clear_btn = QPushButton("清空")
-        clear_btn.setFixedHeight(28)
-        clear_btn.clicked.connect(self._clear_chat)
-        clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
+        self._clear_btn = QPushButton("清空")
+        self._clear_btn.setFixedHeight(28)
+        self._clear_btn.clicked.connect(self._clear_chat)
+        self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
 
-        layout.addWidget(settings_btn)
-        layout.addWidget(clear_btn)
+        layout.addWidget(self._settings_btn)
+        layout.addWidget(self._clear_btn)
 
-        return header
+        return self._header_frame
 
     def _create_input_area(self) -> QWidget:
-        input_area = QFrame()
-        input_area.setMinimumHeight(120)
-        input_area.setMaximumHeight(200)
-        layout = QVBoxLayout(input_area)
+        self._input_area_frame = QFrame()
+        self._input_area_frame.setMinimumHeight(120)
+        self._input_area_frame.setMaximumHeight(200)
+        layout = QVBoxLayout(self._input_area_frame)
         layout.setContentsMargins(12, 8, 12, 8)
 
         self._input_text = QTextEdit()
@@ -310,7 +309,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         layout.addWidget(self._input_text, 1)
         layout.addLayout(button_layout)
 
-        return input_area
+        return self._input_area_frame
 
     def _connect_signals(self) -> None:
         self._input_text.textChanged.connect(self._on_text_changed)
@@ -570,3 +569,32 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             dialog.exec()
         else:
             _logger.warning("API密钥管理器未初始化")
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式"""
+        if hasattr(self, "_session_list"):
+            self._session_list.refresh_theme()
+        if hasattr(self, "_scroll_area"):
+            self._scroll_area.setStyleSheet(Theme.get_chat_scroll_area_stylesheet())
+        if hasattr(self, "_chat_widget"):
+            self._chat_widget.setStyleSheet(Theme.get_chat_panel_stylesheet())
+        if hasattr(self, "_header_frame"):
+            self._header_frame.setStyleSheet(Theme.get_chat_header_stylesheet())
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_chat_title_label_stylesheet())
+        if hasattr(self, "_status_label"):
+            self._status_label.setStyleSheet(Theme.get_chat_status_label_stylesheet())
+        if hasattr(self, "_api_key_combo"):
+            self._api_key_combo.setStyleSheet(Theme.get_combobox_stylesheet())
+        if hasattr(self, "_settings_btn"):
+            self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        if hasattr(self, "_clear_btn"):
+            self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
+        if hasattr(self, "_messages_widget"):
+            self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
+        if hasattr(self, "_input_area"):
+            self._input_area.setStyleSheet(Theme.get_chat_input_area_stylesheet())
+        if hasattr(self, "_input_text"):
+            self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
+        if hasattr(self, "_send_btn"):
+            self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())

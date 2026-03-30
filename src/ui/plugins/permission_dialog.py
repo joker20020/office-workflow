@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from src.core.permission_manager import Permission, PermissionSet
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -64,7 +65,7 @@ HIGH_RISK_PERMISSIONS = {
 }
 
 
-class PermissionItem(QWidget):
+class PermissionItem(QWidget, ThemeAwareMixin):
     """单个权限项控件（复选框 + 描述）"""
 
     def __init__(
@@ -75,6 +76,7 @@ class PermissionItem(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._permission = permission
         self._is_high_risk = is_high_risk
         self._checked = checked
@@ -100,6 +102,17 @@ class PermissionItem(QWidget):
         if self._is_high_risk:
             self._checkbox.setStyleSheet(f"color: {Theme.hex('state_warning')};")
 
+    def refresh_theme(self):
+        desc_text = PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value)
+        if self._is_high_risk:
+            desc_text = f"⚠️ {desc_text}"
+        self._desc_label.setText(f"    {desc_text}")
+        self._desc_label.setStyleSheet(f"color: {Theme.hex('text_hint')}; font-size: 11px;")
+        if self._is_high_risk:
+            self._checkbox.setStyleSheet(f"color: {Theme.hex('state_warning')};")
+        else:
+            self._checkbox.setStyleSheet(f"color: {Theme.hex('text_primary')};")
+
     def _get_permission_text(self) -> str:
         """获取权限显示文本"""
         text = self._permission.value
@@ -121,7 +134,7 @@ class PermissionItem(QWidget):
         return self._permission
 
 
-class PermissionRequestDialog(QDialog):
+class PermissionRequestDialog(QDialog, ThemeAwareMixin):
     """
     权限请求对话框
 
@@ -148,6 +161,7 @@ class PermissionRequestDialog(QDialog):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._plugin_name = plugin_name
         self._plugin_info = plugin_info
         self._requested_permissions = permissions
@@ -177,53 +191,50 @@ class PermissionRequestDialog(QDialog):
         layout.addWidget(title_label)
 
         # 插件信息
-        info_frame = QFrame()
-        info_frame.setStyleSheet(
+        self._info_frame = QFrame()
+        self._info_frame.setStyleSheet(
             f"QFrame {{ background-color: {Theme.hex('background_secondary')}; border-radius: 4px; padding: 8px; }}"
         )
-        info_layout = QVBoxLayout(info_frame)
+        info_layout = QVBoxLayout(self._info_frame)
         info_layout.setSpacing(4)
 
-        # 版本
         version = self._plugin_info.get("version", "未知")
-        version_label = QLabel(f"版本: {version}")
-        version_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
-        info_layout.addWidget(version_label)
+        author = self._plugin_info.get("author", "未知")
+        description = self._plugin_info.get("description", "无描述")
+
+        # 版本
+        self._version_label = QLabel(f"版本: {version}")
+        self._version_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
+        info_layout.addWidget(self._version_label)
 
         # 作者
-        author = self._plugin_info.get("author", "未知")
-        author_label = QLabel(f"作者: {author}")
-        author_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
-        info_layout.addWidget(author_label)
+        self._author_label = QLabel(f"作者: {author}")
+        self._author_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
+        info_layout.addWidget(self._author_label)
 
         # 描述
-        description = self._plugin_info.get("description", "无描述")
-        desc_label = QLabel(f"描述: {description}")
-        desc_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
-        desc_label.setWordWrap(True)
-        info_layout.addWidget(desc_label)
+        self._desc_label = QLabel(f"描述: {description}")
+        self._desc_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
+        self._desc_label.setWordWrap(True)
+        info_layout.addWidget(self._desc_label)
 
-        layout.addWidget(info_frame)
+        layout.addWidget(self._info_frame)
 
-        # 权限列表（滚动区域）
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
-            f"QScrollArea {{ border: 1px solid {Theme.hex('border_primary')}; border-radius: 4px; }}"
+            f"QScrollArea {{ border: 1px solid {Theme.hex('border_primary')}; border-radius: 4px; background-color: {Theme.hex('background_secondary')}; }}"
         )
 
         scroll_content = QWidget()
+        scroll_content.setStyleSheet(Theme.get_transparent_background_stylesheet())
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(8)
         scroll_layout.setContentsMargins(8, 8, 8, 8)
 
-        # 分类显示权限
-        # 先显示普通权限
-        normal_perms = [p for p in self._requested_permissions if p not in HIGH_RISK_PERMISSIONS]
-        # 后显示高风险权限
-        high_risk_perms = [p for p in self._requested_permissions if p in HIGH_RISK_PERMISSIONS]
+        normal_perms = self._requested_permissions - HIGH_RISK_PERMISSIONS
+        high_risk_perms = self._requested_permissions & HIGH_RISK_PERMISSIONS
 
-        # 普通权限
         for perm in sorted(normal_perms, key=lambda p: p.value):
             is_checked = perm in self._granted_permissions
             item = PermissionItem(perm, is_high_risk=False, checked=is_checked)
@@ -268,6 +279,13 @@ class PermissionRequestDialog(QDialog):
 
         # 应用样式
         self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+
+    def refresh_theme(self):
+        """刷新主题样式"""
+        self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+        # 刷新权限项样式
+        for item in self._permission_items:
+            item.refresh_theme()
 
     def _on_button_clicked(self, button) -> None:
         button_text = button.text()

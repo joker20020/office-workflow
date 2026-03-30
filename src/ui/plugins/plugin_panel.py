@@ -67,14 +67,14 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         name_layout = QHBoxLayout()
         name_layout.setSpacing(8)
 
-        name_label = QLabel(self._plugin_name)
-        name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
-        name_layout.addWidget(name_label)
+        self._name_label = QLabel(self._plugin_name)
+        self._name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
+        name_layout.addWidget(self._name_label)
 
         version = self._plugin_info.get("version", "?.?.?")
-        version_label = QLabel(f"v{version}")
-        version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
-        name_layout.addWidget(version_label)
+        self._version_label = QLabel(f"v{version}")
+        self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
+        name_layout.addWidget(self._version_label)
 
         self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
         status_style = (
@@ -89,9 +89,9 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         info_layout.addLayout(name_layout)
 
         description = self._plugin_info.get("description", "无描述")
-        desc_label = QLabel(description[:60] + ("..." if len(description) > 60 else ""))
-        desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
-        info_layout.addWidget(desc_label)
+        self._desc_label = QLabel(description[:60] + ("..." if len(description) > 60 else ""))
+        self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
+        info_layout.addWidget(self._desc_label)
 
         layout.addLayout(info_layout, 1)
 
@@ -127,7 +127,23 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         return self._plugin_name
 
     def refresh_theme(self) -> None:
+        """刷新主题样式"""
         self.setStyleSheet(Theme.get_item_widget_base_stylesheet())
+        if hasattr(self, "_name_label"):
+            self._name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
+        if hasattr(self, "_version_label"):
+            self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
+        if hasattr(self, "_status_label"):
+            status_style = (
+                Theme.get_item_status_enabled_stylesheet()
+                if self._is_enabled
+                else Theme.get_item_status_disabled_stylesheet()
+            )
+            self._status_label.setStyleSheet(status_style)
+        if hasattr(self, "_desc_label"):
+            self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
+        if hasattr(self, "_perms_btn"):
+            self._perms_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
 
 
 class PluginPanel(QWidget, ThemeAwareMixin):
@@ -149,30 +165,31 @@ class PluginPanel(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header = self._create_header()
-        layout.addWidget(header)
+        self._header = self._create_header()
+        layout.addWidget(self._header)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
 
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
         self._list_layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout.setSpacing(0)
         self._list_layout.addStretch()
+        self._list_container.setStyleSheet(Theme.get_transparent_background_stylesheet())
 
-        scroll.setWidget(self._list_container)
-        layout.addWidget(scroll, 1)
+        self._scroll.setWidget(self._list_container)
+        layout.addWidget(self._scroll, 1)
 
         self.setStyleSheet(Theme.get_content_stack_stylesheet())
 
     def _create_header(self) -> QWidget:
-        header = QFrame()
-        header.setStyleSheet(Theme.get_header_frame_stylesheet())
-        header.setFixedHeight(50)
+        self._header = QFrame()
+        self._header.setStyleSheet(Theme.get_header_frame_stylesheet())
+        self._header.setFixedHeight(50)
 
-        layout = QHBoxLayout(header)
+        layout = QHBoxLayout(self._header)
         layout.setContentsMargins(16, 0, 16, 0)
 
         self._title_label = QLabel("插件管理")
@@ -181,12 +198,12 @@ class PluginPanel(QWidget, ThemeAwareMixin):
 
         layout.addStretch()
 
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setFixedWidth(60)
-        refresh_btn.clicked.connect(self._on_refresh)
-        layout.addWidget(refresh_btn)
+        self._refresh_btn = QPushButton("刷新")
+        self._refresh_btn.setFixedWidth(60)
+        self._refresh_btn.clicked.connect(self._on_refresh)
+        layout.addWidget(self._refresh_btn)
 
-        return header
+        return self._header
 
     def _on_refresh(self) -> None:
         _logger.debug("用户请求刷新插件列表")
@@ -239,8 +256,15 @@ class PluginPanel(QWidget, ThemeAwareMixin):
             self._plugin_widgets[plugin_name].set_enabled(enabled)
 
     def refresh_theme(self) -> None:
+        """刷新主题样式"""
         self.setStyleSheet(Theme.get_content_stack_stylesheet())
-        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
-
+        if hasattr(self, "_header"):
+            self._header.setStyleSheet(Theme.get_header_frame_stylesheet())
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        if hasattr(self, "_scroll"):
+            self._scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        if hasattr(self, "_list_container"):
+            self._list_container.setStyleSheet(Theme.get_transparent_background_stylesheet())
         for widget in self._plugin_widgets.values():
             widget.refresh_theme()

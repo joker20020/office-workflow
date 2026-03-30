@@ -223,7 +223,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         self._scroll_area.setStyleSheet(Theme.get_home_scroll_area_stylesheet())
 
         self._scroll_content = QWidget()
-        self._scroll_content.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        self._scroll_content.setStyleSheet(Theme.get_transparent_background_stylesheet())
         content_layout = QVBoxLayout(self._scroll_content)
         content_layout.setContentsMargins(48, 0, 48, 24)
         content_layout.setSpacing(0)
@@ -432,7 +432,19 @@ class HomePage(QWidget, ThemeAwareMixin):
         if hasattr(self, "_scroll_area"):
             self._scroll_area.setStyleSheet(Theme.get_home_scroll_area_stylesheet())
         if hasattr(self, "_scroll_content"):
-            self._scroll_content.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+            self._scroll_content.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_quick_actions_widget"):
+            self._quick_actions_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_recent_section"):
+            self._recent_section.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_recent_list_widget"):
+            self._recent_list_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_quick_actions_widget"):
+            self._quick_actions_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_recent_section"):
+            self._recent_section.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        if hasattr(self, "_recent_list_widget"):
+            self._recent_list_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
@@ -441,6 +453,8 @@ class HomePage(QWidget, ThemeAwareMixin):
 
         # 刷新头部
         self._header.setStyleSheet(Theme.get_home_header_stylesheet())
+        self._title_label.setStyleSheet(Theme.get_home_title_stylesheet())
+        self._subtitle_label.setStyleSheet(Theme.get_home_subtitle_stylesheet())
 
         # 刷新快速操作卡片
         for card in self._quick_action_cards:

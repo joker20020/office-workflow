@@ -44,21 +44,30 @@ class SettingsPanel(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(Theme.get_settings_dialog_stylesheet())
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+
+        self._content_widget = QWidget()
+        self._content_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
+        content_layout = QVBoxLayout(self._content_widget)
         content_layout.setContentsMargins(24, 24, 24, 24)
         content_layout.setSpacing(24)
+
         title_label = QLabel("设置")
         title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         content_layout.addWidget(title_label)
+
         appearance_frame = self._create_appearance_group()
         content_layout.addWidget(appearance_frame)
+
         content_layout.addStretch()
-        scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
+
+        self._scroll_area.setWidget(self._content_widget)
+        layout.addWidget(self._scroll_area)
+
+        # 应用整体背景样式
+        self.setStyleSheet(Theme.get_content_stack_stylesheet())
 
     def _create_appearance_group(self) -> QFrame:
         self._appearance_frame = QFrame()
@@ -108,15 +117,11 @@ class SettingsPanel(QWidget, ThemeAwareMixin):
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
-        self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
-        if hasattr(self, "_appearance_frame"):
-            self._appearance_frame.setStyleSheet(Theme.get_settings_frame_stylesheet())
-        if hasattr(self, "_group_title"):
-            self._group_title.setStyleSheet(Theme.get_settings_group_title_stylesheet())
-        if hasattr(self, "_theme_label"):
-            self._theme_label.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
-        if hasattr(self, "_theme_combo"):
-            self._theme_combo.setStyleSheet(Theme.get_combobox_stylesheet())
+        self.setStyleSheet(Theme.get_content_stack_stylesheet())
+        if hasattr(self, "_scroll_area"):
+            self._scroll_area.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        if hasattr(self, "_content_widget"):
+            self._content_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
         if hasattr(self, "_appearance_frame"):
             self._appearance_frame.setStyleSheet(Theme.get_settings_frame_stylesheet())
         if hasattr(self, "_group_title"):

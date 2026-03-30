@@ -728,13 +728,6 @@ class Theme:
             QPushButton {{
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
-                border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background-color: {cls.hex("background_selected")};
             }}
         """
 
@@ -782,6 +775,27 @@ class Theme:
             }}
             QDialogButtonBox QPushButton:hover {{
                 background-color: {cls.hex("background_selected")};
+            }}
+            QLabel {{
+                color: {cls.hex("text_primary")};
+            }}
+            QCheckBox {{
+                color: {cls.hex("text_primary")};
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid {cls.hex("grid_major")};
+                background-color: {cls.hex("background_input")};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {cls.hex("border_focus")};
+                border-color: {cls.hex("border_focus")};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {cls.hex("border_hover")};
             }}
         """
 
@@ -852,14 +866,11 @@ class Theme:
         """
 
     @classmethod
-    def get_message_content_label_stylesheet(cls) -> str:
+    def get_chat_messages_widget_stylesheet(cls) -> str:
+        """获取聊天消息区域样式表"""
         return f"""
-            QLabel {{
-                background-color: {cls.hex("background_secondary")};
-                color: {cls.hex("text_primary")};
-                border: 1px solid {cls.hex("border_primary")};
-                border-radius: 4px;
-                padding: 8px;
+            QWidget {{
+                background-color: {cls.hex("background_primary")};
             }}
         """
 
