@@ -99,9 +99,7 @@ office/
 
 ## 开发文档
 
-如果你想开发插件或自定义节点包，请参阅 [开发指南](docs/DEVELOPMENT.md)。
-
-详细的架构设计请参阅 [架构文档](docs/ARCHITECTURE.md)。
+如果你想开发插件或自定义节点包，请参阅 [开发指南](DEVELOPMENT.md)。
 
 ## 许可证
 
