@@ -135,7 +135,7 @@ class InstallDialog(QDialog):
 
         install_btn = QPushButton("安装")
         install_btn.clicked.connect(self.accept)
-        install_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
         btn_layout.addWidget(install_btn)
 
         layout.addLayout(btn_layout)
@@ -193,7 +193,7 @@ class LocalInstallDialog(QDialog):
 
         install_btn = QPushButton("安装")
         install_btn.clicked.connect(self._on_install)
-        install_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
         btn_layout.addWidget(install_btn)
 
         layout.addLayout(btn_layout)
@@ -264,24 +264,26 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         name_layout.setSpacing(8)
 
         name_label = QLabel(self._package_info.get("name", "Unknown"))
-        name_label.setStyleSheet("font-weight: bold; color: #e0e0e0;")
+        name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
         name_layout.addWidget(name_label)
 
         version = self._package_info.get("version", "?.?.?")
         version_label = QLabel(f"v{version}")
-        version_label.setStyleSheet("color: #888888; font-size: 11px;")
+        version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
         name_layout.addWidget(version_label)
 
         self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
         self._status_label.setStyleSheet(
-            f"color: {'#4CAF50' if self._is_enabled else '#666666'}; font-size: 11px;"
+            Theme.get_item_status_enabled_stylesheet()
+            if self._is_enabled
+            else Theme.get_item_status_disabled_stylesheet()
         )
         name_layout.addWidget(self._status_label)
 
         nodes_count = len(self._package_info.get("nodes", []))
         if nodes_count > 0:
             nodes_label = QLabel(f"{nodes_count} 个节点")
-            nodes_label.setStyleSheet("color: #90CAF9; font-size: 11px;")
+            nodes_label.setStyleSheet(f"color: {Theme.hex('accent_primary')}; font-size: 11px;")
             name_layout.addWidget(nodes_label)
 
         name_layout.addStretch()
@@ -291,34 +293,24 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         if len(desc) > 80:
             desc = desc[:77] + "..."
         desc_label = QLabel(desc)
-        desc_label.setStyleSheet("color: #999999; font-size: 11px;")
+        desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
         info_layout.addWidget(desc_label)
 
         layout.addLayout(info_layout, 1)
 
         self._update_btn = QPushButton("更新")
         self._update_btn.setFixedWidth(50)
-        self._update_btn.setStyleSheet("color: #90CAF9;")
+        self._update_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
         self._update_btn.clicked.connect(self._on_update_clicked)
         layout.addWidget(self._update_btn)
 
         self._delete_btn = QPushButton("删除")
         self._delete_btn.setFixedWidth(50)
-        self._delete_btn.setStyleSheet("color: #f44336;")
+        self._delete_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         layout.addWidget(self._delete_btn)
 
-        self.setStyleSheet(
-            """
-            PackageItemWidget {
-                background-color: transparent;
-                border-bottom: 1px solid #333333;
-            }
-            PackageItemWidget:hover {
-                background-color: #3a3a3a;
-            }
-            """
-        )
+        self.setStyleSheet(Theme.get_item_widget_base_stylesheet())
 
     def _on_enabled_changed(self, state: int) -> None:
         enabled = state == Qt.CheckState.Checked.value
@@ -336,7 +328,9 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         status_text = "已启用" if enabled else "已禁用"
         self._status_label.setText(status_text)
         self._status_label.setStyleSheet(
-            f"color: {'#4CAF50' if enabled else '#666666'}; font-size: 11px;"
+            Theme.get_item_status_enabled_stylesheet()
+            if enabled
+            else Theme.get_item_status_disabled_stylesheet()
         )
 
     def set_updating(self, updating: bool) -> None:
@@ -382,23 +376,21 @@ class PackagePanel(QWidget, ThemeAwareMixin):
 
         self._progress_bar = QProgressBar()
         self._progress_bar.setVisible(False)
-        self._progress_bar.setStyleSheet(
-            "QProgressBar { border: none; background-color: #2d2d2d; }"
-            "QProgressBar::chunk { background-color: #4CAF50; }"
-        )
+        self._progress_bar.setStyleSheet(Theme.get_progress_bar_stylesheet())
         self._progress_bar.setFixedHeight(3)
         layout.addWidget(self._progress_bar)
 
         self._status_label = QLabel("")
         self._status_label.setVisible(False)
         self._status_label.setStyleSheet(
-            "color: #90CAF9; padding: 4px 16px; background-color: #2d2d2d;"
+            f"color: {Theme.hex('accent_primary')}; padding: 4px 16px; "
+            f"background-color: {Theme.hex('background_secondary')};"
         )
         layout.addWidget(self._status_label)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: #1e1e1e; }")
+        scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
 
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
@@ -413,31 +405,25 @@ class PackagePanel(QWidget, ThemeAwareMixin):
 
     def _create_header(self) -> QWidget:
         header = QFrame()
-        header.setStyleSheet(
-            "QFrame { background-color: #2d2d2d; border-bottom: 1px solid #404040; }"
-        )
+        header.setStyleSheet(Theme.get_header_frame_stylesheet())
         header.setFixedHeight(50)
 
         layout = QHBoxLayout(header)
         layout.setContentsMargins(16, 0, 16, 0)
 
         title = QLabel("节点包管理")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #e0e0e0;")
+        title.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(title)
 
         layout.addStretch()
 
         install_btn = QPushButton("安装新包")
-        install_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; padding: 4px 12px; }"
-        )
+        install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
         install_btn.clicked.connect(self._on_install_clicked)
         layout.addWidget(install_btn)
 
         install_local_btn = QPushButton("本地安装")
-        install_local_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; padding: 4px 12px; }"
-        )
+        install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
         install_local_btn.clicked.connect(self._on_install_local_clicked)
         layout.addWidget(install_local_btn)
 
@@ -643,16 +629,6 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             self._package_widgets[package_id].set_enabled(enabled)
 
     def refresh_theme(self) -> None:
-        """刷新主题样式"""
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {Theme.hex("background_primary")};
-            }}
-        """)
-        # 刷新标题
-        if hasattr(self, "_title_label"):
-            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
-
-        # 刷新所有包项
+        self.setStyleSheet(Theme.get_content_stack_stylesheet())
         for widget in self._package_widgets.values():
             widget.refresh_theme()

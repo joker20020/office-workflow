@@ -80,16 +80,9 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 8, 12, 8)
 
-        title = QLabel("会话历史")
-        title.setStyleSheet(f"""
-            QLabel {{
-                color: {Theme.hex("text_primary")};
-                font-size: 14px;
-                font-weight: bold;
-                background-color: transparent;
-            }}
-        """)
-        header_layout.addWidget(title)
+        self._title_label = QLabel("会话历史")
+        self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
+        header_layout.addWidget(self._title_label)
 
         header_layout.addStretch()
 
@@ -107,14 +100,9 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list_widget, 1)
 
-        delete_area = QFrame()
-        delete_area.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Theme.hex("background_secondary")};
-                padding: 8px;
-            }}
-        """)
-        delete_layout = QHBoxLayout(delete_area)
+        self._delete_area = QFrame()
+        self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
+        delete_layout = QHBoxLayout(self._delete_area)
         delete_layout.setContentsMargins(8, 8, 8, 8)
 
         delete_btn = QPushButton("删除选中会话")
@@ -122,7 +110,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
         delete_layout.addWidget(delete_btn)
 
-        layout.addWidget(delete_area)
+        layout.addWidget(self._delete_area)
 
         self.setMinimumWidth(200)
         self.setMaximumWidth(300)
@@ -157,13 +145,22 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             item.setData(Qt.ItemDataRole.UserRole, session["id"])
             self._list_widget.addItem(item)
 
-    def select_session(self, session_id: str) -> None:
-        """选中指定会话"""
-        for i in range(self._list_widget.count()):
-            item = self._list_widget.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == session_id:
-                self._list_widget.setCurrentItem(item)
-                break
+    def refresh_theme(self) -> None:
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
+        if hasattr(self, "_list_widget"):
+            self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
+        if hasattr(self, "_delete_area"):
+            self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
+
+    def refresh_theme(self) -> None:
+        """刷新主题样式"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
+        if hasattr(self, "_list_widget"):
+            self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
+        if hasattr(self, "_delete_area"):
+            self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
 
 
 class ChatPanel(QWidget, ThemeAwareMixin):

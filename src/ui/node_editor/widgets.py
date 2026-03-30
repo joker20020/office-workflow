@@ -197,25 +197,7 @@ class TextLineEdit(InlineWidgetBase):
         # 文本输入框
         self._line_edit = QLineEdit()
         self._line_edit.setPlaceholderText(port_def.description or "输入文本...")
-        self._line_edit.setStyleSheet(
-            """
-            QLineEdit {
-                background-color: #2d2d30;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #d4d4d4;
-                font-size: 11px;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-            }
-            QLineEdit:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-            }
-        """
-        )
+        self._line_edit.setStyleSheet(Theme.get_inline_input_base_stylesheet())
 
         # 设置默认值
         if port_def.default is not None:
@@ -290,25 +272,7 @@ class NumberSpinBox(InlineWidgetBase):
             self._spin_box.setRange(-999999, 999999)
             self._spin_box.setSingleStep(1)
 
-        self._spin_box.setStyleSheet(
-            """
-            QSpinBox, QDoubleSpinBox {
-                background-color: #2d2d30;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #d4d4d4;
-                font-size: 11px;
-            }
-            QSpinBox:focus, QDoubleSpinBox:focus {
-                border-color: #0078d4;
-            }
-            QSpinBox:disabled, QDoubleSpinBox:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-            }
-        """
-        )
+        self._spin_box.setStyleSheet(Theme.get_inline_spinbox_stylesheet())
 
         # 设置默认值
         if port_def.default is not None:
@@ -378,33 +342,7 @@ class BooleanCheckBox(InlineWidgetBase):
         # 复选框
         self._checkbox = QCheckBox()
         self._checkbox.setText(port_def.description or "")
-        self._checkbox.setStyleSheet(
-            """
-            QCheckBox {
-                color: #d4d4d4;
-                font-size: 11px;
-                spacing: 6px;
-            }
-            QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-                border-radius: 3px;
-                border: 1px solid #3c3c3c;
-                background-color: #2d2d30;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #0078d4;
-                border-color: #0078d4;
-            }
-            QCheckBox::indicator:disabled {
-                background-color: #1e1e1e;
-                border-color: #2d2d2d;
-            }
-            QCheckBox:disabled {
-                color: #666666;
-            }
-        """
-        )
+        self._checkbox.setStyleSheet(Theme.get_inline_checkbox_stylesheet())
 
         # 设置默认值
         if port_def.default is not None:
@@ -468,42 +406,7 @@ class DropdownComboBox(InlineWidgetBase):
 
         # 下拉框
         self._combo_box = QComboBox()
-        self._combo_box.setStyleSheet(
-            """
-            QComboBox {
-                background-color: #2d2d30;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #d4d4d4;
-                font-size: 11px;
-                min-width: 80px;
-            }
-            QComboBox:focus {
-                border-color: #0078d4;
-            }
-            QComboBox:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid #808080;
-                margin-right: 6px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d30;
-                border: 1px solid #3c3c3c;
-                selection-background-color: #0078d4;
-            }
-        """
-        )
+        self._combo_box.setStyleSheet(Theme.get_inline_combobox_stylesheet())
 
         # 添加选项（从 widget_options 或使用默认选项）
         options = getattr(port_def, "widget_options", None) or ["是", "否"]
@@ -576,45 +479,14 @@ class FilePickerButton(InlineWidgetBase):
 
         # 文件路径显示
         self._path_label = QLabel()
-        self._path_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #2d2d30;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #808080;
-                font-size: 10px;
-            }
-        """
-        )
+        self._path_label.setStyleSheet(Theme.get_inline_file_picker_label_stylesheet())
         self._path_label.setText("选择文件...")
         self._path_label.setMinimumWidth(80)
 
         # 选择按钮
         self._button = QPushButton("...")
         self._button.setFixedWidth(30)
-        self._button.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #3c3c3c;
-                border: 1px solid #4a4a4a;
-                border-radius: 3px;
-                color: #d4d4d4;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-            QPushButton:pressed {
-                background-color: #2d2d2d;
-            }
-            QPushButton:disabled {
-                background-color: #2d2d2d;
-                color: #666666;
-            }
-        """
-        )
+        self._button.setStyleSheet(Theme.get_inline_file_picker_button_stylesheet())
 
         # 连接信号
         self._button.clicked.connect(self._on_button_clicked)
@@ -642,9 +514,7 @@ class FilePickerButton(InlineWidgetBase):
             filename = os.path.basename(self._file_path)
             self._path_label.setText(filename if len(filename) <= 20 else filename[:17] + "...")
             self._path_label.setToolTip(self._file_path)
-            self._path_label.setStyleSheet(
-                self._path_label.styleSheet().replace("color: #808080;", "color: #d4d4d4;")
-            )
+            self._path_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
     def set_enabled(self, enabled: bool) -> None:
         """设置启用状态"""
@@ -766,18 +636,7 @@ class OutputTextLabel(OutputLabelBase):
 
         # 输出标签
         self._label = QLabel()
-        self._label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #808080;
-                font-size: 10px;
-            }
-        """
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._label.setText("—")  # 占位符
         self._label.setToolTip("")
 
@@ -795,36 +654,20 @@ class OutputTextLabel(OutputLabelBase):
         display_text = text[:30] + "..." if len(text) > 30 else text
         self._label.setText(display_text)
         self._label.setToolTip(text)
-        # 设置为有值状态的颜色
-        self._label.setStyleSheet(
-            self._label.styleSheet().replace("color: #808080;", "color: #4fc3f7;")
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
     def set_error(self, error_msg: str) -> None:
         """设置错误状态"""
         self._label.setText(f"错误: {error_msg[:20]}...")
         self._label.setToolTip(error_msg)
-        self._label.setStyleSheet(
-            self._label.styleSheet().replace("color: #808080;", "color: #f44336;")
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
 
     def clear(self) -> None:
         """清除显示"""
         self._label.setText("—")
         self._label.setToolTip("")
-        self._label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #808080;
-                font-size: 10px;
-            }
-        """
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
 
 
@@ -856,18 +699,7 @@ class OutputNumberLabel(OutputLabelBase):
         # 输出标签
         self._label = QLabel()
         self._is_float = port_def.type == PortType.FLOAT
-        self._label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #808080;
-                font-size: 10px;
-            }
-        """
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._label.setText("—")
         self._label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -886,9 +718,7 @@ class OutputNumberLabel(OutputLabelBase):
                 display_text = str(int(value))
 
             self._label.setText(display_text)
-            self._label.setStyleSheet(
-                self._label.styleSheet().replace("color: #808080;", "color: #4fc3f7;")
-            )
+            self._label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
         except (ValueError, TypeError):
             self._label.setText(str(value))
 
@@ -896,27 +726,14 @@ class OutputNumberLabel(OutputLabelBase):
         """设置错误状态"""
         self._label.setText(f"错误")
         self._label.setToolTip(error_msg)
-        self._label.setStyleSheet(
-            self._label.styleSheet().replace("color: #808080;", "color: #f44336;")
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
 
     def clear(self) -> None:
         """清除显示"""
         self._label.setText("—")
         self._label.setToolTip("")
-        self._label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 6px;
-                color: #808080;
-                font-size: 10px;
-            }
-        """
-        )
+        self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
 
 
@@ -949,34 +766,12 @@ class OutputDataPreview(OutputLabelBase):
         # 类型标签
         self._type_label = QLabel()
         self._type_label.setFixedWidth(60)
-        self._type_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 4px;
-                color: #808080;
-                font-size: 9px;
-            }
-        """
-        )
+        self._type_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._type_label.setText("—")
 
         # 大小/预览标签
         self._preview_label = QLabel()
-        self._preview_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 4px;
-                color: #808080;
-                font-size: 9px;
-            }
-        """
-        )
+        self._preview_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._preview_label.setText("—")
 
         layout.addWidget(self._type_label)
@@ -1011,51 +806,23 @@ class OutputDataPreview(OutputLabelBase):
                 pass
 
         self._type_label.setText(type_name)
-        self._type_label.setStyleSheet(
-            self._type_label.styleSheet().replace("color: #808080;", "color: #4fc3f7;")
-        )
+        self._type_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
         self._preview_label.setText(preview)
-        self._preview_label.setStyleSheet(
-            self._preview_label.styleSheet().replace("color: #808080;", "color: #d4d4d4;")
-        )
+        self._preview_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
     def set_error(self, error_msg: str) -> None:
         """设置错误状态"""
         self._type_label.setText("ERROR")
         self._preview_label.setText(error_msg[:20] + "...")
-        self._type_label.setStyleSheet(
-            self._type_label.styleSheet().replace("color: #808080;", "color: #f44336;")
-        )
+        self._type_label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
 
     def clear(self) -> None:
         """清除显示"""
         self._type_label.setText("—")
         self._preview_label.setText("—")
-        self._type_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 4px;
-                color: #808080;
-                font-size: 9px;
-            }
-        """
-        )
-        self._preview_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 3px;
-                padding: 2px 4px;
-                color: #808080;
-                font-size: 9px;
-            }
-        """
-        )
+        self._type_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
+        self._preview_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
 
 

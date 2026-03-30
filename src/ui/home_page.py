@@ -136,9 +136,9 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
 
-        icon_label = QLabel("📄")
-        icon_label.setStyleSheet("font-size: 20px;")
-        layout.addWidget(icon_label)
+        self._icon_label = QLabel("📄")
+        self._icon_label.setStyleSheet(Theme.get_icon_label_stylesheet(20))
+        layout.addWidget(self._icon_label)
 
         info_layout = QVBoxLayout()
         info_layout.setSpacing(4)
@@ -158,9 +158,9 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
 
         layout.addLayout(info_layout, 1)
 
-        arrow_label = QLabel("›")
-        arrow_label.setStyleSheet(f"color: {Theme.hex('text_hint')}; font-size: 18px;")
-        layout.addWidget(arrow_label)
+        self._arrow_label = QLabel("›")
+        self._arrow_label.setStyleSheet(Theme.get_arrow_indicator_stylesheet())
+        layout.addWidget(self._arrow_label)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(Theme.get_recent_item_stylesheet())
@@ -175,6 +175,8 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
         self._apply_style()
         self._title_label.setStyleSheet(Theme.get_recent_item_title_stylesheet())
         self._meta_label.setStyleSheet(Theme.get_recent_item_meta_stylesheet())
+        self._icon_label.setStyleSheet(Theme.get_icon_label_stylesheet(20))
+        self._arrow_label.setStyleSheet(Theme.get_arrow_indicator_stylesheet())
 
 
 class HomePage(QWidget, ThemeAwareMixin):
@@ -215,28 +217,14 @@ class HomePage(QWidget, ThemeAwareMixin):
         main_layout.setSpacing(0)
 
         # 滚动区域
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                border: none;
-                background-color: {Theme.hex("background_primary")};
-            }}
-            QScrollBar:vertical {{
-                background-color: {Theme.hex("background_secondary")};
-                width: 10px;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {Theme.hex("background_tertiary")};
-                border-radius: 5px;
-                min-height: 20px;
-            }}
-        """)
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll_area.setStyleSheet(Theme.get_home_scroll_area_stylesheet())
 
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet(f"background-color: {Theme.hex('background_primary')};")
-        content_layout = QVBoxLayout(scroll_content)
+        self._scroll_content = QWidget()
+        self._scroll_content.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+        content_layout = QVBoxLayout(self._scroll_content)
         content_layout.setContentsMargins(48, 0, 48, 24)
         content_layout.setSpacing(0)
 
@@ -254,8 +242,8 @@ class HomePage(QWidget, ThemeAwareMixin):
 
         content_layout.addStretch()
 
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
+        self._scroll_area.setWidget(self._scroll_content)
+        main_layout.addWidget(self._scroll_area)
 
         # 页脚
         self._footer = self._create_footer()
@@ -287,7 +275,7 @@ class HomePage(QWidget, ThemeAwareMixin):
 
     def _create_quick_actions(self) -> QWidget:
         widget = QWidget()
-        widget.setStyleSheet(f"background-color: transparent;")
+        widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 24, 0, 0)
         layout.setSpacing(16)
@@ -324,7 +312,7 @@ class HomePage(QWidget, ThemeAwareMixin):
 
     def _create_recent_section(self) -> QWidget:
         widget = QWidget()
-        widget.setStyleSheet(f"background-color: transparent;")
+        widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
         self._recent_layout = QVBoxLayout(widget)
         self._recent_layout.setContentsMargins(0, 24, 0, 0)
         self._recent_layout.setSpacing(12)
@@ -337,7 +325,7 @@ class HomePage(QWidget, ThemeAwareMixin):
 
         # 工作流列表容器
         self._recent_list_widget = QWidget()
-        self._recent_list_widget.setStyleSheet("background-color: transparent;")
+        self._recent_list_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
         self._recent_list_layout = QVBoxLayout(self._recent_list_widget)
         self._recent_list_layout.setContentsMargins(0, 0, 0, 0)
         self._recent_list_layout.setSpacing(8)
@@ -440,14 +428,19 @@ class HomePage(QWidget, ThemeAwareMixin):
         _logger.info(f"最近工作流点击: {workflow_id}, file_path={file_path}")
         self.load_workflow_requested.emit("nodes", file_path)
 
+    def _apply_styles(self) -> None:
+        if hasattr(self, "_scroll_area"):
+            self._scroll_area.setStyleSheet(Theme.get_home_scroll_area_stylesheet())
+        if hasattr(self, "_scroll_content"):
+            self._scroll_content.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
+
     def refresh_theme(self) -> None:
         """刷新主题样式"""
         self.setStyleSheet(Theme.get_home_page_stylesheet())
+        self._apply_styles()
 
         # 刷新头部
         self._header.setStyleSheet(Theme.get_home_header_stylesheet())
-        self._title_label.setStyleSheet(Theme.get_home_title_stylesheet())
-        self._subtitle_label.setStyleSheet(Theme.get_home_subtitle_stylesheet())
 
         # 刷新快速操作卡片
         for card in self._quick_action_cards:

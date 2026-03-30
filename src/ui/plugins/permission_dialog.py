@@ -94,11 +94,11 @@ class PermissionItem(QWidget):
             desc_text = f"⚠️ {desc_text}"
 
         self._desc_label = QLabel(f"    {desc_text}")
-        self._desc_label.setStyleSheet("color: #999999; font-size: 11px;")
+        self._desc_label.setStyleSheet(f"color: {Theme.hex('text_hint')}; font-size: 11px;")
         layout.addWidget(self._desc_label)
 
         if self._is_high_risk:
-            self._checkbox.setStyleSheet("color: #FFA726;")
+            self._checkbox.setStyleSheet(f"color: {Theme.hex('state_warning')};")
 
     def _get_permission_text(self) -> str:
         """获取权限显示文本"""
@@ -171,13 +171,15 @@ class PermissionRequestDialog(QDialog):
 
         # 标题
         title_label = QLabel(f'插件 "{self._plugin_name}" 请求以下权限')
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #e0e0e0;")
+        title_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {Theme.hex('text_primary')};"
+        )
         layout.addWidget(title_label)
 
         # 插件信息
         info_frame = QFrame()
         info_frame.setStyleSheet(
-            "QFrame { background-color: #2d2d2d; border-radius: 4px; padding: 8px; }"
+            f"QFrame {{ background-color: {Theme.hex('background_secondary')}; border-radius: 4px; padding: 8px; }}"
         )
         info_layout = QVBoxLayout(info_frame)
         info_layout.setSpacing(4)
@@ -185,19 +187,19 @@ class PermissionRequestDialog(QDialog):
         # 版本
         version = self._plugin_info.get("version", "未知")
         version_label = QLabel(f"版本: {version}")
-        version_label.setStyleSheet("color: #b0b0b0; font-size: 12px;")
+        version_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         info_layout.addWidget(version_label)
 
         # 作者
         author = self._plugin_info.get("author", "未知")
         author_label = QLabel(f"作者: {author}")
-        author_label.setStyleSheet("color: #b0b0b0; font-size: 12px;")
+        author_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         info_layout.addWidget(author_label)
 
         # 描述
         description = self._plugin_info.get("description", "无描述")
         desc_label = QLabel(f"描述: {description}")
-        desc_label.setStyleSheet("color: #b0b0b0; font-size: 12px;")
+        desc_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         desc_label.setWordWrap(True)
         info_layout.addWidget(desc_label)
 
@@ -206,7 +208,9 @@ class PermissionRequestDialog(QDialog):
         # 权限列表（滚动区域）
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: 1px solid #404040; border-radius: 4px; }")
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {Theme.hex('border_primary')}; border-radius: 4px; }}"
+        )
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
@@ -231,7 +235,9 @@ class PermissionRequestDialog(QDialog):
             # 添加分隔标签
             if normal_perms:
                 separator = QLabel("以下权限具有较高风险，请谨慎授权：")
-                separator.setStyleSheet("color: #FFA726; font-size: 12px; margin-top: 8px;")
+                separator.setStyleSheet(
+                    f"color: {Theme.hex('state_warning')}; font-size: 12px; margin-top: 8px;"
+                )
                 scroll_layout.addWidget(separator)
 
             for perm in sorted(high_risk_perms, key=lambda p: p.value):

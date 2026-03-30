@@ -449,21 +449,21 @@ class NodeGraphicsItem(QGraphicsObject):
         """绘制节点背景"""
         # 背景颜色（根据状态）
         if self._node.state == NodeState.RUNNING:
-            bg_color = QColor("#3d3d00")  # 深黄色
+            bg_color = Theme.color("node_bg_running")
         elif self._node.state == NodeState.SUCCESS:
-            bg_color = QColor("#1b3d1b")  # 深绿色
+            bg_color = Theme.color("node_bg_success")
         elif self._node.state == NodeState.ERROR:
-            bg_color = QColor("#3d1b1b")  # 深红色
+            bg_color = Theme.color("node_bg_error")
         else:
-            bg_color = QColor("#2d2d30")  # 默认深灰色
+            bg_color = Theme.color("node_bg_idle")
 
         # 选中状态
         if self.isSelected():
             border_color = Theme.NODE_SELECTED_BORDER
         elif self._is_hovered:
-            border_color = QColor("#4a4a4a")
+            border_color = Theme.color("node_border_hover")
         else:
-            border_color = QColor("#3c3c3c")
+            border_color = Theme.color("node_border_normal")
 
         # 绘制圆角矩形背景
         painter.setBrush(QBrush(bg_color))
@@ -474,8 +474,8 @@ class NodeGraphicsItem(QGraphicsObject):
         """绘制标题栏"""
         # 标题栏背景渐变
         gradient = QLinearGradient(0, 0, 0, self.HEADER_HEIGHT)
-        gradient.setColorAt(0, QColor("#3c3c3c"))
-        gradient.setColorAt(1, QColor("#2d2d30"))
+        gradient.setColorAt(0, Theme.color("node_border_normal"))
+        gradient.setColorAt(1, Theme.color("node_bg_idle"))
 
         painter.setBrush(QBrush(gradient))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -497,7 +497,7 @@ class NodeGraphicsItem(QGraphicsObject):
         font.setPointSize(10)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QPen(QColor("#d4d4d4")))
+        painter.setPen(QPen(Theme.color("node_title")))
         painter.drawText(
             QRectF(self.PADDING + 20, 0, self._width - self.PADDING * 2 - 20, self.HEADER_HEIGHT),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -509,7 +509,7 @@ class NodeGraphicsItem(QGraphicsObject):
         font = QFont()
         font.setPointSize(9)
         painter.setFont(font)
-        painter.setPen(QPen(QColor("#b4b4b4")))
+        painter.setPen(QPen(Theme.color("node_port_name")))
 
         # 输入端口名称
         y_offset = self.HEADER_HEIGHT + self.PORT_SPACING

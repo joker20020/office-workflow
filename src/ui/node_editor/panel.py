@@ -491,12 +491,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
         # 刷新节点面板
         if hasattr(self, "_node_panel"):
-            self._node_panel.setStyleSheet(f"""
-                QWidget {{
-                    background-color: {Theme.hex("background_secondary")};
-                    border-right: 1px solid {Theme.hex("border_primary")};
-                }}
-            """)
+            self._node_panel.setStyleSheet(Theme.get_node_panel_container_stylesheet())
 
         # 刷新状态标签
         if hasattr(self, "_status_label"):

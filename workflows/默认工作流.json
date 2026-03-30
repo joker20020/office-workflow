@@ -1,16 +1,56 @@
 {
-  "id": "9ec1c7f7-c467-46af-a246-240e43083a69",
+  "id": "3a73db31-276e-453a-bc11-febbb20906eb",
   "name": "默认工作流",
   "nodes": [
     {
-      "id": "7652a509-276a-4c1c-a39c-7521107644df",
-      "node_type": "math.subtract",
+      "id": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
+      "node_type": "text.join",
       "position": [
-        -289.0,
-        -153.0
+        13.0,
+        -81.0
       ],
       "widget_values": {}
+    },
+    {
+      "id": "5047ea76-1317-4070-bbc7-c7a21d07742d",
+      "node_type": "data.to_string",
+      "position": [
+        -280.0,
+        -176.0
+      ],
+      "widget_values": {
+        "input": "Hello",
+        "text1": "hello",
+        "value": "hello"
+      }
+    },
+    {
+      "id": "ab0c6ad0-3476-4a71-9ab0-1621ccd1b28f",
+      "node_type": "data.to_string",
+      "position": [
+        -225.0,
+        102.0
+      ],
+      "widget_values": {
+        "input": "world",
+        "value": "world"
+      }
     }
   ],
-  "connections": []
+  "connections": [
+    {
+      "id": "71cd5da8-ff39-4b16-b744-eb176b0bbbef",
+      "source_node": "5047ea76-1317-4070-bbc7-c7a21d07742d",
+      "source_port": "result",
+      "target_node": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
+      "target_port": "text1"
+    },
+    {
+      "id": "06f0b9db-1820-4cf9-985b-380dc2d517be",
+      "source_node": "ab0c6ad0-3476-4a71-9ab0-1621ccd1b28f",
+      "source_port": "result",
+      "target_node": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
+      "target_port": "text2"
+    }
+  ]
 }

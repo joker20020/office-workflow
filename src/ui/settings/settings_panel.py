@@ -20,10 +20,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.ui.theme_manager import ThemeManager
 
 
-class SettingsPanel(QWidget):
+class SettingsPanel(QWidget, ThemeAwareMixin):
     """设置面板"""
 
     def __init__(
@@ -32,6 +33,7 @@ class SettingsPanel(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._theme_manager = theme_manager or ThemeManager.instance()
         self._setup_ui()
         self._connect_signals()
@@ -59,39 +61,24 @@ class SettingsPanel(QWidget):
         layout.addWidget(scroll_area)
 
     def _create_appearance_group(self) -> QFrame:
-        """创建外观设置分组"""
-        frame = QFrame()
-        frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Theme.hex("background_secondary")};
-                border: 1px solid {Theme.hex("border_primary")};
-                border-radius: 8px;
-                padding: 16px;
-            }}
-        """)
-        layout = QVBoxLayout(frame)
+        self._appearance_frame = QFrame()
+        self._appearance_frame.setStyleSheet(Theme.get_settings_frame_stylesheet())
+        layout = QVBoxLayout(self._appearance_frame)
         layout.setSpacing(16)
-        group_title = QLabel("外观")
-        group_title.setStyleSheet(f"""
-            QLabel {{
-                color: {Theme.hex("text_primary")};
-                font-size: 14px;
-                font-weight: bold;
-                background-color: transparent;
-            }}
-        """)
-        layout.addWidget(group_title)
+        self._group_title = QLabel("外观")
+        self._group_title.setStyleSheet(Theme.get_settings_group_title_stylesheet())
+        layout.addWidget(self._group_title)
         theme_form = QFormLayout()
         theme_form.setSpacing(12)
-        theme_label = QLabel("主题模式")
-        theme_label.setStyleSheet(f"color: {Theme.hex('text_primary')};")
+        self._theme_label = QLabel("主题模式")
+        self._theme_label.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
         self._theme_combo = QComboBox()
         self._theme_combo.addItem("深色", "dark")
         self._theme_combo.addItem("浅色", "light")
         self._theme_combo.setStyleSheet(Theme.get_combobox_stylesheet())
-        theme_form.addRow(theme_label, self._theme_combo)
+        theme_form.addRow(self._theme_label, self._theme_combo)
         layout.addLayout(theme_form)
-        return frame
+        return self._appearance_frame
 
     def _connect_signals(self) -> None:
         self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
@@ -120,4 +107,21 @@ class SettingsPanel(QWidget):
             self._theme_combo.blockSignals(False)
 
     def refresh_theme(self) -> None:
+        """刷新主题样式"""
         self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
+        if hasattr(self, "_appearance_frame"):
+            self._appearance_frame.setStyleSheet(Theme.get_settings_frame_stylesheet())
+        if hasattr(self, "_group_title"):
+            self._group_title.setStyleSheet(Theme.get_settings_group_title_stylesheet())
+        if hasattr(self, "_theme_label"):
+            self._theme_label.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
+        if hasattr(self, "_theme_combo"):
+            self._theme_combo.setStyleSheet(Theme.get_combobox_stylesheet())
+        if hasattr(self, "_appearance_frame"):
+            self._appearance_frame.setStyleSheet(Theme.get_settings_frame_stylesheet())
+        if hasattr(self, "_group_title"):
+            self._group_title.setStyleSheet(Theme.get_settings_group_title_stylesheet())
+        if hasattr(self, "_theme_label"):
+            self._theme_label.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
+        if hasattr(self, "_theme_combo"):
+            self._theme_combo.setStyleSheet(Theme.get_combobox_stylesheet())

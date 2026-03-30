@@ -9,7 +9,7 @@
 插件状态由启用/禁用决定，是否加载
 """
 
-from typing import Optional, Set
+from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.core.permission_manager import Permission
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
@@ -69,18 +68,21 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         name_layout.setSpacing(8)
 
         name_label = QLabel(self._plugin_name)
-        name_label.setStyleSheet("font-weight: bold; color: #e0e0e0;")
+        name_label.setStyleSheet(Theme.get_item_name_label_stylesheet())
         name_layout.addWidget(name_label)
 
         version = self._plugin_info.get("version", "?.?.?")
         version_label = QLabel(f"v{version}")
-        version_label.setStyleSheet("color: #888888; font-size: 11px;")
+        version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
         name_layout.addWidget(version_label)
 
         self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
-        self._status_label.setStyleSheet(
-            f"color: {'#4CAF50' if self._is_enabled else '#666666'}; font-size: 11px;"
+        status_style = (
+            Theme.get_item_status_enabled_stylesheet()
+            if self._is_enabled
+            else Theme.get_item_status_disabled_stylesheet()
         )
+        self._status_label.setStyleSheet(status_style)
         name_layout.addWidget(self._status_label)
 
         name_layout.addStretch()
@@ -88,28 +90,18 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
 
         description = self._plugin_info.get("description", "无描述")
         desc_label = QLabel(description[:60] + ("..." if len(description) > 60 else ""))
-        desc_label.setStyleSheet("color: #999999; font-size: 11px;")
+        desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
         info_layout.addWidget(desc_label)
 
         layout.addLayout(info_layout, 1)
 
         self._perms_btn = QPushButton("权限")
         self._perms_btn.setFixedWidth(50)
-        self._perms_btn.setStyleSheet("color: #90CAF9; font-size: 11px;")
+        self._perms_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
         self._perms_btn.clicked.connect(self._on_perms_button_clicked)
         layout.addWidget(self._perms_btn)
 
-        self.setStyleSheet(
-            """
-            PluginItemWidget {
-                background-color: transparent;
-                border-bottom: 1px solid #333333;
-            }
-            PluginItemWidget:hover {
-                background-color: #3a3a3a;
-            }
-            """
-        )
+        self.setStyleSheet(Theme.get_item_widget_base_stylesheet())
 
     def _on_enabled_changed(self, state: int) -> None:
         enabled = state == Qt.CheckState.Checked.value
@@ -123,16 +115,19 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         self._enabled_checkbox.setChecked(enabled)
         status_text = "已启用" if enabled else "已禁用"
         self._status_label.setText(status_text)
-        self._status_label.setStyleSheet(
-            f"color: {'#4CAF50' if enabled else '#666666'}; font-size: 11px;"
+        status_style = (
+            Theme.get_item_status_enabled_stylesheet()
+            if enabled
+            else Theme.get_item_status_disabled_stylesheet()
         )
+        self._status_label.setStyleSheet(status_style)
 
     @property
     def plugin_name(self) -> str:
         return self._plugin_name
 
     def refresh_theme(self) -> None:
-        pass
+        self.setStyleSheet(Theme.get_item_widget_base_stylesheet())
 
 
 class PluginPanel(QWidget, ThemeAwareMixin):
@@ -159,7 +154,7 @@ class PluginPanel(QWidget, ThemeAwareMixin):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: #1e111e; }")
+        scroll.setStyleSheet(Theme.get_scroll_area_no_border_stylesheet())
 
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
@@ -174,17 +169,15 @@ class PluginPanel(QWidget, ThemeAwareMixin):
 
     def _create_header(self) -> QWidget:
         header = QFrame()
-        header.setStyleSheet(
-            "QFrame { background-color: #2d2d2d; border-bottom: 1px solid #404040; }"
-        )
+        header.setStyleSheet(Theme.get_header_frame_stylesheet())
         header.setFixedHeight(50)
 
         layout = QHBoxLayout(header)
         layout.setContentsMargins(16, 0, 16, 0)
 
-        title = QLabel("插件管理")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #e0e0e0;")
-        layout.addWidget(title)
+        self._title_label = QLabel("插件管理")
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        layout.addWidget(self._title_label)
 
         layout.addStretch()
 
@@ -246,17 +239,8 @@ class PluginPanel(QWidget, ThemeAwareMixin):
             self._plugin_widgets[plugin_name].set_enabled(enabled)
 
     def refresh_theme(self) -> None:
-        """刷新主题样式"""
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {Theme.hex("background_primary")};
-            }}
-        """)
-        # 刷新标题
-        if hasattr(self, "_title_label"):
-            self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        self.setStyleSheet(Theme.get_content_stack_stylesheet())
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
 
-        # 刷新所有插件项
         for widget in self._plugin_widgets.values():
-            if hasattr(widget, "refresh_theme"):
-                widget.refresh_theme()
+            widget.refresh_theme()

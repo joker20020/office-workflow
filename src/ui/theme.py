@@ -45,13 +45,17 @@ class Theme:
         "background_hover": "#3a3a3a",
         "background_selected": "#454545",
         "background_pressed": "#505050",
+        "background_input": "#2d2d30",
         "border_primary": "#404040",
         "border_secondary": "#555555",
         "border_focus": "#0078d4",
+        "border_hover": "#4a4a4a",
         "text_primary": "#e0e0e0",
         "text_secondary": "#b0b0b0",
         "text_disabled": "#666666",
         "text_hint": "#999999",
+        "text_placeholder": "#808080",
+        "text_link": "#4fc3f7",
         "accent_primary": "#90CAF9",
         "accent_secondary": "#64B5F6",
         "accent_hover": "#BBDEFB",
@@ -59,9 +63,25 @@ class Theme:
         "state_running": "#FFC107",
         "state_success": "#4CAF50",
         "state_error": "#F44336",
+        "state_warning": "#FFA726",
         "grid_minor": "#2d2d2d",
         "grid_major": "#3c3c3c",
         "grid_background": "#232326",
+        "node_bg_idle": "#2d2d30",
+        "node_bg_running": "#3d3d00",
+        "node_bg_success": "#1b3d1b",
+        "node_bg_error": "#3d1b1b",
+        "node_border_normal": "#3c3c3c",
+        "node_border_hover": "#4a4a4a",
+        "node_title": "#d4d4d4",
+        "node_port_name": "#b4b4b4",
+        # Button state colors
+        "accent_hover_bg": "#1976D2",
+        "accent_pressed_bg": "#1565C0",
+        "danger_hover_bg": "#C62828",
+        "danger_pressed_bg": "#B71C1C",
+        "success_hover_bg": "#43A047",
+        "success_pressed_bg": "#388E3C",
     }
 
     LIGHT_COLORS = {
@@ -71,13 +91,17 @@ class Theme:
         "background_hover": "#e0e0e0",
         "background_selected": "#d0d0d0",
         "background_pressed": "#c0c0c0",
+        "background_input": "#ffffff",
         "border_primary": "#d0d0d0",
         "border_secondary": "#c0c0c0",
         "border_focus": "#0078d4",
+        "border_hover": "#c0c0c0",
         "text_primary": "#1a1a1a",
         "text_secondary": "#666666",
         "text_disabled": "#999999",
         "text_hint": "#888888",
+        "text_placeholder": "#a0a0a0",
+        "text_link": "#29B6F2",
         "accent_primary": "#1976D2",
         "accent_secondary": "#2196F3",
         "accent_hover": "#42A5F5",
@@ -85,9 +109,24 @@ class Theme:
         "state_running": "#FFC107",
         "state_success": "#4CAF50",
         "state_error": "#F44336",
+        "state_warning": "#FFA726",
         "grid_minor": "#e0e0e0",
         "grid_major": "#c0c0c0",
         "grid_background": "#f5f5f5",
+        "node_bg_idle": "#f5f5f5",
+        "node_bg_running": "#fffde7",
+        "node_bg_success": "#e8f5e8",
+        "node_bg_error": "#ffebee",
+        "node_border_normal": "#e0e0e0",
+        "node_border_hover": "#d0d0d0",
+        "node_title": "#1a1a1a",
+        "node_port_name": "#666666",
+        "accent_hover_bg": "#1976D2",
+        "accent_pressed_bg": "#1565C0",
+        "danger_hover_bg": "#D32F2F",
+        "danger_pressed_bg": "#C62828",
+        "success_hover_bg": "#4CAF50",
+        "success_pressed_bg": "#388E3C",
     }
 
     _current_theme: ThemeType = ThemeType.DARK
@@ -324,9 +363,6 @@ class Theme:
                 background-color: transparent;
                 border: 1px solid {cls.hex("border_secondary")};
                 color: {cls.hex("text_primary")};
-            }}
-            QTreeWidget::branch {{
-                background-color: {cls.hex("background_secondary")};
             }}
             QToolTip {{
                 background-color: {cls.hex("background_pressed")};
@@ -621,7 +657,7 @@ class Theme:
                 font-size: 13px;
             }}
             QPushButton:hover {{
-                background-color: #1976D2;
+                background-color: {cls.hex("accent_hover_bg")};
             }}
             QPushButton:disabled {{
                 background-color: {cls.hex("background_tertiary")};
@@ -951,10 +987,10 @@ class Theme:
                 font-size: 12px;
             }}
             QPushButton:hover {{
-                background-color: #1976D2;
+                background-color: {cls.hex("accent_hover_bg")};
             }}
             QPushButton:pressed {{
-                background-color: #1565C0;
+                background-color: {cls.hex("accent_pressed_bg")};
             }}
         """
 
@@ -971,11 +1007,11 @@ class Theme:
                 font-size: 11px;
             }}
             QPushButton:hover {{
-                background-color: #C62828;
+                background-color: {cls.hex("danger_hover_bg")};
                 color: white;
             }}
             QPushButton:pressed {{
-                background-color: #B71C1C;
+                background-color: {cls.hex("danger_pressed_bg")};
                 color: white;
             }}
         """
@@ -1010,6 +1046,518 @@ class Theme:
             }}
             QSplitter::handle:vertical {{
                 height: 1px;
+            }}
+        """
+
+    # ==================== 内联控件样式 ====================
+
+    @classmethod
+    def get_inline_input_base_stylesheet(cls) -> str:
+        """获取内联输入控件基础样式 (QLineEdit)"""
+        return f"""
+            QLineEdit {{
+                background-color: {cls.hex("background_input")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_primary")};
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border-color: {cls.hex("border_focus")};
+            }}
+            QLineEdit:disabled {{
+                background-color: {cls.hex("background_primary")};
+                color: {cls.hex("text_disabled")};
+            }}
+        """
+
+    @classmethod
+    def get_inline_spinbox_stylesheet(cls) -> str:
+        """获取内联数字输入控件样式 (QSpinBox, QDoubleSpinBox)"""
+        return f"""
+            QSpinBox, QDoubleSpinBox {{
+                background-color: {cls.hex("background_input")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_primary")};
+                font-size: 11px;
+            }}
+            QSpinBox:focus, QDoubleSpinBox:focus {{
+                border-color: {cls.hex("border_focus")};
+            }}
+            QSpinBox:disabled, QDoubleSpinBox:disabled {{
+                background-color: {cls.hex("background_primary")};
+                color: {cls.hex("text_disabled")};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                background-color: {cls.hex("background_tertiary")};
+                border: none;
+                width: 16px;
+            }}
+            QSpinBox::up-arrow, QSpinBox::down-arrow,
+            QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
+                width: 8px;
+                height: 8px;
+            }}
+        """
+
+    @classmethod
+    def get_inline_checkbox_stylesheet(cls) -> str:
+        """获取内联复选框控件样式"""
+        return f"""
+            QCheckBox {{
+                color: {cls.hex("text_primary")};
+                font-size: 11px;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid {cls.hex("grid_major")};
+                background-color: {cls.hex("background_input")};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {cls.hex("border_focus")};
+                border-color: {cls.hex("border_focus")};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {cls.hex("border_hover")};
+            }}
+            QCheckBox:disabled {{
+                color: {cls.hex("text_disabled")};
+            }}
+            QCheckBox::indicator:disabled {{
+                background-color: {cls.hex("background_primary")};
+                border-color: {cls.hex("grid_minor")};
+            }}
+        """
+
+    @classmethod
+    def get_inline_combobox_stylesheet(cls) -> str:
+        """获取内联下拉框控件样式"""
+        return f"""
+            QComboBox {{
+                background-color: {cls.hex("background_input")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_primary")};
+                font-size: 11px;
+                min-width: 80px;
+            }}
+            QComboBox:focus {{
+                border-color: {cls.hex("border_focus")};
+            }}
+            QComboBox:disabled {{
+                background-color: {cls.hex("background_primary")};
+                color: {cls.hex("text_disabled")};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 6px solid {cls.hex("text_placeholder")};
+                margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {cls.hex("background_input")};
+                border: 1px solid {cls.hex("grid_major")};
+                selection-background-color: {cls.hex("border_focus")};
+            }}
+        """
+
+    @classmethod
+    def get_inline_file_picker_button_stylesheet(cls) -> str:
+        """获取内联文件选择按钮样式"""
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("background_tertiary")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 8px;
+                color: {cls.hex("text_primary")};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("border_hover")};
+                border-color: {cls.hex("border_hover")};
+            }}
+            QPushButton:pressed {{
+                background-color: {cls.hex("background_pressed")};
+            }}
+            QPushButton:disabled {{
+                background-color: {cls.hex("background_primary")};
+                color: {cls.hex("text_disabled")};
+                border-color: {cls.hex("grid_minor")};
+            }}
+        """
+
+    @classmethod
+    def get_inline_file_picker_label_stylesheet(cls) -> str:
+        """获取内联文件路径标签样式"""
+        return f"""
+            QLabel {{
+                background-color: {cls.hex("background_input")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_placeholder")};
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_inline_output_label_base_stylesheet(cls) -> str:
+        """获取内联输出标签基础样式"""
+        return f"""
+            QLabel {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_inline_output_label_idle_stylesheet(cls) -> str:
+        """获取内联输出标签空闲状态样式"""
+        return f"""
+            QLabel {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_placeholder")};
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_inline_output_label_link_stylesheet(cls) -> str:
+        """获取内联输出标签链接状态样式"""
+        return f"""
+            QLabel {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("text_link")};
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_inline_output_label_error_stylesheet(cls) -> str:
+        """获取内联输出标签错误状态样式"""
+        return f"""
+            QLabel {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("grid_major")};
+                border-radius: 3px;
+                padding: 2px 6px;
+                color: {cls.hex("state_error")};
+                font-size: 11px;
+            }}
+        """
+
+    # ==================== 列表项样式 ====================
+
+    @classmethod
+    def get_item_widget_base_stylesheet(cls) -> str:
+        """获取列表项基础样式"""
+        return f"""
+            QWidget {{
+                border-bottom: 1px solid {cls.hex("grid_minor")};
+                background-color: transparent;
+            }}
+            QWidget:hover {{
+                background-color: {cls.hex("background_hover")};
+            }}
+            QWidget:selected {{
+                background-color: {cls.hex("background_selected")};
+            }}
+        """
+
+    @classmethod
+    def get_item_name_label_stylesheet(cls) -> str:
+        """获取列表项名称标签样式"""
+        return f"font-weight: bold; color: {cls.hex('text_primary')};"
+
+    @classmethod
+    def get_item_version_label_stylesheet(cls) -> str:
+        """获取列表项版本标签样式"""
+        return f"color: {cls.hex('text_hint')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_description_label_stylesheet(cls) -> str:
+        """获取列表项描述标签样式"""
+        return f"color: {cls.hex('text_hint')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_status_enabled_stylesheet(cls) -> str:
+        """获取列表项启用状态标签样式"""
+        return f"color: {cls.hex('state_success')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_status_disabled_stylesheet(cls) -> str:
+        """获取列表项禁用状态标签样式"""
+        return f"color: {cls.hex('text_disabled')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_accent_button_stylesheet(cls) -> str:
+        """获取列表项强调按钮样式"""
+        return f"color: {cls.hex('accent_primary')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_danger_button_stylesheet(cls) -> str:
+        """获取列表项危险按钮样式"""
+        return f"color: {cls.hex('state_error')}; font-size: 11px;"
+
+    @classmethod
+    def get_item_warning_checkbox_stylesheet(cls) -> str:
+        """获取列表项警告复选框样式"""
+        return f"color: {cls.hex('state_warning')};"
+
+    # ==================== 按钮样式 ====================
+
+    @classmethod
+    def get_install_button_stylesheet(cls) -> str:
+        """获取安装按钮样式"""
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("state_success")};
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("success_hover_bg")};
+            }}
+            QPushButton:pressed {{
+                background-color: {cls.hex("success_pressed_bg")};
+            }}
+        """
+
+    @classmethod
+    def get_primary_button_stylesheet(cls) -> str:
+        """获取主要按钮样式 (蓝色)"""
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("accent_secondary")};
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("accent_hover")};
+            }}
+            QPushButton:pressed {{
+                background-color: {cls.hex("border_focus")};
+            }}
+        """
+
+    @classmethod
+    def get_header_frame_stylesheet(cls) -> str:
+        """获取头部框架样式"""
+        return f"""
+            QFrame {{
+                background-color: {cls.hex("background_secondary")};
+                border-bottom: 1px solid {cls.hex("border_primary")};
+            }}
+        """
+
+    @classmethod
+    def get_scroll_area_no_border_stylesheet(cls) -> str:
+        """获取无边框滚动区域样式"""
+        return f"""
+            QScrollArea {{
+                border: none;
+                background-color: {cls.hex("background_primary")};
+            }}
+        """
+
+    @classmethod
+    def get_progress_bar_stylesheet(cls) -> str:
+        """获取进度条样式"""
+        return f"""
+            QProgressBar {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 3px;
+                text-align: center;
+                color: {cls.hex("text_primary")};
+            }}
+            QProgressBar::chunk {{
+                background-color: {cls.hex("state_success")};
+                border-radius: 2px;
+            }}
+        """
+
+    @classmethod
+    def get_info_frame_stylesheet(cls) -> str:
+        """获取信息框架样式"""
+        return f"""
+            QFrame {{
+                background-color: {cls.hex("background_secondary")};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """
+
+    # ==================== 提取的硬编码样式方法 ====================
+
+    @classmethod
+    def get_transparent_background_stylesheet(cls) -> str:
+        """Get transparent background stylesheet for container widgets"""
+        return "background-color: transparent;"
+
+    @classmethod
+    def get_icon_label_stylesheet(cls, size: int = 20) -> str:
+        """
+        Get icon label stylesheet with configurable font size.
+
+        Args:
+            size: Font size in pixels (default: 20)
+        """
+        return f"""
+            QLabel {{
+                font-size: {size}px;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_arrow_indicator_stylesheet(cls) -> str:
+        """Get arrow indicator stylesheet for navigation hints"""
+        return f"""
+            QLabel {{
+                color: {cls.hex("text_hint")};
+                font-size: 18px;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_home_scroll_area_stylesheet(cls) -> str:
+        """Get scroll area stylesheet for home page with scrollbar styling"""
+        return f"""
+            QScrollArea {{
+                border: none;
+                background-color: {cls.hex("background_primary")};
+            }}
+            QScrollBar:vertical {{
+                background-color: {cls.hex("background_secondary")};
+                width: 10px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {cls.hex("background_tertiary")};
+                border-radius: 5px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {cls.hex("background_selected")};
+            }}
+        """
+
+    @classmethod
+    def get_session_list_title_stylesheet(cls) -> str:
+        """Get session list title label stylesheet"""
+        return f"""
+            QLabel {{
+                color: {cls.hex("text_primary")};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_delete_area_stylesheet(cls) -> str:
+        """Get delete area container stylesheet for session list"""
+        return f"""
+            QFrame {{
+                background-color: {cls.hex("background_secondary")};
+                padding: 8px;
+            }}
+        """
+
+    @classmethod
+    def get_node_panel_container_stylesheet(cls) -> str:
+        """Get node panel container stylesheet"""
+        return f"""
+            QWidget {{
+                background-color: {cls.hex("background_secondary")};
+                border-right: 1px solid {cls.hex("border_primary")};
+            }}
+        """
+
+    @classmethod
+    def get_settings_frame_stylesheet(cls) -> str:
+        """Get settings group frame stylesheet"""
+        return f"""
+            QFrame {{
+                background-color: {cls.hex("background_secondary")};
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 8px;
+                padding: 16px;
+            }}
+        """
+
+    @classmethod
+    def get_settings_group_title_stylesheet(cls) -> str:
+        """Get settings group title stylesheet"""
+        return f"""
+            QLabel {{
+                color: {cls.hex("text_primary")};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """
+
+    @classmethod
+    def get_simple_text_label_stylesheet(cls, color_key: str = "text_primary") -> str:
+        """
+        Get simple text label stylesheet with configurable color.
+
+        Args:
+            color_key: Theme color key (default: "text_primary")
+        """
+        return f"color: {cls.hex(color_key)};"
+
+    @classmethod
+    def get_dialog_title_label_stylesheet(cls) -> str:
+        """获取对话框标题标签样式"""
+        return f"font-size: 14px; font-weight: bold; color: {cls.hex('text_primary')};"
+
+    @classmethod
+    def get_dialog_info_label_stylesheet(cls) -> str:
+        """获取对话框信息标签样式"""
+        return f"color: {cls.hex('text_secondary')}; font-size: 12px;"
+
+    @classmethod
+    def get_warning_label_stylesheet(cls) -> str:
+        """获取警告标签样式"""
+        return f"color: {cls.hex('state_warning')}; font-size: 12px; margin-top: 8px;"
+
+    @classmethod
+    def get_scroll_area_with_border_stylesheet(cls) -> str:
+        """获取带边框滚动区域样式"""
+        return f"""
+            QScrollArea {{
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 4px;
             }}
         """
 

@@ -12,6 +12,7 @@ wheels/
 .ruff_cache/
 .*_cache/
 .sisyphus/
+.opencode/
 
 data/
 *.db
