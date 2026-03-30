@@ -6,9 +6,10 @@ from PySide6.QtGui import QTextCursor, QResizeEvent
 from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QLabel
 
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 
 
-class MarkdownMessageWidget(QWidget):
+class MarkdownMessageWidget(QWidget, ThemeAwareMixin):
     content_clicked = Signal()
     content_double_clicked = Signal()
 
@@ -19,6 +20,7 @@ class MarkdownMessageWidget(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
 
         self._role = role
         self._content = content
@@ -83,3 +85,7 @@ class MarkdownMessageWidget(QWidget):
 
     def get_content(self) -> str:
         return self._content
+
+    def refresh_theme(self) -> None:
+        self._role_label.setStyleSheet(Theme.get_message_role_label_stylesheet(self._role))
+        self._content_edit.setStyleSheet(Theme.get_message_content_edit_stylesheet())

@@ -34,6 +34,7 @@ from src.ui.node_editor.scene import NodeEditorScene
 from src.ui.node_editor.view import NodeEditorView
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 
 if TYPE_CHECKING:
     from src.core.app_context import AppContext
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
-class NodeEditorPanel(QWidget):
+class NodeEditorPanel(QWidget, ThemeAwareMixin):
     """节点编辑器面板"""
 
     workflow_executed = Signal(bool)
@@ -54,6 +55,7 @@ class NodeEditorPanel(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         # 使用全局单例引擎，若未提供 engine，则通过单例工厂获取
         self._engine = engine or get_node_engine()
         self._event_bus = event_bus

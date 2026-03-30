@@ -540,31 +540,8 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _on_theme_changed(self, theme_name: str) -> None:
-        """主题变更时刷新UI"""
         self.setStyleSheet(Theme.get_main_window_stylesheet())
         self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
-
-        if hasattr(self, "_nav_rail"):
-            self._nav_rail.refresh_theme()
-
-        if hasattr(self, "_home_page") and self._home_page:
-            self._home_page.refresh_theme()
-
-        if hasattr(self, "_settings_panel") and self._settings_panel:
-            self._settings_panel.refresh_theme()
-
-        if hasattr(self, "_node_editor_panel") and self._node_editor_panel:
-            self._node_editor_panel.refresh_theme()
-
-        if hasattr(self, "_chat_panel") and self._chat_panel:
-            self._chat_panel.refresh_theme()
-
-        if hasattr(self, "_plugin_panel") and self._plugin_panel:
-            self._plugin_panel.refresh_theme()
-
-        if hasattr(self, "_package_panel") and self._package_panel:
-            self._package_panel.refresh_theme()
-
         theme_display = "深色" if theme_name == "dark" else "浅色"
         self._status_bar.showMessage(f"主题已切换为: {theme_display}")

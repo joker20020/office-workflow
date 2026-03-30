@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -226,7 +227,7 @@ class LocalInstallDialog(QDialog):
         return self._copy_radio.isChecked()
 
 
-class PackageItemWidget(QWidget):
+class PackageItemWidget(QWidget, ThemeAwareMixin):
     """包列表项控件"""
 
     enabled_changed = Signal(str, bool)
@@ -239,6 +240,7 @@ class PackageItemWidget(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._package_info = package_info
         self._package_id = package_info.get("id", "")
         self._is_enabled = package_info.get("enabled", True)
@@ -341,12 +343,15 @@ class PackageItemWidget(QWidget):
         self._update_btn.setEnabled(not updating)
         self._update_btn.setText("更新中..." if updating else "更新")
 
+    def refresh_theme(self) -> None:
+        pass
+
     @property
     def package_id(self) -> str:
         return self._package_id
 
 
-class PackagePanel(QWidget):
+class PackagePanel(QWidget, ThemeAwareMixin):
     """节点包管理面板"""
 
     package_enabled_changed = Signal(str, bool)
@@ -360,6 +365,7 @@ class PackagePanel(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._package_manager = package_manager
         self._package_widgets: Dict[str, PackageItemWidget] = {}
         self._worker: Optional[InstallWorker] = None

@@ -32,12 +32,13 @@ from PySide6.QtWidgets import (
 
 from src.core.config_manager import get_config_manager
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
 
 
-class QuickActionCard(QFrame):
+class QuickActionCard(QFrame, ThemeAwareMixin):
     """快速操作卡片组件 - 可点击的功能入口卡片"""
 
     clicked = Signal(str)
@@ -51,6 +52,7 @@ class QuickActionCard(QFrame):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._action_id = action_id
         self._title = title
         self._icon = icon
@@ -102,7 +104,7 @@ class QuickActionCard(QFrame):
         self._desc_label.setStyleSheet(Theme.get_quick_action_desc_stylesheet())
 
 
-class RecentWorkflowItem(QFrame):
+class RecentWorkflowItem(QFrame, ThemeAwareMixin):
     """最近工作流项组件"""
 
     clicked = Signal(str, str)  # workflow_id, file_path
@@ -117,6 +119,7 @@ class RecentWorkflowItem(QFrame):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._workflow_id = workflow_id
         self._title = title
         self._modified_time = modified_time
@@ -174,7 +177,7 @@ class RecentWorkflowItem(QFrame):
         self._meta_label.setStyleSheet(Theme.get_recent_item_meta_stylesheet())
 
 
-class HomePage(QWidget):
+class HomePage(QWidget, ThemeAwareMixin):
     """
     首页组件
 
@@ -198,6 +201,7 @@ class HomePage(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self.setObjectName("HomePage")
         self._recent_items: List[Any] = []
         self._quick_action_cards: List[QuickActionCard] = []

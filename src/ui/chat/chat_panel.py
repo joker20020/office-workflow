@@ -24,6 +24,7 @@ from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.ui.chat.settings_panel import AgentSettingsDialog
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -57,7 +58,7 @@ class AgentWorker(QThread):
 from src.ui.chat.message_widget import MarkdownMessageWidget
 
 
-class SessionListWidget(QWidget):
+class SessionListWidget(QWidget, ThemeAwareMixin):
     """会话列表组件 - 显示历史会话，支持切换、新建和删除"""
 
     session_selected = Signal(str)  # session_id
@@ -66,6 +67,7 @@ class SessionListWidget(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -164,7 +166,7 @@ class SessionListWidget(QWidget):
                 break
 
 
-class ChatPanel(QWidget):
+class ChatPanel(QWidget, ThemeAwareMixin):
     message_sent = Signal(str)
 
     def __init__(
@@ -177,6 +179,7 @@ class ChatPanel(QWidget):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self._setup_theme_awareness()
         self._agent = agent
         self._api_key_manager = api_key_manager
         self._mcp_manager = mcp_manager

@@ -25,12 +25,13 @@ from PySide6.QtWidgets import (
 
 from src.core.permission_manager import Permission
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
 
 
-class PluginItemWidget(QWidget):
+class PluginItemWidget(QWidget, ThemeAwareMixin):
     """插件列表项控件"""
 
     enabled_changed = Signal(str, bool)
@@ -49,6 +50,7 @@ class PluginItemWidget(QWidget):
         self._is_enabled = is_enabled
 
         self._setup_ui()
+        self._setup_theme_awareness()
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -129,8 +131,11 @@ class PluginItemWidget(QWidget):
     def plugin_name(self) -> str:
         return self._plugin_name
 
+    def refresh_theme(self) -> None:
+        pass
 
-class PluginPanel(QWidget):
+
+class PluginPanel(QWidget, ThemeAwareMixin):
     """插件管理面板"""
 
     plugin_enabled_changed = Signal(str, bool)
@@ -142,6 +147,7 @@ class PluginPanel(QWidget):
         self._plugin_widgets: dict[str, PluginItemWidget] = {}
 
         self._setup_ui()
+        self._setup_theme_awareness()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)

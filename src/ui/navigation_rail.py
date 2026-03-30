@@ -32,12 +32,13 @@ from PySide6.QtWidgets import (
 
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 
 # 模块日志记录器
 _logger = get_logger(__name__)
 
 
-class NavItem(QPushButton):
+class NavItem(QPushButton, ThemeAwareMixin):
     """
     导航项组件
 
@@ -75,6 +76,7 @@ class NavItem(QPushButton):
         self._text = text
         self._selected = False
 
+        self._setup_theme_awareness()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -135,7 +137,7 @@ class NavItem(QPushButton):
             self._apply_style()
 
 
-class NavigationRail(QWidget):
+class NavigationRail(QWidget, ThemeAwareMixin):
     """
     导航栏组件
 
@@ -170,6 +172,7 @@ class NavigationRail(QWidget):
         self._items: dict[str, NavItem] = {}
         self._current_id: Optional[str] = None
 
+        self._setup_theme_awareness()
         self._setup_ui()
 
         _logger.debug("NavigationRail 初始化完成")
