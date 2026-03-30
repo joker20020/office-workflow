@@ -295,6 +295,13 @@ class AppContext:
             self._package_manager = get_package_manager()
             _logger.debug("包管理器初始化完成")
 
+            # 先发现包（同步文件系统到数据库），再加载已启用的节点包
+            discovered = self._package_manager.discover_packages()
+            _logger.info(f"发现 {len(discovered)} 个节点包")
+
+            loaded_count = self._package_manager.load_all_enabled()
+            _logger.info(f"已加载 {loaded_count} 个启用的节点包")
+
         if init_api_key_manager is not None and get_api_key_manager is not None:
             init_api_key_manager(db=self._database)
             self._api_key_manager = get_api_key_manager()
