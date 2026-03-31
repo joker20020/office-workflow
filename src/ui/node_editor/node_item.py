@@ -18,7 +18,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QLinearGradient
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QLinearGradient, QPainterPath
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from src.engine.definitions import NodeDefinition, PortDefinition, PortType
@@ -129,10 +129,6 @@ class NodeGraphicsItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
 
-        # 启用设备坐标缓存，防止Windows下拖动时出现白色边框线
-        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
-
-        # 设置位置
         self.setPos(node.position[0], node.position[1])
 
         # 创建端口和控件
@@ -422,13 +418,11 @@ class NodeGraphicsItem(QGraphicsObject):
     # ==================== 几何 ====================
 
     def boundingRect(self) -> QRectF:
-        """返回边界矩形"""
-        return QRectF(0, 0, self._width, self._height)
+        """返回边界矩形（包含边框笔宽）"""
+        return QRectF(-1, -1, self._width + 2, self._height + 2)
 
     def shape(self):
         """返回形状（用于碰撞检测和点击测试）"""
-        from PySide6.QtGui import QPainterPath
-
         path = QPainterPath()
         path.addRoundedRect(0, 0, self._width, self._height, 5, 5)
         return path
@@ -595,12 +589,12 @@ class NodeGraphicsItem(QGraphicsObject):
         super().keyPressEvent(event)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        """项目变化事件"""
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            value = QPointF(round(value.x()), round(value.y()))
+            return value
+
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
-            x, y = round(self.pos().x()), round(self.pos().y())
-            if x != self.pos().x() or y != self.pos().y():
-                self.setPos(x, y)
-            self._node.position = (x, y)
+            self._node.position = (value.x(), value.y())
             self.position_changed.emit(self._node.id)
             self._update_all_connections()
 
