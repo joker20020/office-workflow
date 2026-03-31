@@ -20,4 +20,5 @@ docs/
 *.db
 *.sqlite3
 
-logs/
+.idea/
+.vscode/
