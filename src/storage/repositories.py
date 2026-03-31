@@ -389,7 +389,7 @@ class ChatHistoryRepository:
 
                 # 如果没有标题，使用第一条用户消息设置标题
                 if session_record.title is None and role == "user":
-                    session_record.title = content[:50] + ("..." if len(content) > 50 else "")
+                    session_record.title = content[:10] + ("..." if len(content) > 10 else "")
 
                 session.flush()  # 获取自增ID
                 message_id = message_record.id
