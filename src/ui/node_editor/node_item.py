@@ -278,9 +278,7 @@ class NodeGraphicsItem(QGraphicsObject):
         self._widget_proxies[port_def.name] = proxy
 
         # 定位控件（在端口名称右侧）
-        # 端口名称显示在端口圆点右侧约 20px 处
-        # 控件在端口名称之后
-        widget_x = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + 60  # 端口 + 名称空间
+        widget_x = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + 60
         widget_y = port_y - widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
         proxy.setPos(widget_x, widget_y)
 
@@ -294,73 +292,110 @@ class NodeGraphicsItem(QGraphicsObject):
         proxy = OutputWidgetProxy(widget, parent=self)
         self._output_widget_proxies[port_def.name] = proxy
 
-        widget_width = widget.sizeHint().width() if widget.sizeHint().width() > 0 else 80
-        widget_x = self._width - self.PADDING - PortGraphicsItem.PORT_RADIUS * 2 - widget_width - 70
+        widget_x = self.PADDING
         widget_y = port_y - widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
         proxy.setPos(widget_x, widget_y)
 
-        _logger.debug(f"创建输出预览控件: {port_def.name} at ({widget_x:.1f}, {widget_y:.1f})")
+        _logger.debug(f"创建输出预览控件: {port_def.name}")
 
     def _update_size(self) -> None:
         """
         更新节点尺寸
 
         根据端口数量、控件计算节点的最终尺寸
+        布局方案:
+        - 输入行: [PADDING][●][端口名称][间距][输入控件]
+        - 输出行: [PADDING][输出控件][间距][端口名称][●]
         """
         from PySide6.QtGui import QFontMetrics
+
+        font = QFont()
+        font.setPointSize(9)
+        fm = QFontMetrics(font)
+
+        # 端口名称统一宽度: 最多15字符
+        max_name_chars = 15
+        char_width = fm.horizontalAdvance("M")
+        max_port_name_width = char_width * max_name_chars
+
+        # 计算实际端口名称宽度（用于调试）
+        for port_def in self._definition.inputs + self._definition.outputs:
+            actual_width = fm.horizontalAdvance(port_def.name)
+            if actual_width > max_port_name_width:
+                _logger.debug(f"端口名 '{port_def.name}' 超过15字符，将被截断")
+
+        # 计算输入控件的最大宽度
+        max_input_widget_width = 0
+        for proxy in self._widget_proxies.values():
+            try:
+                w = proxy.widget.sizeHint().width()
+                if w > 0 and w > max_input_widget_width:
+                    max_input_widget_width = w
+            except Exception:
+                pass
+        if max_input_widget_width == 0:
+            max_input_widget_width = self.WIDGET_WIDTH
+
+        # 计算输出控件的最大宽度
+        max_output_widget_width = 0
+        for proxy in self._output_widget_proxies.values():
+            try:
+                w = proxy.widget.sizeHint().width()
+                if w > 0 and w > max_output_widget_width:
+                    max_output_widget_width = w
+            except Exception:
+                pass
+        if max_output_widget_width == 0:
+            max_output_widget_width = self.WIDGET_WIDTH
+
+        # 间距常量
+        name_widget_gap = 10
+
+        # 输入行宽度: PADDING + 端口圆点 + 端口名称 + 间距 + 输入控件 + PADDING
+        input_row_width = (self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + 
+                          max_port_name_width + name_widget_gap + 
+                          max_input_widget_width + self.PADDING)
+
+        # 输出行宽度: PADDING + 输出控件 + 间距 + 端口名称 + 端口圆点 + PADDING
+        output_row_width = (self.PADDING + max_output_widget_width + 
+                           name_widget_gap + max_port_name_width + 
+                           PortGraphicsItem.PORT_RADIUS * 2 + self.PADDING)
+
+        # 节点宽度取两者的最大值
+        self._width = max(self.MIN_WIDTH, input_row_width, output_row_width)
 
         # 计算端口区域高度
         num_ports = len(self._definition.inputs) + len(self._definition.outputs)
         ports_height = num_ports * (self.PORT_HEIGHT + self.PORT_SPACING)
-
-        # 计算总高度（移除末尾多余的底部内边距）
         self._height = self.HEADER_HEIGHT + ports_height
 
-        # 计算端口名称所需的最大宽度
-        font = QFont()
-        font.setPointSize(9)
-        fm = QFontMetrics(font)
-        max_port_name_width = 0
-        for port_def in self._definition.inputs:
-            text_width = fm.horizontalAdvance(port_def.name)
-            max_port_name_width = max(max_port_name_width, text_width)
-        for port_def in self._definition.outputs:
-            text_width = fm.horizontalAdvance(port_def.name)
-            max_port_name_width = max(max_port_name_width, text_width)
-
-        # 计算可用的控件宽度：使用实际内联控件的最大宽度（若无控件则为 0）
-        max_widget_width = 0
-        # 输入控件代理
-        for proxy in self._widget_proxies.values():
-            try:
-                w = proxy.widget.sizeHint().width()
-                if w and w > max_widget_width:
-                    max_widget_width = w
-            except Exception:
-                pass
-        # 输出控件代理
-        for proxy in self._output_widget_proxies.values():
-            try:
-                w = proxy.widget.sizeHint().width()
-                if w and w > max_widget_width:
-                    max_widget_width = w
-            except Exception:
-                pass
-
-        # 计算基础宽度： 端口圆点 + 名称 + 控件空间
-        base_width = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + max_port_name_width + 10 + max_widget_width + self.PADDING
-
-        self._width = max(self.MIN_WIDTH, base_width)
-
-        # 更新输出端口位置(右侧)
+        # 更新输入控件位置
         y_offset = self.HEADER_HEIGHT + self.PORT_SPACING
         for port_def in self._definition.inputs:
+            proxy = self._widget_proxies.get(port_def.name)
+            if proxy:
+                widget_x = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + max_port_name_width + name_widget_gap
+                widget_y = y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                proxy.setPos(widget_x, widget_y)
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
+
+        # 更新输出端口位置和控件位置
         for port_def in self._definition.outputs:
+            # 输出端口圆点位置（右侧）
             port_item = self._port_items.get(port_def.name)
             if port_item:
                 port_x = self._width - self.PADDING - PortGraphicsItem.PORT_RADIUS
                 port_item.setPos(port_x, port_item.pos().y())
+            
+            # 输出控件位置
+            proxy = self._output_widget_proxies.get(port_def.name)
+            if proxy:
+                widget_width = proxy.widget.sizeHint().width() if proxy.widget.sizeHint().width() > 0 else 80
+                widget_x = self.PADDING
+                widget_y = y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                proxy.setPos(widget_x, widget_y)
+            
+            y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
     # ==================== 控件状态管理 ====================
 
@@ -541,38 +576,44 @@ class NodeGraphicsItem(QGraphicsObject):
         painter.setPen(QPen(Theme.color("node_port_name")))
 
         fm = QFontMetrics(font)
-        max_name_width = self._width - self.PADDING * 2 - PortGraphicsItem.PORT_RADIUS * 2 - self.WIDGET_WIDTH - self.PADDING - 15
-
-        max_name_width = max(15, max_name_width)
+        char_width = fm.horizontalAdvance("M")
+        max_port_name_width = char_width * 15
 
         y_offset = self.HEADER_HEIGHT + self.PORT_SPACING
         for port_def in self._definition.inputs:
             text_x = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + 5
             text_y = y_offset
-            # Limit display to 15 characters, append ellipsis if longer
             name_display = port_def.name
             if len(name_display) > 15:
                 name_display = name_display[:12] + "..."
-            elided_name = fm.elidedText(name_display, Qt.TextElideMode.ElideRight, max_name_width)
             painter.drawText(
-                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_name_width, self.PORT_HEIGHT),
+                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_port_name_width, self.PORT_HEIGHT),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                elided_name,
+                name_display,
             )
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
         for port_def in self._definition.outputs:
-            text_x = self._width - self.PADDING - PortGraphicsItem.PORT_RADIUS * 2 - max_name_width - 5
+            max_output_widget_width = 0
+            for proxy in self._output_widget_proxies.values():
+                try:
+                    w = proxy.widget.sizeHint().width()
+                    if w > 0 and w > max_output_widget_width:
+                        max_output_widget_width = w
+                except Exception:
+                    pass
+            if max_output_widget_width == 0:
+                max_output_widget_width = self.WIDGET_WIDTH
+
+            text_x = self.PADDING + max_output_widget_width + 10
             text_y = y_offset
-            # Limit display to 15 characters, append ellipsis if longer
             name_display = port_def.name
             if len(name_display) > 15:
                 name_display = name_display[:12] + "..."
-            elided_name = fm.elidedText(name_display, Qt.TextElideMode.ElideLeft, max_name_width)
             painter.drawText(
-                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_name_width, self.PORT_HEIGHT),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                elided_name,
+                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_port_name_width, self.PORT_HEIGHT),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                name_display,
             )
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
