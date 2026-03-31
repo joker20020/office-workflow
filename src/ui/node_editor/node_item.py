@@ -328,8 +328,8 @@ class NodeGraphicsItem(QGraphicsObject):
         max_input_widget_width = 0
         for proxy in self._widget_proxies.values():
             try:
-                w = proxy.widget.sizeHint().width()
-                if w > 0 and w > max_input_widget_width:
+                w = proxy.widget.minimumWidth()
+                if w > max_input_widget_width:
                     max_input_widget_width = w
             except Exception:
                 pass
@@ -340,8 +340,8 @@ class NodeGraphicsItem(QGraphicsObject):
         max_output_widget_width = 0
         for proxy in self._output_widget_proxies.values():
             try:
-                w = proxy.widget.sizeHint().width()
-                if w > 0 and w > max_output_widget_width:
+                w = proxy.widget.minimumWidth()
+                if w > max_output_widget_width:
                     max_output_widget_width = w
             except Exception:
                 pass
@@ -352,14 +352,24 @@ class NodeGraphicsItem(QGraphicsObject):
         name_widget_gap = 10
 
         # 输入行宽度: PADDING + 端口圆点 + 端口名称 + 间距 + 输入控件 + PADDING
-        input_row_width = (self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + 
-                          max_port_name_width + name_widget_gap + 
-                          max_input_widget_width + self.PADDING)
+        input_row_width = (
+            self.PADDING
+            + PortGraphicsItem.PORT_RADIUS * 2
+            + max_port_name_width
+            + name_widget_gap
+            + max_input_widget_width
+            + self.PADDING
+        )
 
         # 输出行宽度: PADDING + 输出控件 + 间距 + 端口名称 + 端口圆点 + PADDING
-        output_row_width = (self.PADDING + max_output_widget_width + 
-                           name_widget_gap + max_port_name_width + 
-                           PortGraphicsItem.PORT_RADIUS * 2 + self.PADDING)
+        output_row_width = (
+            self.PADDING
+            + max_output_widget_width
+            + name_widget_gap
+            + max_port_name_width
+            + PortGraphicsItem.PORT_RADIUS * 2
+            + self.PADDING
+        )
 
         # 节点宽度取两者的最大值
         self._width = max(self.MIN_WIDTH, input_row_width, output_row_width)
@@ -374,8 +384,15 @@ class NodeGraphicsItem(QGraphicsObject):
         for port_def in self._definition.inputs:
             proxy = self._widget_proxies.get(port_def.name)
             if proxy:
-                widget_x = self.PADDING + PortGraphicsItem.PORT_RADIUS * 2 + max_port_name_width + name_widget_gap
-                widget_y = y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                widget_x = (
+                    self.PADDING
+                    + PortGraphicsItem.PORT_RADIUS * 2
+                    + max_port_name_width
+                    + name_widget_gap
+                )
+                widget_y = (
+                    y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                )
                 proxy.setPos(widget_x, widget_y)
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
@@ -386,15 +403,17 @@ class NodeGraphicsItem(QGraphicsObject):
             if port_item:
                 port_x = self._width - self.PADDING - PortGraphicsItem.PORT_RADIUS
                 port_item.setPos(port_x, port_item.pos().y())
-            
+
             # 输出控件位置
             proxy = self._output_widget_proxies.get(port_def.name)
             if proxy:
-                widget_width = proxy.widget.sizeHint().width() if proxy.widget.sizeHint().width() > 0 else 80
+                widget_width = max(proxy.widget.sizeHint().width(), proxy.widget.minimumWidth())
                 widget_x = self.PADDING
-                widget_y = y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                widget_y = (
+                    y_offset - proxy.widget.FIXED_HEIGHT / 2 + PortGraphicsItem.PORT_RADIUS / 2
+                )
                 proxy.setPos(widget_x, widget_y)
-            
+
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
     # ==================== 控件状态管理 ====================
@@ -587,32 +606,45 @@ class NodeGraphicsItem(QGraphicsObject):
             if len(name_display) > 15:
                 name_display = name_display[:12] + "..."
             painter.drawText(
-                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_port_name_width, self.PORT_HEIGHT),
+                QRectF(
+                    text_x, text_y - self.PORT_HEIGHT / 2, max_port_name_width, self.PORT_HEIGHT
+                ),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 name_display,
             )
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING
 
-        for port_def in self._definition.outputs:
-            max_output_widget_width = 0
-            for proxy in self._output_widget_proxies.values():
-                try:
-                    w = proxy.widget.sizeHint().width()
-                    if w > 0 and w > max_output_widget_width:
-                        max_output_widget_width = w
-                except Exception:
-                    pass
-            if max_output_widget_width == 0:
-                max_output_widget_width = self.WIDGET_WIDTH
+        # 计算输出控件的最大宽度
+        max_output_widget_width = 0
+        for proxy in self._output_widget_proxies.values():
+            try:
+                w = max(proxy.widget.sizeHint().width(), proxy.widget.minimumWidth())
+                if w > 0 and w > max_output_widget_width:
+                    max_output_widget_width = w
+            except Exception:
+                pass
+        if max_output_widget_width == 0:
+            max_output_widget_width = self.WIDGET_WIDTH
 
-            text_x = self.PADDING + max_output_widget_width + 10
+        for port_def in self._definition.outputs:
+            # 输出端口名称右对齐，结束于端口圆点左侧
+            port_x = self._width - self.PADDING - PortGraphicsItem.PORT_RADIUS
+            name_widget_gap = 10
+            text_end_x = port_x - name_widget_gap
+            text_width = text_end_x - (self.PADDING + max_output_widget_width + name_widget_gap)
+
             text_y = y_offset
             name_display = port_def.name
             if len(name_display) > 15:
                 name_display = name_display[:12] + "..."
             painter.drawText(
-                QRectF(text_x, text_y - self.PORT_HEIGHT / 2, max_port_name_width, self.PORT_HEIGHT),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                QRectF(
+                    self.PADDING + max_output_widget_width + name_widget_gap,
+                    text_y - self.PORT_HEIGHT / 2,
+                    text_width,
+                    self.PORT_HEIGHT,
+                ),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 name_display,
             )
             y_offset += self.PORT_HEIGHT + self.PORT_SPACING

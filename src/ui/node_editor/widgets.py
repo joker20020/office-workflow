@@ -187,26 +187,25 @@ class TextLineEdit(InlineWidgetBase):
         """初始化文本输入控件"""
         super().__init__(port_def, parent)
 
-        # 创建布局和控件
         from PySide6.QtWidgets import QHBoxLayout
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
-        # 文本输入框
         self._line_edit = QLineEdit()
         self._line_edit.setPlaceholderText(port_def.description or "输入文本...")
         self._line_edit.setStyleSheet(Theme.get_inline_input_base_stylesheet())
+        self._line_edit.setFixedWidth(self.MIN_WIDTH)
 
-        # 设置默认值
         if port_def.default is not None:
             self._line_edit.setText(str(port_def.default))
 
-        # 连接信号
         self._line_edit.textChanged.connect(self._on_text_changed)
 
         layout.addWidget(self._line_edit)
+
+        self.setFixedWidth(self.MIN_WIDTH)
 
     def get_value(self) -> str:
         """获取文本值"""
@@ -481,7 +480,7 @@ class FilePickerButton(InlineWidgetBase):
         self._path_label = QLabel()
         self._path_label.setStyleSheet(Theme.get_inline_file_picker_label_stylesheet())
         self._path_label.setText("选择文件...")
-        self._path_label.setMinimumWidth(80)
+        self._path_label.setFixedWidth(80)
 
         # 选择按钮
         self._button = QPushButton("...")
@@ -491,7 +490,7 @@ class FilePickerButton(InlineWidgetBase):
         # 连接信号
         self._button.clicked.connect(self._on_button_clicked)
 
-        layout.addWidget(self._path_label, 1)
+        layout.addWidget(self._path_label)
         layout.addWidget(self._button)
 
         # 保存完整路径

@@ -6,8 +6,8 @@
       "id": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
       "node_type": "text.join",
       "position": [
-        13.0,
-        -81.0
+        62.0,
+        -152.0
       ],
       "widget_values": {}
     },
@@ -15,8 +15,8 @@
       "id": "5047ea76-1317-4070-bbc7-c7a21d07742d",
       "node_type": "data.to_string",
       "position": [
-        -280.0,
-        -176.0
+        -338.0,
+        -278.0
       ],
       "widget_values": {
         "input": "Hello",
@@ -28,25 +28,52 @@
       "id": "ab0c6ad0-3476-4a71-9ab0-1621ccd1b28f",
       "node_type": "data.to_string",
       "position": [
-        -225.0,
-        102.0
+        -333.0,
+        73.0
       ],
       "widget_values": {
         "input": "world",
         "value": "world"
       }
+    },
+    {
+      "id": "cead9736-dfdb-4327-9d03-9f7cf6f9b8d3",
+      "node_type": "data.dict_get",
+      "position": [
+        -291.0,
+        -108.0
+      ],
+      "widget_values": {}
+    },
+    {
+      "id": "d0223597-fdb6-45eb-aca0-2888921fc88f",
+      "node_type": "excel.preview",
+      "position": [
+        -5.0,
+        -174.0
+      ],
+      "widget_values": {}
+    },
+    {
+      "id": "3b9b963a-65fa-4f32-afa3-77095e9f0f57",
+      "node_type": "excel.compare",
+      "position": [
+        -390.0,
+        -286.0
+      ],
+      "widget_values": {}
     }
   ],
   "connections": [
     {
-      "id": "71cd5da8-ff39-4b16-b744-eb176b0bbbef",
+      "id": "a06dbd7d-7ea5-4244-9c85-273dfe32a4ab",
       "source_node": "5047ea76-1317-4070-bbc7-c7a21d07742d",
       "source_port": "result",
       "target_node": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
       "target_port": "text1"
     },
     {
-      "id": "06f0b9db-1820-4cf9-985b-380dc2d517be",
+      "id": "3a4852a5-6254-4bb4-acd4-e1a70504d474",
       "source_node": "ab0c6ad0-3476-4a71-9ab0-1621ccd1b28f",
       "source_port": "result",
       "target_node": "6ae00230-b5dd-48f6-ad5d-03dfc37e7b4d",
