@@ -145,6 +145,13 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             item.setData(Qt.ItemDataRole.UserRole, session["id"])
             self._list_widget.addItem(item)
 
+    def select_session(self, session_id: str) -> None:
+        for i in range(self._list_widget.count()):
+            item = self._list_widget.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == session_id:
+                self._list_widget.setCurrentItem(item)
+                break
+
     def refresh_theme(self) -> None:
         """刷新主题样式"""
         if hasattr(self, "_header"):
