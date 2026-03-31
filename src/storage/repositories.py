@@ -349,25 +349,33 @@ class ChatHistoryRepository:
     def add_message(
         self,
         session_id: str,
-        role: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        msg: Any,
     ) -> Optional[int]:
         """
         添加消息到会话
 
+        直接存储 Msg.to_dict() 返回的完整 JSON 数据。
+
         Args:
             session_id: 会话ID
-            role: 消息角色 (user/assistant/system)
-            content: 消息内容
-            metadata: 消息元数据（可选）
+            msg: AgentScope Msg对象（必需）
 
         Returns:
             新消息的ID，失败返回 None
 
         Example:
-            >>> repo.add_message(session_id, "user", "请帮我设计工作流")
+            >>> from agentscope.message import Msg
+            >>> msg = Msg(name="User", content="你好", role="user")
+            >>> repo.add_message(session_id, msg)
         """
+        if msg is None:
+            _logger.error("msg 参数不能为 None")
+            return None
+
+        if not hasattr(msg, "to_dict"):
+            _logger.error("msg 必须是 AgentScope Msg 对象，必须有 to_dict 方法")
+            return None
+
         try:
             with self._database.session() as session:
                 # 验证会话存在
@@ -378,22 +386,29 @@ class ChatHistoryRepository:
                     _logger.warning(f"会话不存在，无法添加消息: {session_id[:8]}...")
                     return None
 
+                msg_dict = msg.to_dict()
+                actual_role = getattr(msg, "role", "user")
+                actual_content = self._extract_content(msg)
+                extra_data = json.dumps(msg_dict, ensure_ascii=False)
+
                 # 创建消息记录
                 message_record = ChatMessageRecord(
                     session_id=session_id,
-                    role=role,
-                    content=content,
-                    extra_data=json.dumps(metadata or {}, ensure_ascii=False),
+                    role=actual_role,
+                    content=actual_content,
+                    extra_data=extra_data,
                 )
                 session.add(message_record)
 
                 # 如果没有标题，使用第一条用户消息设置标题
-                if session_record.title is None and role == "user":
-                    session_record.title = content[:10] + ("..." if len(content) > 10 else "")
+                if session_record.title is None and actual_role == "user":
+                    session_record.title = actual_content[:10] + (
+                        "..." if len(actual_content) > 10 else ""
+                    )
 
-                session.flush()  # 获取自增ID
+                session.flush()
                 message_id = message_record.id
-                _logger.debug(f"添加消息: session={session_id[:8]}..., role={role}")
+                _logger.debug(f"添加消息: session={session_id[:8]}..., role={actual_role}")
                 return message_id
 
         except Exception as e:
@@ -413,15 +428,17 @@ class ChatHistoryRepository:
             limit: 限制返回数量（可选，从最新开始）
 
         Returns:
-            消息列表，每项包含 id, role, content, timestamp, metadata
+            消息列表，每项包含完整的Msg字典数据，可用于Msg.from_dict()重建
 
         Example:
             >>> messages = repo.get_session_messages(session_id, limit=10)
+            >>> # 重建Msg对象
+            >>> from agentscope.message import Msg
+            >>> msg = Msg.from_dict(messages[0])
         """
         try:
             with self._database.session() as session:
                 if limit:
-                    # 获取最近N条消息
                     stmt = (
                         select(ChatMessageRecord)
                         .where(ChatMessageRecord.session_id == session_id)
@@ -429,7 +446,7 @@ class ChatHistoryRepository:
                         .limit(limit)
                     )
                     records = session.execute(stmt).scalars().all()
-                    records = list(reversed(records))  # 恢复时间顺序
+                    records = list(reversed(records))
                 else:
                     stmt = (
                         select(ChatMessageRecord)
@@ -438,16 +455,14 @@ class ChatHistoryRepository:
                     )
                     records = session.execute(stmt).scalars().all()
 
-                result = [
-                    {
-                        "id": r.id,
-                        "role": r.role,
-                        "content": r.content,
-                        "timestamp": r.timestamp.isoformat(),
-                        "metadata": json.loads(r.extra_data) if r.extra_data else {},
-                    }
-                    for r in records
-                ]
+                result = []
+                for r in records:
+                    # 直接返回 extra_data 中的完整 Msg JSON
+                    if r.extra_data:
+                        msg_dict = json.loads(r.extra_data)
+                        result.append(msg_dict)
+                    else:
+                        _logger.warning(f"消息 {r.id} 没有 extra_data")
 
                 _logger.debug(f"获取会话消息: session={session_id[:8]}..., count={len(result)}")
                 return result
@@ -455,6 +470,25 @@ class ChatHistoryRepository:
         except Exception as e:
             _logger.error(f"获取会话消息失败: {e}", exc_info=True)
             return []
+
+    def _extract_content(self, msg: Any) -> str:
+        """Extract text content from Msg for database storage"""
+        if hasattr(msg, "get_text_content"):
+            return msg.get_text_content()
+        elif hasattr(msg, "content"):
+            content = msg.content
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and "text" in block:
+                        text_parts.append(block["text"])
+                    elif hasattr(block, "text"):
+                        text_parts.append(getattr(block, "text", ""))
+                return "".join(text_parts)
+            return str(content)
+        return ""
 
     def list_sessions(
         self,

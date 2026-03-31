@@ -3,7 +3,7 @@
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 try:
     from agentscope.agent import ReActAgent
@@ -89,6 +89,7 @@ class AgentIntegration:
         self._base_url: str = ""
         self._mcp_clients: List[Any] = []
         self._api_key: str = ""
+        self._streaming_callbacks: List[Callable] = []
 
         # 初始化会话历史
         if history_repository:
@@ -125,6 +126,28 @@ class AgentIntegration:
 
         _logger.info("AgentIntegration 初始化完成")
         _logger.info("=" * 50)
+
+    def register_streaming_callback(self, callback: Callable[[str], None]) -> None:
+        """Register a callback for streaming output chunks"""
+        self._streaming_callbacks.append(callback)
+
+    def unregister_streaming_callback(self, callback: Callable[[str], None]) -> None:
+        """Unregister a streaming callback"""
+        if callback in self._streaming_callbacks:
+            self._streaming_callbacks.remove(callback)
+
+    def _create_streaming_hook(self) -> Callable:
+        """Create a post_print hook for real-time streaming output"""
+
+        def streaming_hook(agent_self: Any, kwargs: dict, output: Any) -> Any:
+            for callback in self._streaming_callbacks:
+                try:
+                    callback(agent_self, kwargs, output)
+                except Exception as e:
+                    _logger.error(f"Streaming callback error: {e}")
+            return output
+
+        return streaming_hook
 
     def initialize(
         self, provider: str = "dashscope", model_name: str = "", base_url: str = ""
@@ -209,6 +232,12 @@ class AgentIntegration:
                 max_iters=50,
             )
             _logger.info("ReActAgent创建成功")
+
+            self._agent.register_instance_hook(
+                hook_type="post_print",
+                hook_name="streaming_output",
+                hook=self._create_streaming_hook(),
+            )
 
             self._initialized = True
             _logger.info(f"Agent初始化成功: provider={provider}, model={self._model_name}")
@@ -490,26 +519,37 @@ class AgentIntegration:
             loop.run_until_complete(self._agent.memory.clear())
             _logger.info("Agent memory已清空")
 
-            if self._history_repository:
-                messages = self._history.get_all_messages_persisted()
-                _logger.info(f"从数据库加载 {len(messages)} 条历史消息")
-            else:
-                messages = self._history.to_dict_list()
-                _logger.info(f"从内存加载 {len(messages)} 条历史消息")
+            messages = self._history.get_messages()
+            _logger.info(f"从内存加载 {len(messages)} 条历史消息")
 
             sync_count = 0
-            for msg_data in messages:
-                role = msg_data.get("role", "user")
-                content = msg_data.get("content", "")
-
-                if role in ("user", "assistant"):
-                    msg = Msg(
-                        name="User" if role == "user" else "Assistant",
-                        content=content,
-                        role=role,
-                    )
+            for msg in messages:
+                if hasattr(msg, "role") and hasattr(msg, "content"):
                     loop.run_until_complete(self._agent.memory.add(msg))
                     sync_count += 1
+                elif isinstance(msg, dict):
+                    try:
+                        reconstructed_msg = Msg.from_dict(msg)
+                        loop.run_until_complete(self._agent.memory.add(reconstructed_msg))
+                        sync_count += 1
+                        _logger.debug(
+                            f"Synced message with preserved metadata: {msg.get('id', 'unknown')}"
+                        )
+                    except Exception as e:
+                        _logger.warning(
+                            f"Failed to reconstruct Msg with from_dict, using fallback: {e}"
+                        )
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        if role in ("user", "assistant"):
+                            fallback_msg = Msg(
+                                name=msg.get("name", "User" if role == "user" else "Assistant"),
+                                content=content,
+                                role=role,
+                                metadata=msg.get("metadata", {}),
+                            )
+                            loop.run_until_complete(self._agent.memory.add(fallback_msg))
+                            sync_count += 1
 
             _logger.info(f"已同步 {sync_count} 条消息到Agent memory")
             loop.close()

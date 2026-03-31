@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""会话历史管理测试"""
+"""会话历史管理测试 - 使用 AgentScope Msg 对象"""
 
 import pytest
 from datetime import datetime
 from pathlib import Path
 import tempfile
 
-from src.agent.chat_history import ChatHistory, ChatMessage
+from agentscope.message import Msg
+
+from src.agent.chat_history import ChatHistory
 from src.storage.database import Database
 from src.storage.repositories import ChatHistoryRepository
 
@@ -28,21 +30,29 @@ def repository(temp_db):
     return ChatHistoryRepository(temp_db)
 
 
-class TestChatMessage:
-    """ChatMessage 测试"""
+class TestMsgUsage:
+    """测试 Msg 对象使用"""
 
-    def test_create_message(self):
-        """测试创建消息"""
-        msg = ChatMessage(role="user", content="你好")
+    def test_create_user_msg(self):
+        """测试创建用户消息"""
+        msg = Msg(name="User", role="user", content="你好")
         assert msg.role == "user"
         assert msg.content == "你好"
-        assert isinstance(msg.timestamp, datetime)
-        assert msg.metadata == {}
+        assert msg.name == "User"
 
-    def test_message_to_dict(self):
-        """测试消息转字典"""
-        msg = ChatMessage(
-            role="assistant", content="你好！有什么可以帮助你的？", metadata={"tool_calls": []}
+    def test_create_assistant_msg(self):
+        """测试创建助手消息"""
+        msg = Msg(name="Assistant", role="assistant", content="你好！")
+        assert msg.role == "assistant"
+        assert msg.content == "你好！"
+
+    def test_msg_to_dict(self):
+        """测试 Msg 序列化"""
+        msg = Msg(
+            name="Assistant",
+            role="assistant",
+            content="你好！有什么可以帮助你的？",
+            metadata={"tool_calls": []},
         )
         data = msg.to_dict()
         assert data["role"] == "assistant"
@@ -50,15 +60,16 @@ class TestChatMessage:
         assert "timestamp" in data
         assert data["metadata"] == {"tool_calls": []}
 
-    def test_message_from_dict(self):
-        """测试从字典创建消息"""
+    def test_msg_from_dict(self):
+        """测试 Msg 反序列化"""
         data = {
+            "name": "System",
             "role": "system",
             "content": "你是一个助手",
             "timestamp": "2026-03-28T10:00:00",
             "metadata": {"source": "test"},
         }
-        msg = ChatMessage.from_dict(data)
+        msg = Msg.from_dict(data)
         assert msg.role == "system"
         assert msg.content == "你是一个助手"
         assert msg.metadata == {"source": "test"}
@@ -78,6 +89,17 @@ class TestChatHistoryMemoryMode:
         assert messages[0].role == "user"
         assert messages[1].role == "assistant"
 
+    def test_add_msg_directly(self):
+        """测试直接添加 Msg 对象"""
+        history = ChatHistory(max_messages=10)
+        msg = Msg(name="User", role="user", content="直接传入的消息")
+        history.add_message(msg=msg)
+
+        messages = history.get_messages()
+        assert len(messages) == 1
+        assert isinstance(messages[0], Msg)
+        assert messages[0].content == "直接传入的消息"
+
     def test_max_messages_limit(self):
         """测试消息数量限制"""
         history = ChatHistory(max_messages=5)
@@ -86,7 +108,6 @@ class TestChatHistoryMemoryMode:
 
         messages = history.get_messages()
         assert len(messages) == 5
-        # 应该保留最新的5条
         assert "消息 5" in messages[0].content
 
     def test_get_recent_messages(self):
@@ -126,7 +147,6 @@ class TestChatHistoryDatabaseMode:
         """测试使用存储库创建历史"""
         history = ChatHistory(repository=repository)
 
-        # 应该自动创建会话
         assert history.session_id is not None
         assert history.is_persistent is True
 
@@ -138,26 +158,41 @@ class TestChatHistoryDatabaseMode:
         history.add_message("user", "第一条消息")
         history.add_message("assistant", "回复消息")
 
-        # 验证内存中的消息
         messages = history.get_messages()
         assert len(messages) == 2
 
-        # 验证数据库中的消息
         db_messages = repository.get_session_messages(session_id)
         assert len(db_messages) == 2
         assert db_messages[0]["role"] == "user"
         assert db_messages[1]["role"] == "assistant"
 
+    def test_add_msg_object_to_database(self, repository):
+        """测试添加 Msg 对象到数据库"""
+        history = ChatHistory(repository=repository)
+        session_id = history.session_id
+
+        msg = Msg(
+            name="CustomName",
+            role="user",
+            content="自定义消息",
+            metadata={"custom": "data"},
+        )
+        history.add_message(msg=msg)
+
+        db_messages = repository.get_session_messages(session_id)
+        assert len(db_messages) == 1
+        assert db_messages[0]["role"] == "user"
+        assert db_messages[0]["name"] == "CustomName"
+        assert db_messages[0]["metadata"] == {"custom": "data"}
+
     def test_load_existing_session(self, repository):
         """测试加载现有会话"""
-        # 创建会话并添加消息
         session_id = repository.create_session("测试会话")
-        repository.add_message(session_id, "user", "已存在的消息")
+        msg = Msg(name="User", role="user", content="已存在的消息")
+        repository.add_message(session_id, msg)
 
-        # 从现有会话创建历史
         history = ChatHistory.create_from_session(session_id=session_id, repository=repository)
 
-        # 验证加载了消息
         messages = history.get_messages()
         assert len(messages) == 1
         assert messages[0].content == "已存在的消息"
@@ -176,15 +211,12 @@ class TestChatHistoryDatabaseMode:
         """测试切换会话"""
         history = ChatHistory(repository=repository)
 
-        # 添加消息到当前会话
         history.add_message("user", "第一个会话的消息")
         first_session_id = history.session_id
 
-        # 创建并切换到新会话
         new_session_id = history.create_new_session("第二个会话")
         history.add_message("user", "第二个会话的消息")
 
-        # 切换回第一个会话
         result = history.set_session(first_session_id)
         assert result is True
         messages = history.get_messages()
@@ -196,24 +228,19 @@ class TestChatHistoryDatabaseMode:
         history = ChatHistory(repository=repository)
         session_id = history.session_id
 
-        # 添加消息
         history.add_message("user", "测试消息")
         messages = history.get_messages()
         assert len(messages) == 1
 
-        # 完全清空
         result = history.clear_all()
         assert result is True
 
-        # 验证会话被删除
         session = repository.get_session(session_id)
         assert session is None
 
-        # 验证内存被清空
         messages = history.get_messages()
         assert len(messages) == 0
 
-        # 验证会话被删除
         assert repository.get_session(history.session_id) is None
 
 
@@ -224,7 +251,7 @@ class TestChatHistoryRepository:
         """测试创建会话"""
         session_id = repository.create_session("测试会话")
         assert session_id is not None
-        assert len(session_id) == 36  # UUID格式
+        assert len(session_id) == 36
 
     def test_get_session(self, repository):
         """测试获取会话"""
@@ -245,8 +272,9 @@ class TestChatHistoryRepository:
     def test_add_message(self, repository):
         """测试添加消息"""
         session_id = repository.create_session()
+        msg = Msg(name="User", role="user", content="测试消息")
 
-        msg_id = repository.add_message(session_id, "user", "测试消息")
+        msg_id = repository.add_message(session_id, msg)
         assert msg_id is not None
 
         messages = repository.get_session_messages(session_id)
@@ -258,7 +286,8 @@ class TestChatHistoryRepository:
         session_id = repository.create_session()
 
         metadata = {"tool": "search", "query": "test"}
-        repository.add_message(session_id, "assistant", "搜索结果", metadata=metadata)
+        msg = Msg(name="Assistant", role="assistant", content="搜索结果", metadata=metadata)
+        repository.add_message(session_id, msg)
 
         messages = repository.get_session_messages(session_id)
         assert messages[0]["metadata"] == metadata
@@ -268,11 +297,11 @@ class TestChatHistoryRepository:
         session_id = repository.create_session()
 
         for i in range(10):
-            repository.add_message(session_id, "user", f"消息 {i}")
+            msg = Msg(name="User", role="user", content=f"消息 {i}")
+            repository.add_message(session_id, msg)
 
         messages = repository.get_session_messages(session_id, limit=5)
         assert len(messages) == 5
-        # 应该是最新的5条
         assert "消息 5" in messages[0]["content"]
 
     def test_list_sessions(self, repository):
@@ -307,22 +336,44 @@ class TestChatHistoryRepository:
 
     def test_cleanup_old_sessions(self, repository):
         """测试清理旧会话"""
-        # 创建会话
         repository.create_session("会话1")
         repository.create_session("会话2")
 
-        # 清理30天前的会话（应该删除0个）
         deleted = repository.cleanup_old_sessions(days=30)
         assert deleted == 0
 
     def test_auto_title_from_first_message(self, repository):
         """测试从第一条用户消息自动设置标题"""
-        session_id = repository.create_session()  # 无标题
+        session_id = repository.create_session()
 
-        repository.add_message(
-            session_id, "user", "这是一条很长的测试消息，用于验证自动标题功能是否正常工作"
+        msg = Msg(
+            name="User",
+            role="user",
+            content="这是一条很长的测试消息，用于验证自动标题功能是否正常工作",
         )
+        repository.add_message(session_id, msg)
 
         session = repository.get_session(session_id)
         assert session["title"] is not None
-        assert "这是一条很长的测试消息" in session["title"]
+        assert "这是一条很长的测试消" in session["title"]
+
+    def test_msg_roundtrip(self, repository):
+        """测试 Msg 完整往返（存储和加载）"""
+        session_id = repository.create_session()
+
+        original_msg = Msg(
+            name="TestUser",
+            role="user",
+            content="测试往返",
+            metadata={"key": "value", "number": 42},
+        )
+        repository.add_message(session_id, original_msg)
+
+        messages = repository.get_session_messages(session_id)
+        assert len(messages) == 1
+
+        loaded_msg = Msg.from_dict(messages[0])
+        assert loaded_msg.name == "TestUser"
+        assert loaded_msg.role == "user"
+        assert loaded_msg.content == "测试往返"
+        assert loaded_msg.metadata == {"key": "value", "number": 42}

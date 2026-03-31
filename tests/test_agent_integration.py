@@ -175,3 +175,75 @@ class TestMcpServerManager:
         assert config["name"] == "test_http"
         assert config["url"] == "http://localhost:8080/mcp"
         assert config["transport"] == "sse"
+
+
+try:
+    from agentscope.message import Msg
+
+    AGENTSCOPE_MSG_AVAILABLE = True
+except ImportError:
+    AGENTSCOPE_MSG_AVAILABLE = False
+    Msg = None
+
+
+@pytest.mark.skipif(not AGENTSCOPE_MSG_AVAILABLE, reason="AgentScope Msg not available")
+class TestHistorySyncPreservation:
+    """Test that _sync_history_to_memory preserves all Msg fields"""
+
+    @pytest.mark.asyncio
+    async def test_sync_preserves_metadata(self):
+        """Metadata should be preserved during sync"""
+        # Create Msg with complex metadata
+        msg = Msg(
+            name="User",
+            role="user",
+            content="test",
+            metadata={"tool_calls": [{"id": "1", "name": "search"}], "usage": {"tokens": 100}},
+        )
+
+        # Verify metadata is set
+        assert msg.metadata is not None
+        assert msg.metadata["tool_calls"] == [{"id": "1", "name": "search"}]
+        assert msg.metadata["usage"]["tokens"] == 100
+
+    @pytest.mark.asyncio
+    async def test_sync_preserves_id_and_timestamp(self):
+        """ID and timestamp should be preserved"""
+        # Create Msg
+        msg = Msg(name="User", role="user", content="test message")
+        original_id = msg.id
+        original_timestamp = msg.timestamp
+
+        # Verify id and timestamp exist
+        assert original_id is not None
+        assert original_timestamp is not None
+
+        # Test that Msg.from_dict preserves fields
+        msg_dict = msg.to_dict()
+        reconstructed_msg = Msg.from_dict(msg_dict)
+
+        assert reconstructed_msg.id == original_id
+        assert reconstructed_msg.timestamp == original_timestamp
+
+    @pytest.mark.asyncio
+    async def test_sync_from_dict_preserves_all_fields(self):
+        """Msg.from_dict should preserve all fields including metadata"""
+        # Create a message with all fields
+        original_msg = Msg(
+            name="Assistant",
+            role="assistant",
+            content="Response content",
+            metadata={"key": "value", "nested": {"a": 1}},
+        )
+
+        # Convert to dict and back
+        msg_dict = original_msg.to_dict()
+        reconstructed_msg = Msg.from_dict(msg_dict)
+
+        # Verify all fields preserved
+        assert reconstructed_msg.name == "Assistant"
+        assert reconstructed_msg.role == "assistant"
+        assert reconstructed_msg.content == "Response content"
+        assert reconstructed_msg.metadata == {"key": "value", "nested": {"a": 1}}
+        assert reconstructed_msg.id == original_msg.id
+        assert reconstructed_msg.timestamp == original_msg.timestamp

@@ -2,9 +2,7 @@
 """
 对话历史管理 - 支持内存和数据库持久化存储
 
-提供两种存储模式：
-1. 内存模式：适合临时会话，数据不持久化
-2. 数据库模式：适合需要持久化的会话，使用SQLite存储
+使用 AgentScope Msg 对象存储消息，完整支持 Msg 的序列化和反序列化。
 
 使用方式：
     # 内存模式
@@ -16,50 +14,31 @@
     db = Database(Path("data/app.db"))
     repo = ChatHistoryRepository(db)
     history = ChatHistory(repository=repo)
+
+    # 添加消息（自动创建 Msg 对象）
+    history.add_message("user", "你好")
+
+    # 或直接传入 Msg 对象
+    from agentscope.message import Msg
+    msg = Msg(name="User", role="user", content="你好")
+    history.add_message(msg=msg)
 """
 
+import json
 import threading
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+try:
+    from agentscope.message import Msg
+
+    AGENTSCOPE_AVAILABLE = True
+except ImportError:
+    AGENTSCOPE_AVAILABLE = False
+    Msg = None
+
 if TYPE_CHECKING:
     from src.storage.repositories import ChatHistoryRepository
-
-
-@dataclass
-class ChatMessage:
-    """对话消息数据类"""
-
-    role: str  # "user", "assistant", "system"
-    content: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "role": self.role,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChatMessage":
-        """从字典创建"""
-        timestamp = data.get("timestamp")
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        elif not isinstance(timestamp, datetime):
-            timestamp = datetime.now()
-
-        return cls(
-            role=data["role"],
-            content=data["content"],
-            timestamp=timestamp,
-            metadata=data.get("metadata", {}),
-        )
 
 
 class ChatHistory:
@@ -69,6 +48,8 @@ class ChatHistory:
     支持两种存储模式：
     - 内存模式：使用内存列表存储，不持久化
     - 数据库模式：使用ChatHistoryRepository持久化到SQLite
+
+    内部完全使用 AgentScope Msg 对象存储消息，支持完整的 Msg 序列化。
 
     Attributes:
         max_messages: 内存模式下最大消息数量（默认100）
@@ -82,24 +63,13 @@ class ChatHistory:
         session_id: Optional[str] = None,
         repository: Optional["ChatHistoryRepository"] = None,
     ):
-        """
-        初始化历史管理器
-
-        Args:
-            max_messages: 内存模式下最大消息数量
-            session_id: 会话ID（数据库模式必需）
-            repository: 数据库存储库（使用数据库模式时必需）
-        """
-        # 内存存储
-        self._messages: List[ChatMessage] = []
+        self._messages: List[Any] = []  # 存储 Msg 对象
         self._max_messages = max_messages
         self._lock = threading.Lock()
 
-        # 数据库存储
         self._session_id: Optional[str] = session_id
         self._repository: Optional["ChatHistoryRepository"] = repository
 
-        # 如果提供了repository但没有session_id，自动创建新会话
         if self._repository and not self._session_id:
             self._session_id = self._repository.create_session()
             self._is_new_session = True
@@ -108,52 +78,71 @@ class ChatHistory:
 
     @property
     def session_id(self) -> Optional[str]:
-        """获取当前会话ID"""
         return self._session_id
 
     @property
     def is_persistent(self) -> bool:
-        """是否使用持久化存储"""
         return self._repository is not None
 
     def add_message(
         self,
-        role: str,
-        content: str,
+        role: Optional[str] = None,
+        content: Optional[str] = None,
+        msg: Optional[Any] = None,
+        name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         添加消息
 
+        支持两种方式：
+        1. 传入 Msg 对象: add_message(msg=msg)
+        2. 传入参数创建 Msg: add_message(role="user", content="你好")
+
         Args:
-            role: 角色 (user/assistant/system)
-            content: 消息内容
-            metadata: 元数据（可选）
+            role: 角色 (user/assistant/system)，当不传入 msg 时必需
+            content: 消息内容，当不传入 msg 时必需
+            msg: Msg 对象，如果提供则忽略其他参数
+            name: 发送者名称，默认根据 role 自动设置
+            metadata: 元数据
         """
-        message = ChatMessage(role=role, content=content, metadata=metadata or {})
+        if msg is None:
+            if not AGENTSCOPE_AVAILABLE or Msg is None:
+                raise RuntimeError("AgentScope 未安装，无法创建消息")
+
+            if role is None or content is None:
+                raise ValueError("当不传入 msg 时，role 和 content 参数必需")
+
+            if name is None:
+                name = (
+                    "User" if role == "user" else ("Assistant" if role == "assistant" else "System")
+                )
+
+            msg = Msg(
+                name=name,
+                role=role,
+                content=content,
+                metadata=metadata,
+            )
 
         with self._lock:
-            # 添加到内存
-            self._messages.append(message)
+            self._messages.append(msg)
             if len(self._messages) > self._max_messages:
                 self._messages.pop(0)
 
-            # 如果使用数据库模式，持久化到数据库
             if self._repository and self._session_id:
                 self._repository.add_message(
                     session_id=self._session_id,
-                    role=role,
-                    content=content,
-                    metadata=metadata,
+                    msg=msg,
                 )
 
-    def get_messages(self) -> List[ChatMessage]:
-        """获取所有消息（内存中的消息）"""
+    def get_messages(self) -> List[Any]:
+        """获取所有消息（返回 Msg 对象列表）"""
         with self._lock:
             return self._messages.copy()
 
-    def get_recent_messages(self, count: int = 10) -> List[ChatMessage]:
-        """获取最近N条消息"""
+    def get_recent_messages(self, count: int = 10) -> List[Any]:
+        """获取最近N条消息（返回 Msg 对象列表）"""
         with self._lock:
             return (
                 self._messages[-count:] if len(self._messages) >= count else self._messages.copy()
@@ -161,10 +150,10 @@ class ChatHistory:
 
     def get_all_messages_persisted(self) -> List[Dict[str, Any]]:
         """
-        获取所有持久化的消息（仅数据库模式）
+        获取所有持久化的消息
 
         Returns:
-            消息字典列表，如果未使用数据库模式则返回内存中的消息
+            Msg.to_dict() 格式的字典列表
         """
         if self._repository and self._session_id:
             return self._repository.get_session_messages(self._session_id)
@@ -195,10 +184,18 @@ class ChatHistory:
 
             return True
 
-    def to_dict_list(self) -> List[Dict]:
-        """转换为字典列表（用于序列化内存中的消息）"""
+    def to_dict_list(self) -> List[Dict[str, Any]]:
+        """转换为字典列表（使用 Msg.to_dict() 序列化）"""
         with self._lock:
-            return [msg.to_dict() for msg in self._messages]
+            result = []
+            for msg in self._messages:
+                if hasattr(msg, "to_dict"):
+                    result.append(msg.to_dict())
+                elif isinstance(msg, dict):
+                    result.append(msg)
+                else:
+                    raise ValueError(f"不支持的消息类型: {type(msg)}")
+            return result
 
     def load_from_repository(self) -> bool:
         """
@@ -210,10 +207,22 @@ class ChatHistory:
         if not self._repository or not self._session_id:
             return False
 
+        if not AGENTSCOPE_AVAILABLE or Msg is None:
+            return False
+
         try:
             messages_data = self._repository.get_session_messages(self._session_id)
             with self._lock:
-                self._messages = [ChatMessage.from_dict(data) for data in messages_data]
+                self._messages = []
+                for data in messages_data:
+                    try:
+                        msg = Msg.from_dict(data)
+                        self._messages.append(msg)
+                    except Exception as e:
+                        # 记录错误但继续处理其他消息
+                        import logging
+
+                        logging.getLogger(__name__).warning(f"反序列化消息失败: {e}")
             return True
         except Exception:
             return False
@@ -231,11 +240,9 @@ class ChatHistory:
         if not self._repository:
             raise RuntimeError("需要设置repository才能创建新会话")
 
-        # 清空内存
         with self._lock:
             self._messages.clear()
 
-        # 创建新会话
         self._session_id = self._repository.create_session(title)
         self._is_new_session = True
 
@@ -261,7 +268,6 @@ class ChatHistory:
         self._session_id = session_id
         self._is_new_session = False
 
-        # 加载会话消息到内存
         return self.load_from_repository()
 
     @classmethod

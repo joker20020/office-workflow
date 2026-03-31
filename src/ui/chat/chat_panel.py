@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, List, Dict
+from typing import TYPE_CHECKING, Any, Callable, Optional, List, Dict
 
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer
 from PySide6.QtWidgets import (
@@ -35,20 +35,76 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
+def _extract_text_from_msg(msg: Any) -> str:
+    """Extract text content from AgentScope Msg object.
+
+    Handles both string content and list[ContentBlock] formats.
+
+    Args:
+        msg: AgentScope Msg object
+
+    Returns:
+        Extracted text string, or empty string if extraction fails
+    """
+    if msg is None:
+        return ""
+
+    content = getattr(msg, "content", None)
+    if content is None:
+        return ""
+
+    # Case 1: Content is a plain string
+    if isinstance(content, str):
+        return content
+
+    # Case 2: Content is a list of ContentBlocks
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            # Handle dict-style content blocks
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            # Handle object-style content blocks (TextBlock, etc.)
+            elif hasattr(block, "type") and block.type == "text":
+                text_parts.append(getattr(block, "text", ""))
+
+        return "".join(text_parts)
+
+    # Fallback: convert to string
+    return str(content)
+
+
 class AgentWorker(QThread):
     response_ready = Signal(str)
+    streaming_chunk = Signal(str)
     error_occurred = Signal(str)
 
-    def __init__(self, agent: AgentIntegration, message: str, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        agent: AgentIntegration,
+        message: str,
+        streaming_callback: Optional[Callable] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self._agent = agent
         self._message = message
+        self._streaming_callback = streaming_callback
 
     def run(self) -> None:
         try:
             _logger.info(f"AgentWorker: 开始处理消息: {self._message[:50]}...")
+
+            if self._streaming_callback:
+                self._agent.register_streaming_callback(self._streaming_callback)
+
             response = self._agent.chat(self._message)
             _logger.info(f"AgentWorker: 获取到响应， length: {len(response)}")
+
+            if self._streaming_callback:
+                self._agent.unregister_streaming_callback(self._streaming_callback)
+
             self.response_ready.emit(response)
         except Exception as e:
             _logger.error(f"AgentWorker: 发生错误: {e}", exc_info=True)
@@ -191,6 +247,8 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._current_provider: Optional[str] = None
         self._worker: Optional[AgentWorker] = None
         self._current_session_id: Optional[str] = None
+        self._streaming_message: Optional[MarkdownMessageWidget] = None
+        self._streaming_text: str = ""
 
         self._setup_ui()
         self._connect_signals()
@@ -486,19 +544,40 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._set_status("思考中...")
         self._send_btn.setEnabled(False)
 
-        self._worker = AgentWorker(self._agent, text)
+        self._worker = AgentWorker(self._agent, text, None)
         self._worker.response_ready.connect(self._on_agent_response)
+        self._worker.streaming_chunk.connect(self._on_streaming_chunk)
         self._worker.error_occurred.connect(self._on_agent_error)
         self._worker.finished.connect(self._on_worker_finished)
+
+        def streaming_callback(agent_self: Any, kwargs: dict, output: Any) -> None:
+            msg = kwargs.get("msg")
+            print(msg)
+            if msg is None:
+                return
+
+            text = _extract_text_from_msg(msg)
+            if not text:
+                return
+
+            self._worker.streaming_chunk.emit(text)
+
+        self._worker._streaming_callback = streaming_callback
         self._worker.start()
         _logger.info(f"已启动AgentWorker处理消息: {text[:50]}...")
 
     def _on_agent_response(self, response: str) -> None:
         _logger.info(f"收到Agent响应: {response[:100]}...")
-        self.add_message("assistant", response)
+
+        if self._streaming_message:
+            self._streaming_message.set_content(response)
+            self._streaming_message = None
+            self._streaming_text = ""
+        else:
+            self.add_message("assistant", response)
+
         self._set_status("就绪")
 
-        # 刷新会话列表
         if self._history_repository:
             self._load_sessions()
             if self._current_session_id:
@@ -508,6 +587,19 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         _logger.error(f"Agent处理错误: {error}")
         self.add_message("system", f"错误: {error}")
         self._set_status("错误")
+
+    def _on_streaming_chunk(self, chunk: str) -> None:
+        if self._streaming_message is None:
+            self._streaming_message = MarkdownMessageWidget("assistant", "")
+            self._messages_layout.addWidget(self._streaming_message)
+            self._messages.append(self._streaming_message)
+            self._streaming_text = ""
+
+        self._streaming_text = chunk
+
+        self._streaming_message.set_content(self._streaming_text)
+
+        QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _on_worker_finished(self) -> None:
         _logger.info("AgentWorker完成")
