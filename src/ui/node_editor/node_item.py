@@ -418,7 +418,7 @@ class NodeGraphicsItem(QGraphicsObject):
     # ==================== 几何 ====================
 
     def boundingRect(self) -> QRectF:
-        """返回边界矩形（包含边框笔宽）"""
+        """返回边界矩形（包含边框笔宽和悬停效果)"""
         return QRectF(-1, -1, self._width + 2, self._height + 2)
 
     def shape(self):
@@ -465,7 +465,7 @@ class NodeGraphicsItem(QGraphicsObject):
         # 绘制圆角矩形背景
         painter.setBrush(QBrush(bg_color))
         painter.setPen(QPen(border_color, 2.0))
-        painter.drawRoundedRect(1, 1, self._width - 2, self._height - 2, 5, 5)
+        painter.drawRoundedRect(0, 0, self._width, self._height, 5, 5)
 
     def _paint_header(self, painter: QPainter) -> None:
         """绘制标题栏"""

@@ -81,6 +81,8 @@ class NodeEditorView(QGraphicsView):
         # 居中视图到场景原点
         self.centerOn(0, 0)
 
+        self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
+
     def _center_view(self) -> None:
         """将视图居中到场景原点"""
         self.centerOn(0, 0)
