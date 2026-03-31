@@ -129,6 +129,9 @@ class NodeGraphicsItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
 
+        # 启用设备坐标缓存，防止Windows下拖动时出现白色边框线
+        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
+
         # 设置位置
         self.setPos(node.position[0], node.position[1])
 
@@ -467,7 +470,7 @@ class NodeGraphicsItem(QGraphicsObject):
 
         # 绘制圆角矩形背景
         painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(border_color, 1.5))
+        painter.setPen(QPen(border_color, 2.0))
         painter.drawRoundedRect(1, 1, self._width - 2, self._height - 2, 5, 5)
 
     def _paint_header(self, painter: QPainter) -> None:
@@ -594,11 +597,11 @@ class NodeGraphicsItem(QGraphicsObject):
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         """项目变化事件"""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
-            # 更新数据节点的位置
-            self._node.position = (self.pos().x(), self.pos().y())
-            # 发射位置变化信号
+            x, y = round(self.pos().x()), round(self.pos().y())
+            if x != self.pos().x() or y != self.pos().y():
+                self.setPos(x, y)
+            self._node.position = (x, y)
             self.position_changed.emit(self._node.id)
-            # 更新所有连接线的路径
             self._update_all_connections()
 
         return super().itemChange(change, value)
