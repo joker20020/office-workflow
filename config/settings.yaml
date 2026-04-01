@@ -18,5 +18,5 @@ system_prompt: |
               1. 首先使用 get_node_types 查看有哪些节点可用
               2. 使用 get_node_info 了解特定节点的详细信息
               3. 使用 search_nodes 按关键词查找相关节点
-
+              
               请用自然语言与用户交流。使用工具完成工作流设计。

@@ -240,7 +240,7 @@ class AgentIntegration:
 
                             请用自然语言与用户交流。使用工具完成工作流设计。"""
                             )
-            print(system_prompt)
+            
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
             _logger.info("创建ReActAgent...")

@@ -560,7 +560,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             config = self._api_key_manager.get_config(provider, model_name)
         if config:
             model_name = config.get("model_name", "") if config else model_name
-            base_url = config.get("base_url", "") if config else base_url
+            base_url = config.get("base_url", "") if config else ""
         model_name = config.get("model_name", "") if config else model_name
         base_url = config.get("base_url", "") if config else ""
 
