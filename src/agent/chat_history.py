@@ -223,6 +223,13 @@ class ChatHistory:
                         import logging
 
                         logging.getLogger(__name__).warning(f"反序列化消息失败: {e}")
+                        logging.getLogger(__name__).debug(f"消息数据: {data}")
+                        logging.getLogger(__name__).debug(f"数据类型: {type(data)}")
+                        if isinstance(data, dict):
+                            logging.getLogger(__name__).debug(f"Content字段: {data.get('content')}")
+                            logging.getLogger(__name__).debug(
+                                f"Content类型: {type(data.get('content'))}"
+                            )
             return True
         except Exception:
             return False

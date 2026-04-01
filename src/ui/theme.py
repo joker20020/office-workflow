@@ -1572,6 +1572,110 @@ class Theme:
             }}
         """
 
+    # ==================== 内容块样式 ====================
+
+    @classmethod
+    def get_thinking_block_header_stylesheet(cls) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("background_tertiary")};
+                color: {cls.hex("text_hint")};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 10px;
+                text-align: left;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("background_selected")};
+            }}
+        """
+
+    @classmethod
+    def get_thinking_block_content_stylesheet(cls) -> str:
+        return f"""
+            QTextEdit {{
+                background-color: {cls.hex("background_tertiary")};
+                color: {cls.hex("text_hint")};
+                border: none;
+                border-radius: 4px;
+                padding: 8px;
+                font-style: italic;
+                font-size: 12px;
+            }}
+        """
+
+    @classmethod
+    def get_tool_use_block_header_stylesheet(cls) -> str:
+        return f"""
+            QLabel {{
+                color: {cls.hex("accent_primary")};
+                font-size: 12px;
+                font-weight: bold;
+                padding: 4px 0;
+            }}
+        """
+
+    @classmethod
+    def get_tool_use_block_input_stylesheet(cls) -> str:
+        return f"""
+            QTextEdit {{
+                background-color: {cls.hex("background_secondary")};
+                color: {cls.hex("text_primary")};
+                border: 1px solid {cls.hex("border_primary")};
+                border-left: 3px solid {cls.hex("border_focus")};
+                border-radius: 4px;
+                padding: 8px;
+                font-family: monospace;
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_tool_result_block_header_stylesheet(cls, is_error: bool = False) -> str:
+        color = cls.hex("state_error") if is_error else cls.hex("state_success")
+        return f"""
+            QLabel {{
+                color: {color};
+                font-size: 12px;
+                font-weight: bold;
+                padding: 4px 0;
+            }}
+        """
+
+    @classmethod
+    def get_tool_result_block_content_stylesheet(cls, is_error: bool = False) -> str:
+        color = cls.hex("state_error") if is_error else cls.hex("text_primary")
+        border_color = cls.hex("state_error") if is_error else cls.hex("border_secondary")
+        return f"""
+            QTextEdit {{
+                background-color: {cls.hex("background_secondary")};
+                color: {color};
+                border: 1px solid {cls.hex("border_primary")};
+                border-left: 3px solid {border_color};
+                border-radius: 4px;
+                padding: 8px;
+                font-family: monospace;
+                font-size: 11px;
+            }}
+        """
+
+    @classmethod
+    def get_tool_result_show_more_button_stylesheet(cls) -> str:
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {cls.hex("text_link")};
+                border: none;
+                padding: 4px 8px;
+                font-size: 11px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                color: {cls.hex("accent_hover")};
+            }}
+        """
+
     # ==================== 节点编辑器特定颜色 ====================
 
     # 节点颜色

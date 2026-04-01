@@ -32,7 +32,7 @@ except ImportError as e:
     OpenAIChatFormatter = None
     InMemoryMemory = None
     Toolkit = None
-    StdIOStatefulClient = None
+    StdIOStatelessClient = None
     HttpStatelessClient = None
     _logger_agent = None
 
@@ -55,9 +55,9 @@ class AgentIntegration:
     """
     AgentScope框架集成层，管理Agent的生命周期和对话交互
 
-    支持会话历史持久化：
+    支持会话历史持久化
     - 通过 repository 参数启用数据库持久化
-    - 支持创建新会话和加载现有会话
+    - 支持创建新会话、加载现有会话
     - 支持列出所有历史会话
     """
 
@@ -83,18 +83,23 @@ class AgentIntegration:
         self._history_repository = history_repository
         self._agent: Optional[Any] = None
         self._toolkit: Optional[Any] = None
-        self._initialized = False
+        self._mcp_clients: List[Any] = []
+        self._api_key: str = ""
+        self._streaming_callbacks: List[Callable] = []
+        self._initialized: bool = False
         self._provider: str = ""
         self._model_name: str = ""
         self._base_url: str = ""
         self._mcp_clients: List[Any] = []
         self._api_key: str = ""
         self._streaming_callbacks: List[Callable] = []
+        self._initialized: bool = False
+        self._provider: str = ""
+        self._model_name: str = ""
+        self._base_url: str = ""
 
-        # 初始化会话历史
         if history_repository:
             if session_id:
-                # 加载指定会话
                 self._history = ChatHistory.create_from_session(
                     session_id=session_id,
                     repository=history_repository,
@@ -102,7 +107,6 @@ class AgentIntegration:
                 )
                 _logger.info(f"加载指定会话: {session_id[:8]}...")
             else:
-                # 尝试加载最新会话，避免自动创建新会话
                 existing_sessions = history_repository.list_sessions(limit=1)
                 if existing_sessions:
                     latest_session_id = existing_sessions[0]["id"]
@@ -113,14 +117,9 @@ class AgentIntegration:
                     )
                     _logger.info(f"自动加载最新会话: {latest_session_id[:8]}...")
                 else:
-                    # 没有现有会话，使用内存模式，首次对话时再持久化
-                    self._history = ChatHistory(
-                        max_messages=100,
-                        repository=history_repository,
-                    )
+                    self._history = ChatHistory(max_messages=100, repository=history_repository)
                     _logger.info("无现有会话，将在首次对话时创建新会话")
         else:
-            # 内存模式
             self._history = ChatHistory(max_messages=100)
             _logger.info("使用内存模式存储会话历史")
 
@@ -128,17 +127,13 @@ class AgentIntegration:
         _logger.info("=" * 50)
 
     def register_streaming_callback(self, callback: Callable[[str], None]) -> None:
-        """Register a callback for streaming output chunks"""
         self._streaming_callbacks.append(callback)
 
     def unregister_streaming_callback(self, callback: Callable[[str], None]) -> None:
-        """Unregister a streaming callback"""
         if callback in self._streaming_callbacks:
             self._streaming_callbacks.remove(callback)
 
     def _create_streaming_hook(self) -> Callable:
-        """Create a post_print hook for real-time streaming output"""
-
         def streaming_hook(agent_self: Any, kwargs: dict, output: Any) -> Any:
             for callback in self._streaming_callbacks:
                 try:
@@ -183,10 +178,24 @@ class AgentIntegration:
             self._toolkit = Toolkit()
             _logger.info("Toolkit创建成功")
 
+            # Define variables for model configuration
+            config = self._api_manager.get_config(provider)
+            if config:
+                _logger.info(f"获取到配置: {config}")
+                model_name = model_name or config.get("model_name", "")
+                base_url = base_url or config.get("base_url", "")
+
+            self._provider = provider
+            self._model_name = model_name
+            self._base_url = base_url
+
+            # Create model based on provider
             if provider == "dashscope":
-                _logger.info(f"创建DashScope模型: model_name=qwen-turbo")
+                model_name = model_name or "qwen-turbo"
+                base_url = base_url or "https://api.dashscope.com"
+                _logger.info(f"创建DashScope模型: model_name={model_name}, base_url={base_url}")
                 model = DashScopeChatModel(
-                    model_name="qwen-turbo", api_key=api_key, client_kwargs={"base_url": final_url}
+                    model_name=model_name, api_key=api_key, client_kwargs={"base_url": base_url}
                 )
                 formatter = DashScopeChatFormatter()
             elif provider == "deepseek":
@@ -211,13 +220,6 @@ class AgentIntegration:
 
             _logger.info("模型创建成功")
 
-            if self._workflow_tools:
-                self._register_workflow_tools()
-                _logger.info("工作流工具注册完成")
-
-            self._register_mcp_tools()
-            self._register_skills()
-
             system_prompt = self._build_system_prompt()
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
@@ -232,6 +234,21 @@ class AgentIntegration:
                 max_iters=50,
             )
             _logger.info("ReActAgent创建成功")
+
+            # Register streaming hook (unconditionally)
+            self._agent.register_instance_hook(
+                hook_type="post_print",
+                hook_name="streaming_output",
+                hook=self._create_streaming_hook(),
+            )
+
+            if self._workflow_tools:
+                self._register_workflow_tools()
+                _logger.info("工作流工具注册完成")
+
+            self._register_mcp_tools()
+            self._register_skills()
+
 
             self._agent.register_instance_hook(
                 hook_type="post_print",
@@ -383,11 +400,37 @@ class AgentIntegration:
                 result = response.strip()
 
                 _logger.info(f"最终响应: '{result[:100]}...' (长度: {len(result)})")
+
+                # Extract all messages from agent's short-term memory
+                memory_messages = self.extract_agent_memory()
+                print(memory_messages)
+                if memory_messages:
+                    _logger.info(f"从agent memory获取 {len(memory_messages)} 条消息")
+                    self._history.clear()
+                    for mem_msg_dict in memory_messages:
+                        try:
+                            restored_msg = Msg.from_dict(mem_msg_dict)
+                            self._history.add_message(msg=restored_msg)
+                        except Exception as e:
+                            _logger.warning(f"存储消息失败: {e}")
+                else:
+                    # Fallback: store response directly if memory retrieval fails
+                    if hasattr(response_msg, "content"):
+                        from agentscope.message import Msg as ASMsg
+
+                        full_msg = ASMsg(
+                            name="Assistant",
+                            role="assistant",
+                            content=response_msg.content,
+                            metadata=getattr(response_msg, "metadata", None),
+                        )
+                        self._history.add_message(msg=full_msg)
+                    else:
+                        self._history.add_message("assistant", result)
             else:
                 result = "AgentScope框架未安装"
                 _logger.error(result)
-
-            self._history.add_message("assistant", result)
+                self._history.add_message("assistant", result)
 
             elapsed = time.time() - start_time
             _logger.info(f"对话处理完成，耗时: {elapsed:.2f}秒")
@@ -461,21 +504,42 @@ class AgentIntegration:
         _logger.info("Agent已重置")
 
     def get_history(self) -> List[Dict]:
-        """获取当前会话历史"""
         if self._history_repository:
             return self._history.get_all_messages_persisted()
         return self._history.to_dict_list()
 
+    def extract_agent_memory(self) -> List[Dict]:
+        if not self._agent or not hasattr(self._agent, "memory"):
+            _logger.warning("Agent memory not available")
+            return []
+
+        loop = asyncio.new_event_loop()
+        try:
+            memory = loop.run_until_complete(self._agent.memory.get_memory())
+
+            messages = []
+            for msg in reversed(memory):
+                msg_dict = msg.to_dict() if hasattr(msg, "to_dict") else msg
+
+                role = msg_dict.get("role", "unknown")
+                if role not in ["user", "assistant", "system"]:
+                    continue
+                if role == "user":
+                    break
+
+                messages.append(msg_dict)
+
+            _logger.info(f"Extracted {len(messages)} messages from agent memory")
+            messages.reverse()
+            return messages
+
+        except Exception as e:
+            _logger.error(f"Failed to extract agent memory: {e}")
+            return []
+        finally:
+            loop.close()
+
     def create_new_session(self, title: Optional[str] = None) -> Optional[str]:
-        """
-        创建新会话（仅数据库模式）
-
-        Args:
-            title: 会话标题
-
-        Returns:
-            新会话ID，如果未使用数据库模式则返回 None
-        """
         if not self._history_repository:
             _logger.warning("未启用数据库持久化，无法创建新会话")
             return None
@@ -485,23 +549,13 @@ class AgentIntegration:
         return session_id
 
     def switch_session(self, session_id: str) -> bool:
-        """
-        切换到指定会话（仅数据库模式）
-
-        Args:
-            session_id: 会话ID
-
-        Returns:
-            是否成功切换
-        """
         if not self._history_repository:
-            _logger.warning("未启用数据库持久化，无法切换会话")
+            _logger.warning("未启用数据库持久化，无法切换会会")
             return False
 
         success = self._history.set_session(session_id)
         if success:
             _logger.info(f"切换到会话: {session_id}")
-            # 同步历史到Agent的Memory
             self._sync_history_to_memory()
         return success
 
@@ -513,8 +567,8 @@ class AgentIntegration:
         if not AGENTSCOPE_AVAILABLE:
             return
 
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.new_event_loop()
             _logger.info("清空Agent memory...")
             loop.run_until_complete(self._agent.memory.clear())
             _logger.info("Agent memory已清空")
@@ -532,13 +586,8 @@ class AgentIntegration:
                         reconstructed_msg = Msg.from_dict(msg)
                         loop.run_until_complete(self._agent.memory.add(reconstructed_msg))
                         sync_count += 1
-                        _logger.debug(
-                            f"Synced message with preserved metadata: {msg.get('id', 'unknown')}"
-                        )
                     except Exception as e:
-                        _logger.warning(
-                            f"Failed to reconstruct Msg with from_dict, using fallback: {e}"
-                        )
+                        _logger.warning(f"Failed to reconstruct Msg: {e}")
                         role = msg.get("role", "user")
                         content = msg.get("content", "")
                         if role in ("user", "assistant"):
@@ -552,22 +601,13 @@ class AgentIntegration:
                             sync_count += 1
 
             _logger.info(f"已同步 {sync_count} 条消息到Agent memory")
-            loop.close()
-            _logger.info("历史同步完成")
 
         except Exception as e:
             _logger.warning(f"同步历史到Memory失败: {e}")
+        finally:
+            loop.close()
 
     def list_sessions(self, limit: int = 20) -> List[Dict]:
-        """
-        列出所有会话（仅数据库模式）
-
-        Args:
-            limit: 限制返回数量
-
-        Returns:
-            会话列表
-        """
         if not self._history_repository:
             _logger.warning("未启用数据库持久化，无法列出会话")
             return []
@@ -575,15 +615,6 @@ class AgentIntegration:
         return self._history_repository.list_sessions(limit=limit)
 
     def delete_session(self, session_id: str) -> bool:
-        """
-        删除指定会话（仅数据库模式）
-
-        Args:
-            session_id: 会话ID
-
-        Returns:
-            是否成功删除
-        """
         if not self._history_repository:
             _logger.warning("未启用数据库持久化，无法删除会话")
             return False
@@ -595,12 +626,10 @@ class AgentIntegration:
 
     @property
     def current_session_id(self) -> Optional[str]:
-        """获取当前会话ID"""
         return self._history.session_id
 
     @property
     def is_persisted(self) -> bool:
-        """是否使用持久化存储"""
         return self._history_repository is not None
 
     @property

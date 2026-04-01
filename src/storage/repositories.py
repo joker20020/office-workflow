@@ -474,12 +474,16 @@ class ChatHistoryRepository:
     def _extract_content(self, msg: Any) -> str:
         """Extract text content from Msg for database storage"""
         if hasattr(msg, "get_text_content"):
-            return msg.get_text_content()
-        elif hasattr(msg, "content"):
+            result = msg.get_text_content()
+            if result:
+                return result
+        if hasattr(msg, "content"):
             content = msg.content
+            if content is None:
+                return ""
             if isinstance(content, str):
                 return content
-            elif isinstance(content, list):
+            if isinstance(content, list):
                 text_parts = []
                 for block in content:
                     if isinstance(block, dict) and "text" in block:
@@ -487,7 +491,7 @@ class ChatHistoryRepository:
                     elif hasattr(block, "text"):
                         text_parts.append(getattr(block, "text", ""))
                 return "".join(text_parts)
-            return str(content)
+            return str(content) if content else ""
         return ""
 
     def list_sessions(

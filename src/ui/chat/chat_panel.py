@@ -75,9 +75,55 @@ def _extract_text_from_msg(msg: Any) -> str:
     return str(content)
 
 
+def _extract_blocks_from_msg(msg: Any) -> List[Dict[str, Any]]:
+    """Extract all content blocks from AgentScope Msg object.
+
+    Handles both string content and list[ContentBlock] formats.
+
+    Args:
+        msg: AgentScope Msg object
+
+    Returns:
+        List of content block dictionaries
+    """
+    if msg is None:
+        return []
+
+    content = getattr(msg, "content", None)
+    if content is None:
+        return []
+
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+
+    if isinstance(content, list):
+        blocks = []
+        for block in content:
+            if isinstance(block, dict):
+                blocks.append(block)
+            elif hasattr(block, "type"):
+                block_dict = {"type": getattr(block, "type", "unknown")}
+                if block_dict["type"] == "text":
+                    block_dict["text"] = getattr(block, "text", "")
+                elif block_dict["type"] == "thinking":
+                    block_dict["thinking"] = getattr(block, "thinking", "")
+                elif block_dict["type"] == "tool_use":
+                    block_dict["id"] = getattr(block, "id", "")
+                    block_dict["name"] = getattr(block, "name", "")
+                    block_dict["input"] = getattr(block, "input", {})
+                elif block_dict["type"] == "tool_result":
+                    block_dict["id"] = getattr(block, "id", "")
+                    block_dict["name"] = getattr(block, "name", "")
+                    block_dict["output"] = getattr(block, "output", "")
+                blocks.append(block_dict)
+        return blocks
+
+    return [{"type": "text", "text": str(content)}]
+
+
 class AgentWorker(QThread):
     response_ready = Signal(str)
-    streaming_chunk = Signal(str)
+    block_update = Signal(list)
     error_occurred = Signal(str)
 
     def __init__(
@@ -112,6 +158,7 @@ class AgentWorker(QThread):
 
 
 from src.ui.chat.message_widget import MarkdownMessageWidget
+from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
 class SessionListWidget(QWidget, ThemeAwareMixin):
@@ -202,11 +249,15 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             self._list_widget.addItem(item)
 
     def select_session(self, session_id: str) -> None:
-        for i in range(self._list_widget.count()):
-            item = self._list_widget.item(i)
-            if item and item.data(Qt.ItemDataRole.UserRole) == session_id:
-                self._list_widget.setCurrentItem(item)
-                break
+        self._list_widget.blockSignals(True)
+        try:
+            for i in range(self._list_widget.count()):
+                item = self._list_widget.item(i)
+                if item and item.data(Qt.ItemDataRole.UserRole) == session_id:
+                    self._list_widget.setCurrentItem(item)
+                    break
+        finally:
+            self._list_widget.blockSignals(False)
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
@@ -243,12 +294,14 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
-        self._messages: list[MarkdownMessageWidget] = []
+        self._messages: list[MarkdownMessageWidget | CompositeMessageWidget] = []
         self._current_provider: Optional[str] = None
         self._worker: Optional[AgentWorker] = None
         self._current_session_id: Optional[str] = None
-        self._streaming_message: Optional[MarkdownMessageWidget] = None
+        self._streaming_message: Optional[MarkdownMessageWidget | CompositeMessageWidget] = None
         self._streaming_text: str = ""
+        self._streaming_blocks: List[Dict[str, Any]] = []
+        self._current_block_type = "unkonwn"
 
         self._setup_ui()
         self._connect_signals()
@@ -410,11 +463,11 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         if not self._agent or not self._history_repository:
             return
 
-        # 切换会话
         success = self._agent.switch_session(session_id)
         if success:
             self._current_session_id = session_id
             self._load_session_messages()
+            self._load_sessions()
             self._session_list.select_session(session_id)
             _logger.info(f"切换到会话: {session_id}")
         else:
@@ -470,7 +523,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         history = self._agent.get_history()
         for msg in history:
-            self._add_message_widget(msg["role"], msg["content"])
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            if isinstance(content, list) and content and isinstance(content[0], dict):
+                blocks = content
+            elif isinstance(content, str):
+                blocks = [{"type": "text", "text": content}]
+            else:
+                blocks = _extract_blocks_from_msg(msg)
+
+            self._add_message_widget(role, blocks)
 
     def _clear_messages_ui(self) -> None:
         """清空消息UI"""
@@ -493,7 +556,11 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         provider, model_name = item_data if isinstance(item_data, tuple) else (item_data, "")
         self._current_provider = provider
 
-        config = self._api_key_manager.get_config(provider, model_name)
+        if self._api_key_manager:
+            config = self._api_key_manager.get_config(provider, model_name)
+        if config:
+            model_name = config.get("model_name", "") if config else model_name
+            base_url = config.get("base_url", "") if config else base_url
         model_name = config.get("model_name", "") if config else model_name
         base_url = config.get("base_url", "") if config else ""
 
@@ -524,6 +591,28 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         has_text = bool(self._input_text.toPlainText().strip())
         self._send_btn.setEnabled(has_text and self._current_provider is not None)
 
+    def _create_streaming_callback(self) -> Callable:
+        """Create streaming callback for real-time block updates.
+
+        This callback is invoked by the agent's post_print hook during streaming.
+        It extracts content blocks (thinking, tool_use, tool_result, text) from
+        the Msg output and emits block_update signals for UI rendering.
+
+        Returns:
+            Callable: The streaming callback function
+        """
+
+        def callback(agent_self: Any, kwargs: dict, output: Any) -> None:
+            if kwargs is None:
+                return
+            msg = kwargs.get("msg", None)
+            # Extract all content blocks from the Msg object
+            blocks = _extract_blocks_from_msg(msg)
+            if self._worker:
+                self._worker.block_update.emit(blocks)
+
+        return callback
+
     def _send_message(self) -> None:
         if not self._current_provider:
             self._set_status("请先选择API密钥")
@@ -544,72 +633,88 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._set_status("思考中...")
         self._send_btn.setEnabled(False)
 
-        self._worker = AgentWorker(self._agent, text, None)
+        self._worker = AgentWorker(self._agent, text, self._create_streaming_callback())
         self._worker.response_ready.connect(self._on_agent_response)
-        self._worker.streaming_chunk.connect(self._on_streaming_chunk)
+        self._worker.block_update.connect(self._on_block_update)
         self._worker.error_occurred.connect(self._on_agent_error)
         self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()  # Start the worker thread
 
-        def streaming_callback(agent_self: Any, kwargs: dict, output: Any) -> None:
-            msg = kwargs.get("msg")
-            print(msg)
-            if msg is None:
-                return
+    def _on_block_update(self, block_datas: List[Dict[str, Any]]) -> None:
+        block_data = block_datas[-1]
+        _logger.info(f"Block update: {block_data.get('type', 'unknown')}")
+        block_type = block_data.get("type", "text")
 
-            text = _extract_text_from_msg(msg)
-            if not text:
-                return
-
-            self._worker.streaming_chunk.emit(text)
-
-        self._worker._streaming_callback = streaming_callback
-        self._worker.start()
-        _logger.info(f"已启动AgentWorker处理消息: {text[:50]}...")
-
-    def _on_agent_response(self, response: str) -> None:
-        _logger.info(f"收到Agent响应: {response[:100]}...")
-
-        if self._streaming_message:
-            self._streaming_message.set_content(response)
-            self._streaming_message = None
-            self._streaming_text = ""
-        else:
-            self.add_message("assistant", response)
-
-        self._set_status("就绪")
-
-        if self._history_repository:
-            self._load_sessions()
-            if self._current_session_id:
-                self._session_list.select_session(self._current_session_id)
-
-    def _on_agent_error(self, error: str) -> None:
-        _logger.error(f"Agent处理错误: {error}")
-        self.add_message("system", f"错误: {error}")
-        self._set_status("错误")
-
-    def _on_streaming_chunk(self, chunk: str) -> None:
         if self._streaming_message is None:
-            self._streaming_message = MarkdownMessageWidget("assistant", "")
+            self._streaming_message = CompositeMessageWidget("assistant")
             self._messages_layout.addWidget(self._streaming_message)
             self._messages.append(self._streaming_message)
+            self._streaming_blocks = []
+
+        self._streaming_blocks.append(block_data)
+
+        if block_type == "thinking":
+            thinking_content = block_data.get("thinking", "")
+            # Try to update existing thinking block, if not found, add new one
+            if self._current_block_type == block_type:
+                self._streaming_message.update_last_thinking_block(thinking_content)
+            else:
+                self._streaming_message.add_or_update_block(block_data)
+        elif block_type == "tool_use":
+            self._streaming_message.add_or_update_block(block_data)
+        elif block_type == "tool_result":
+            self._streaming_message.add_or_update_block(block_data)
+        elif block_type == "text":
+            text_content = block_data.get("text", "")
+            # Try to update existing text block, if not found, add new one
+            if self._current_block_type == block_type:
+                self._streaming_message.update_last_text_block(text_content)
+            else:
+                self._streaming_message.add_or_update_block(block_data)
+
+        if self._current_block_type != block_type:
+            self._current_block_type = block_type
+
+        QTimer.singleShot(100, self._scroll_to_bottom)
+
+
+    def _on_agent_response(self, response: str) -> None:
+        _logger.info(f"Agent response received, length: {len(response)}")
+        self._set_status("就绪" if self._current_provider else "请选择API密钥")
+
+        if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
+            if self._streaming_blocks:
+                self._streaming_message._blocks = self._streaming_blocks.copy()
+            self._streaming_message = None
+            self._streaming_blocks = []
             self._streaming_text = ""
-
-        self._streaming_text = chunk
-
-        self._streaming_message.set_content(self._streaming_text)
-
+        
         QTimer.singleShot(10, self._scroll_to_bottom)
+
+
+    def _on_agent_error(self, error: str) -> None:
+        _logger.error(f"Agent error: {error}")
+        self._set_status(f"错误: {error}")
+        self._streaming_message = None
+        self._streaming_blocks = []
+        self._streaming_text = ""
 
     def _on_worker_finished(self) -> None:
         _logger.info("AgentWorker完成")
         self._send_btn.setEnabled(self._current_provider is not None)
+        self._current_block_type = "unknown"
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
 
-    def _add_message_widget(self, role: str, content: str) -> None:
-        message_widget = MarkdownMessageWidget(role, content)
+    def _add_message_widget(self, role: str, content: Any) -> None:
+        if isinstance(content, list) and content and isinstance(content[0], dict):
+            message_widget = CompositeMessageWidget(role, content)
+        elif isinstance(content, str):
+            message_widget = MarkdownMessageWidget(role, content)
+        else:
+            message_widget = MarkdownMessageWidget(role, str(content))
+
         self._messages_layout.addWidget(message_widget)
         self._messages.append(message_widget)
         QTimer.singleShot(100, self._scroll_to_bottom)
