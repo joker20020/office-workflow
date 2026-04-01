@@ -3,11 +3,18 @@
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 try:
     from agentscope.agent import ReActAgent
-    from agentscope.message import Msg
+    from agentscope.message import (
+        Msg,
+        TextBlock,
+        ImageBlock,
+        AudioBlock,
+        VideoBlock,
+    )
+    from agentscope.message import URLSource, Base64Source
     from agentscope.model import DashScopeChatModel, OpenAIChatModel
     from agentscope.formatter import (
         DashScopeChatFormatter,
@@ -25,6 +32,12 @@ except ImportError as e:
     AGENTSCOPE_AVAILABLE = False
     ReActAgent = None
     Msg = None
+    TextBlock = None
+    ImageBlock = None
+    AudioBlock = None
+    VideoBlock = None
+    URLSource = None
+    Base64Source = None
     DashScopeChatModel = None
     OpenAIChatModel = None
     DashScopeChatFormatter = None
@@ -86,13 +99,6 @@ class AgentIntegration:
 
         self._agent: Optional[Any] = None
         self._toolkit: Optional[Any] = None
-        self._mcp_clients: List[Any] = []
-        self._api_key: str = ""
-        self._streaming_callbacks: List[Callable] = []
-        self._initialized: bool = False
-        self._provider: str = ""
-        self._model_name: str = ""
-        self._base_url: str = ""
         self._mcp_clients: List[Any] = []
         self._api_key: str = ""
         self._streaming_callbacks: List[Callable] = []
@@ -181,17 +187,6 @@ class AgentIntegration:
             self._toolkit = Toolkit()
             _logger.info("Toolkit创建成功")
 
-            # Define variables for model configuration
-            config = self._api_manager.get_config(provider)
-            if config:
-                _logger.info(f"获取到配置: {config}")
-                model_name = model_name or config.get("model_name", "")
-                base_url = base_url or config.get("base_url", "")
-
-            self._provider = provider
-            self._model_name = model_name
-            self._base_url = base_url
-
             # Create model based on provider
             if provider == "dashscope":
                 model_name = model_name or "qwen-turbo"
@@ -223,8 +218,9 @@ class AgentIntegration:
 
             _logger.info("模型创建成功")
 
-            system_prompt = self.config.get("system_prompt",
-                                            """
+            system_prompt = self.config.get(
+                "system_prompt",
+                """
                             你是一个智能工作流助手。
 
                             你的能力:
@@ -238,9 +234,9 @@ class AgentIntegration:
                             2. 使用 get_node_info 了解特定节点的详细信息
                             3. 使用 search_nodes 按关键词查找相关节点
 
-                            请用自然语言与用户交流。使用工具完成工作流设计。"""
-                            )
-            
+                            请用自然语言与用户交流。使用工具完成工作流设计。""",
+            )
+
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
             _logger.info("创建ReActAgent...")
@@ -268,12 +264,6 @@ class AgentIntegration:
 
             self._register_mcp_tools()
             self._register_skills()
-
-            self._agent.register_instance_hook(
-                hook_type="post_print",
-                hook_name="streaming_output",
-                hook=self._create_streaming_hook(),
-            )
 
             self._initialized = True
             _logger.info(f"Agent初始化成功: provider={provider}, model={self._model_name}")
@@ -357,9 +347,25 @@ class AgentIntegration:
             except Exception as e:
                 _logger.error(f"注册Skill失败: {e}")
 
-    def chat(self, message: str) -> str:
+    def chat(self, message: str | List[Dict[str, Any]]) -> str:
+        """Send message to agent and get response.
+
+        Args:
+            message: Either a text string or list of content blocks.
+                     Content blocks format:
+                     - {"type": "text", "text": "..."}
+                     - {"type": "image", "url": "file:///path/to/image.jpg"}
+                     - {"type": "audio", "url": "file:///path/to/audio.mp3"}
+                     - {"type": "video", "url": "file:///path/to/video.mp4"}
+
+        Returns:
+            Agent response text
+        """
         _logger.info("=" * 50)
-        _logger.info(f"开始处理对话: message='{message[:50]}...' (长度: {len(message)})")
+        if isinstance(message, str):
+            _logger.info(f"开始处理对话: message='{message[:50]}...' (长度: {len(message)})")
+        else:
+            _logger.info(f"开始处理多模态对话: {len(message)} 个内容块")
 
         if not self._initialized:
             _logger.error("Agent未初始化")
@@ -372,12 +378,44 @@ class AgentIntegration:
         start_time = time.time()
 
         try:
-            self._history.add_message("user", message)
-            _logger.info(f"用户消息已添加到历史记录")
-
             if AGENTSCOPE_AVAILABLE and Msg is not None:
-                _logger.info("创建Msg对象...")
-                msg = Msg(name="User", content=message, role="user")
+                if isinstance(message, str):
+                    self._history.add_message("user", message)
+                    _logger.info("用户消息已添加到历史记录")
+                    msg = Msg(name="User", content=message, role="user")
+                else:
+                    content_blocks = []
+                    text_parts = []
+
+                    for block in message:
+                        block_type = block.get("type")
+
+                        if block_type == "text":
+                            text_content = block.get("text", "")
+                            content_blocks.append(TextBlock(type="text", text=text_content))
+                            text_parts.append(text_content)
+
+                        elif block_type == "image":
+                            source = self._create_image_source(block)
+                            content_blocks.append(ImageBlock(type="image", source=source))
+                            text_parts.append("[图片]")
+
+                        elif block_type == "audio":
+                            source = self._create_audio_source(block)
+                            content_blocks.append(AudioBlock(type="audio", source=source))
+                            text_parts.append("[音频]")
+
+                        elif block_type == "video":
+                            source = self._create_video_source(block)
+                            content_blocks.append(VideoBlock(type="video", source=source))
+                            text_parts.append("[视频]")
+
+                    history_text = " ".join(text_parts)
+                    self._history.add_message("user", history_text)
+                    _logger.info(f"多模态消息已添加到历史记录: {history_text[:50]}...")
+
+                    msg = Msg(name="User", content=content_blocks, role="user")
+
                 _logger.info(f"Msg对象创建成功: {msg}")
 
                 _logger.info("开始调用Agent...")
@@ -452,8 +490,12 @@ class AgentIntegration:
             _logger.error("=" * 50)
             return f"错误: {e}"
 
-    async def chat_async(self, message: str) -> str:
-        _logger.info(f"[异步] 开始处理对话: {message[:50]}...")
+    async def chat_async(self, message: str | List[Dict[str, Any]]) -> str:
+        """Async implementation of chat with multimodal support."""
+        if isinstance(message, str):
+            _logger.info(f"[异步] 开始处理对话: {message[:50]}...")
+        else:
+            _logger.info(f"[异步] 开始处理多模态对话: {len(message)} 个内容块")
 
         if not self._initialized or not self._agent:
             return "Agent未初始化，请先配置API密钥"
@@ -461,27 +503,51 @@ class AgentIntegration:
         start_time = time.time()
 
         try:
-            self._history.add_message("user", message)
-
             if AGENTSCOPE_AVAILABLE and Msg is not None:
-                msg = Msg(name="User", content=message, role="user")
+                if isinstance(message, str):
+                    self._history.add_message("user", message)
+                    msg = Msg(name="User", content=message, role="user")
+                else:
+                    content_blocks = []
+                    text_parts = []
+
+                    for block in message:
+                        block_type = block.get("type")
+
+                        if block_type == "text":
+                            text_content = block.get("text", "")
+                            content_blocks.append(TextBlock(type="text", text=text_content))
+                            text_parts.append(text_content)
+
+                        elif block_type == "image":
+                            source = self._create_image_source(block)
+                            content_blocks.append(ImageBlock(type="image", source=source))
+                            text_parts.append("[图片]")
+
+                        elif block_type == "audio":
+                            source = self._create_audio_source(block)
+                            content_blocks.append(AudioBlock(type="audio", source=source))
+                            text_parts.append("[音频]")
+
+                        elif block_type == "video":
+                            source = self._create_video_source(block)
+                            content_blocks.append(VideoBlock(type="video", source=source))
+                            text_parts.append("[视频]")
+
+                    history_text = " ".join(text_parts)
+                    self._history.add_message("user", history_text)
+                    msg = Msg(name="User", content=content_blocks, role="user")
+
                 _logger.info("[异步] 调用Agent...")
 
                 response_msg = await self._agent(msg)
-                response = response_msg.content
 
-                if isinstance(response, list):
-                    text_parts = []
-                    for block in response:
-                        if hasattr(block, "text"):
-                            text_parts.append(block.text)
-                    result = "\n".join(text_parts)
-                else:
-                    result = str(response)
+                text_blocks = response_msg.get_content_blocks("text")
+                result = "".join([block.get("text", "") for block in text_blocks])
+
+                self._history.add_message(msg=response_msg)
             else:
                 result = "AgentScope框架未安装"
-
-            self._history.add_message("assistant", result)
 
             elapsed = time.time() - start_time
             _logger.info(f"[异步] 对话处理完成，耗时: {elapsed:.2f}秒")
@@ -491,6 +557,45 @@ class AgentIntegration:
             elapsed = time.time() - start_time
             _logger.error(f"[异步] Agent对话失败: {e}", exc_info=True)
             return f"错误: {e}"
+
+    def _create_image_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
+        if "url" in block:
+            url = block["url"]
+            if url.startswith("file://"):
+                url = url[7:]
+            return URLSource(type="url", url=url)
+        elif "data" in block:
+            return Base64Source(
+                type="base64", media_type=block.get("media_type", "image/png"), data=block["data"]
+            )
+        else:
+            raise ValueError("Image block must have 'url' or 'data' field")
+
+    def _create_audio_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
+        if "url" in block:
+            url = block["url"]
+            if url.startswith("file://"):
+                url = url[7:]
+            return URLSource(type="url", url=url)
+        elif "data" in block:
+            return Base64Source(
+                type="base64", media_type=block.get("media_type", "audio/mpeg"), data=block["data"]
+            )
+        else:
+            raise ValueError("Audio block must have 'url' or 'data' field")
+
+    def _create_video_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
+        if "url" in block:
+            url = block["url"]
+            if url.startswith("file://"):
+                url = url[7:]
+            return URLSource(type="url", url=url)
+        elif "data" in block:
+            return Base64Source(
+                type="base64", media_type=block.get("media_type", "video/mp4"), data=block["data"]
+            )
+        else:
+            raise ValueError("Video block must have 'url' or 'data' field")
 
     def reset(self) -> None:
         _logger.info("重置Agent...")

@@ -27,6 +27,7 @@ from typing import Optional, List
 from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import json
 
 from src.storage.database import Database
 from src.storage.models import ApiKeyRecord
@@ -154,6 +155,7 @@ class ApiKeyManager:
         api_key: str,
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
+        supported_types: Optional[List[str]] = None,
     ) -> None:
         """
         存储API密钥（加密）
@@ -169,6 +171,8 @@ class ApiKeyManager:
         """
         # 加密密钥
         encrypted_key = self._fernet.encrypt(api_key.encode()).decode()
+        # JSON序列化的支持的模态类型，默认 ["text"]
+        supported_types_json = json.dumps(supported_types or ["text"])
 
         # 保存到数据库
         with Session(self._db.engine) as session:
@@ -183,6 +187,7 @@ class ApiKeyManager:
                 existing.encrypted_key = encrypted_key
                 existing.base_url = base_url
                 existing.model_name = model_name
+                existing.supported_types = supported_types_json
                 _logger.info(f"更新API密钥: {provider}/{model_name or 'default'}")
             else:
                 record = ApiKeyRecord(
@@ -190,6 +195,7 @@ class ApiKeyManager:
                     encrypted_key=encrypted_key,
                     base_url=base_url,
                     model_name=model_name,
+                    supported_types=supported_types_json,
                 )
                 session.add(record)
                 _logger.info(f"存储新API密钥: {provider}/{model_name or 'default'}")
@@ -285,6 +291,9 @@ class ApiKeyManager:
                     "base_url": r.base_url,
                     "model_name": r.model_name,
                     "enabled": r.enabled,
+                    "supported_types": json.loads(r.supported_types)
+                    if getattr(r, "supported_types", None)
+                    else ["text"],
                     "created_at": r.created_at,
                     "updated_at": r.updated_at,
                 }
@@ -311,6 +320,9 @@ class ApiKeyManager:
                 "base_url": record.base_url,
                 "model_name": record.model_name,
                 "enabled": record.enabled,
+                "supported_types": json.loads(record.supported_types)
+                if getattr(record, "supported_types", None)
+                else ["text"],
                 "created_at": record.created_at,
                 "updated_at": record.updated_at,
             }
@@ -338,6 +350,37 @@ class ApiKeyManager:
 
             session.commit()
             _logger.info(f"更新API密钥配置: {provider}/{model_name or 'default'} - {update_fields}")
+            return True
+
+    def update_supported_types(
+        self, provider: str, supported_types: List[str], model_name: Optional[str] = None
+    ) -> bool:
+        """Update supported modal types for an API key.
+
+        Args:
+            provider: Service provider name
+            supported_types: List of supported modal types
+            model_name: Optional model name
+
+        Returns:
+            True if updated successfully, False if key not found
+        """
+        with Session(self._db.engine) as session:
+            stmt = select(ApiKeyRecord).where(
+                ApiKeyRecord.provider == provider,
+                ApiKeyRecord.model_name == model_name,
+            )
+            record = session.execute(stmt).scalar_one_or_none()
+
+            if not record:
+                _logger.warning(f"未找到API密钥: {provider}/{model_name or 'default'}")
+                return False
+
+            record.supported_types = json.dumps(supported_types)
+            session.commit()
+            _logger.info(
+                f"更新API密钥支持类型: {provider}/{model_name or 'default'} - {supported_types}"
+            )
             return True
 
 

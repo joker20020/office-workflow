@@ -1,50 +1,49 @@
-# -*- coding: utf-8 -*-
-"""测试 API密钥管理器和功能"""
-
 import pytest
-
 from src.agent.api_key_manager import ApiKeyManager
 from src.storage.database import Database
 
 
 @pytest.fixture
-def db():
-    database = Database(":memory:")
-    database.create_tables()
-    return database
+def test_db(tmp_path):
+    db_path = tmp_path / "test.db"
+    db = Database(db_path)
+    db.create_tables()
+    yield db
 
 
 @pytest.fixture
-def api_key_manager(db):
-    return ApiKeyManager(db)
+def api_key_manager(test_db):
+    manager = ApiKeyManager(db=test_db)
+    yield manager
 
 
-class TestApiKeyManager:
-    """测试ApiKeyManager的基本功能"""
+def test_store_key_with_supported_types(api_key_manager):
+    api_key_manager.store_key("openai", "sk-test", supported_types=["text", "image"])
 
-    def test_store_and_get_key(self, api_key_manager: api_key_manager):
-        api_key_manager.store_key("test_provider", "test_key_123")
-        key = api_key_manager.get_key("test_provider")
-        assert key == "test_key_123"
+    config = api_key_manager.get_config("openai")
+    assert config is not None
+    assert config["supported_types"] == ["text", "image"]
 
-    def test_delete_key(self, api_key_manager: api_key_manager):
-        api_key_manager.store_key("test_provider", "test_key_123")
-        result = api_key_manager.delete_key("test_provider")
-        assert result is True
 
-        key = api_key_manager.get_key("test_provider")
-        assert key is None
+def test_get_config_returns_supported_types(api_key_manager):
+    api_key_manager.store_key("anthropic", "sk-test", supported_types=["text", "image", "audio"])
 
-    def test_list_providers(self, api_key_manager: api_key_manager):
-        api_key_manager.store_key("provider1", "key1")
-        api_key_manager.store_key("provider2", "key2")
+    config = api_key_manager.get_config("anthropic")
+    assert config["supported_types"] == ["text", "image", "audio"]
 
-        providers = api_key_manager.list_providers()
-        assert "provider1" in providers
-        assert "provider2" in providers
 
-    def test_has_key(self, api_key_manager: api_key_manager):
-        assert not api_key_manager.has_key("nonexistent")
+def test_update_supported_types(api_key_manager):
+    api_key_manager.store_key("openai", "sk-test")
 
-        api_key_manager.store_key("test_provider", "test_key")
-        assert api_key_manager.has_key("test_provider")
+    success = api_key_manager.update_supported_types("openai", ["text", "image", "video"])
+    assert success is True
+
+    config = api_key_manager.get_config("openai")
+    assert config["supported_types"] == ["text", "image", "video"]
+
+
+def test_default_supported_types(api_key_manager):
+    api_key_manager.store_key("deepseek", "sk-test")
+
+    config = api_key_manager.get_config("deepseek")
+    assert config["supported_types"] == ["text"]

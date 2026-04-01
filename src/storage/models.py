@@ -221,6 +221,11 @@ class ApiKeyRecord(Base):
     encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    supported_types: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default='["text"]',
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

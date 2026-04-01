@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional, List, Dict
 
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QUrl, QSize
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QScrollArea,
     QVBoxLayout,
@@ -18,7 +19,10 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QSplitter,
     QMessageBox,
+    QSizePolicy,
 )
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
@@ -115,6 +119,27 @@ def _extract_blocks_from_msg(msg: Any) -> List[Dict[str, Any]]:
                     block_dict["id"] = getattr(block, "id", "")
                     block_dict["name"] = getattr(block, "name", "")
                     block_dict["output"] = getattr(block, "output", "")
+                elif block_dict["type"] == "image":
+                    source = getattr(block, "source", None)
+                    if source:
+                        block_dict["source"] = {
+                            "type": getattr(source, "type", "url"),
+                            "url": getattr(source, "url", ""),
+                        }
+                elif block_dict["type"] == "audio":
+                    source = getattr(block, "source", None)
+                    if source:
+                        block_dict["source"] = {
+                            "type": getattr(source, "type", "url"),
+                            "url": getattr(source, "url", ""),
+                        }
+                elif block_dict["type"] == "video":
+                    source = getattr(block, "source", None)
+                    if source:
+                        block_dict["source"] = {
+                            "type": getattr(source, "type", "url"),
+                            "url": getattr(source, "url", ""),
+                        }
                 blocks.append(block_dict)
         return blocks
 
@@ -129,7 +154,7 @@ class AgentWorker(QThread):
     def __init__(
         self,
         agent: AgentIntegration,
-        message: str,
+        message: str | List[Dict[str, Any]],
         streaming_callback: Optional[Callable] = None,
         parent: Optional[QWidget] = None,
     ):
@@ -140,7 +165,12 @@ class AgentWorker(QThread):
 
     def run(self) -> None:
         try:
-            _logger.info(f"AgentWorker: 开始处理消息: {self._message[:50]}...")
+            msg_preview = (
+                self._message[:50]
+                if isinstance(self._message, str)
+                else f"[multimodal: {len(self._message)} blocks]"
+            )
+            _logger.info(f"AgentWorker: 开始处理消息: {msg_preview}...")
 
             if self._streaming_callback:
                 self._agent.register_streaming_callback(self._streaming_callback)
@@ -301,7 +331,8 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._streaming_message: Optional[MarkdownMessageWidget | CompositeMessageWidget] = None
         self._streaming_text: str = ""
         self._streaming_blocks: List[Dict[str, Any]] = []
-        self._current_block_type = "unkonwn"
+        self._current_block_type = "unknown"
+        self._attachments: List[Dict[str, Any]] = []
 
         self._setup_ui()
         self._connect_signals()
@@ -405,15 +436,64 @@ class ChatPanel(QWidget, ThemeAwareMixin):
     def _create_input_area(self) -> QWidget:
         self._input_area_frame = QFrame()
         self._input_area_frame.setMinimumHeight(120)
-        self._input_area_frame.setMaximumHeight(200)
         layout = QVBoxLayout(self._input_area_frame)
         layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
+
+        # 附件预览区域 — 独立滚动，不影响输入框高度
+        self._preview_scroll = QScrollArea()
+        self._preview_scroll.setWidgetResizable(True)
+        self._preview_scroll.setFixedHeight(90)
+        self._preview_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._preview_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._preview_scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        self._preview_container = QWidget()
+        self._preview_layout = QHBoxLayout(self._preview_container)
+        self._preview_layout.setContentsMargins(0, 0, 0, 0)
+        self._preview_layout.setSpacing(8)
+        self._preview_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._preview_scroll.setWidget(self._preview_container)
+        self._preview_scroll.hide()
 
         self._input_text = QTextEdit()
         self._input_text.setPlaceholderText("输入消息，与AI助手对话...")
         self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
 
+        # 底部按钮行：附件按钮居左 + 发送按钮居右
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+
+        # 多模态附件按钮（默认隐藏，根据 API Key 支持类型显示）
+        self._image_btn = QPushButton("📷 图片")
+        self._image_btn.setToolTip("添加图片")
+        self._image_btn.setFixedSize(70, 32)
+        self._image_btn.clicked.connect(self._select_image)
+        self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._image_btn.hide()
+
+        self._audio_btn = QPushButton("🎤 音频")
+        self._audio_btn.setToolTip("添加音频")
+        self._audio_btn.setFixedSize(70, 32)
+        self._audio_btn.clicked.connect(self._select_audio)
+        self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._audio_btn.hide()
+
+        self._video_btn = QPushButton("🎬 视频")
+        self._video_btn.setToolTip("添加视频")
+        self._video_btn.setFixedSize(70, 32)
+        self._video_btn.clicked.connect(self._select_video)
+        self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._video_btn.hide()
 
         self._send_btn = QPushButton("发送")
         self._send_btn.setFixedHeight(32)
@@ -421,13 +501,302 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
         self._send_btn.setEnabled(False)
 
+        # 左侧附件按钮
+        button_layout.addWidget(self._image_btn)
+        button_layout.addWidget(self._audio_btn)
+        button_layout.addWidget(self._video_btn)
         button_layout.addStretch()
+        # 右侧发送按钮
         button_layout.addWidget(self._send_btn)
 
+        layout.addWidget(self._preview_scroll)
         layout.addWidget(self._input_text, 1)
         layout.addLayout(button_layout)
 
         return self._input_area_frame
+
+    def _select_image(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择图片", "", "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)"
+        )
+        if file_path:
+            self._add_multimodal_attachment("image", file_path)
+
+    def _select_audio(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择音频", "", "Audio (*.mp3 *.wav *.aac *.ogg *.flac)"
+        )
+        if file_path:
+            self._add_multimodal_attachment("audio", file_path)
+
+    def _select_video(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择视频", "", "Video (*.mp4 *.avi *.mov *.mkv *.webm)"
+        )
+        if file_path:
+            self._add_multimodal_attachment("video", file_path)
+
+    def _add_multimodal_attachment(self, media_type: str, file_path: str):
+        from pathlib import Path
+
+        attachment = {
+            "type": media_type,
+            "path": file_path,
+            "url": f"file://{file_path}",
+        }
+        self._attachments.append(attachment)
+
+        # 创建预览卡片
+        card = self._create_preview_card(attachment)
+        self._preview_layout.addWidget(card)
+
+        self._preview_scroll.show()
+        _logger.info(f"添加{media_type}附件: {file_path}")
+
+    def _create_preview_card(self, attachment: Dict[str, Any]) -> QFrame:
+        """创建附件预览卡片，包含可视化预览和删除按钮"""
+        from pathlib import Path
+
+        media_type = attachment["type"]
+        file_path = attachment["path"]
+        file_name = Path(file_path).name
+
+        card = QFrame()
+        card.setFixedHeight(80)
+        card.setMinimumWidth(100)
+        card.setMaximumWidth(160)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Theme.hex("background_secondary")};
+                border: 1px solid {Theme.hex("border_primary")};
+                border-radius: 6px;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(4, 4, 4, 4)
+        card_layout.setSpacing(2)
+
+        # 预览内容区域
+        preview_widget = self._create_media_preview(media_type, file_path)
+        card_layout.addWidget(preview_widget, 1)
+
+        # 底部：文件名 + 删除按钮
+        bottom = QHBoxLayout()
+        bottom.setSpacing(4)
+
+        name_label = QLabel(file_name)
+        name_label.setFixedHeight(16)
+        name_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.hex("text_secondary")};
+                font-size: 11px;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        name_label.setToolTip(file_path)
+
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedSize(16, 16)
+        remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {Theme.hex("text_secondary")};
+                border: none;
+                font-size: 12px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                color: #e74c3c;
+            }}
+        """)
+        remove_btn.clicked.connect(lambda checked, a=attachment: self._remove_attachment(a))
+
+        bottom.addWidget(name_label, 1)
+        bottom.addWidget(remove_btn)
+        card_layout.addLayout(bottom)
+
+        # 存储附件引用到卡片，方便后续删除
+        card._attachment_ref = attachment
+        return card
+
+    def _create_media_preview(self, media_type: str, file_path: str) -> QWidget:
+        """根据媒体类型创建预览控件"""
+        if media_type == "image":
+            return self._create_image_preview(file_path)
+        elif media_type == "audio":
+            return self._create_audio_preview(file_path)
+        elif media_type == "video":
+            return self._create_video_preview(file_path)
+        else:
+            label = QLabel("未知类型")
+            label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; background: transparent;")
+            return label
+
+    def _create_image_preview(self, file_path: str) -> QLabel:
+        """创建图片缩略图预览"""
+        label = QLabel()
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setMinimumHeight(44)
+
+        pixmap = QPixmap(file_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                140, 44,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            label.setPixmap(scaled)
+        else:
+            label.setText("[无法加载]")
+            label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; background: transparent; border: none;")
+
+        return label
+
+    def _create_audio_preview(self, file_path: str) -> QWidget:
+        """创建音频文件预览（带播放按钮）"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(4)
+
+        icon = QLabel("🎵")
+        icon.setFixedWidth(20)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        play_btn = QPushButton("▶")
+        play_btn.setFixedSize(28, 28)
+        play_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.hex("border_focus")};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.hex("accent_hover_bg")};
+            }}
+        """)
+
+        player = QMediaPlayer(widget)
+        audio_output = QAudioOutput(widget)
+        player.setAudioOutput(audio_output)
+        player.setSource(QUrl.fromLocalFile(file_path))
+
+        def toggle_play():
+            if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                player.pause()
+                play_btn.setText("▶")
+            else:
+                player.play()
+                play_btn.setText("⏸")
+
+        play_btn.clicked.connect(toggle_play)
+
+        layout.addWidget(icon)
+        layout.addWidget(play_btn)
+        layout.addStretch()
+
+        return widget
+
+    def _create_video_preview(self, file_path: str) -> QWidget:
+        """创建视频缩略图预览"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+
+        # 视频预览使用小型播放控件
+        video_widget = QVideoWidget()
+        video_widget.setFixedHeight(36)
+        video_widget.setMinimumWidth(80)
+        video_widget.setStyleSheet(f"""
+            QVideoWidget {{
+                background-color: #000;
+                border-radius: 3px;
+            }}
+        """)
+
+        player = QMediaPlayer(widget)
+        audio_output = QAudioOutput(widget)
+        player.setAudioOutput(audio_output)
+        player.setVideoOutput(video_widget)
+        player.setSource(QUrl.fromLocalFile(file_path))
+
+        # 播放/暂停按钮
+        play_btn = QPushButton("▶")
+        play_btn.setFixedSize(22, 22)
+        play_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.hex("border_focus")};
+                color: white;
+                border: none;
+                border-radius: 11px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.hex("accent_hover_bg")};
+            }}
+        """)
+
+        def toggle_play():
+            if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                player.pause()
+                play_btn.setText("▶")
+            else:
+                player.play()
+                play_btn.setText("⏸")
+
+        play_btn.clicked.connect(toggle_play)
+
+        controls = QHBoxLayout()
+        controls.addWidget(play_btn)
+        controls.addStretch()
+
+        layout.addWidget(video_widget)
+        layout.addLayout(controls)
+
+        return widget
+
+    def _remove_attachment(self, attachment: Dict[str, Any]):
+        """移除指定附件及其预览卡片"""
+        if attachment in self._attachments:
+            self._attachments.remove(attachment)
+
+        # 找到并删除对应的预览卡片
+        layout = self._preview_layout
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            widget = item.widget()
+            if widget and isinstance(widget, QFrame) and hasattr(widget, "_attachment_ref"):
+                if widget._attachment_ref is attachment:
+                    layout.removeWidget(widget)
+                    widget.deleteLater()
+                    break
+
+        # 没有附件时隐藏预览区
+        if not self._attachments:
+            self._preview_scroll.hide()
+
+        _logger.info(f"移除附件: {attachment['path']}")
+
+    def _clear_preview_area(self):
+        """清空所有预览卡片"""
+        layout = self._preview_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self._preview_scroll.hide()
 
     def _connect_signals(self) -> None:
         self._input_text.textChanged.connect(self._on_text_changed)
@@ -556,6 +925,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         provider, model_name = item_data if isinstance(item_data, tuple) else (item_data, "")
         self._current_provider = provider
 
+        config = None
         if self._api_key_manager:
             config = self._api_key_manager.get_config(provider, model_name)
         if config:
@@ -563,6 +933,22 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             base_url = config.get("base_url", "") if config else ""
         model_name = config.get("model_name", "") if config else model_name
         base_url = config.get("base_url", "") if config else ""
+
+        supported_types = config.get("supported_types", ["text"]) if config else ["text"]
+        has_image = "image" in supported_types
+        has_audio = "audio" in supported_types
+        has_video = "video" in supported_types
+
+        self._image_btn.setVisible(has_image)
+        self._audio_btn.setVisible(has_audio)
+        self._video_btn.setVisible(has_video)
+
+        has_multimodal = any([has_image, has_audio, has_video])
+
+        _logger.info(
+            f"切换API密钥: {provider}/{model_name or 'default'}, "
+            f"支持类型: {supported_types}, 多模态: {has_multimodal}"
+        )
 
         if model_name:
             self._set_status(f"已选择: {provider} ({model_name})")
@@ -619,10 +1005,26 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             return
 
         text = self._input_text.toPlainText().strip()
-        if not text:
+        if not text and not self._attachments:
             return
 
+        if self._attachments:
+            content = [{"type": "text", "text": text}]
+            for attachment in self._attachments:
+                content.append(
+                    {
+                        "type": attachment["type"],
+                        "url": attachment["url"],
+                    }
+                )
+            message_content = content
+        else:
+            message_content = text
+
         self._input_text.clear()
+        self._attachments.clear()
+        self._clear_preview_area()
+
         self.add_message("user", text)
         self.message_sent.emit(text)
 
@@ -633,12 +1035,12 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._set_status("思考中...")
         self._send_btn.setEnabled(False)
 
-        self._worker = AgentWorker(self._agent, text, self._create_streaming_callback())
+        self._worker = AgentWorker(self._agent, message_content, self._create_streaming_callback())
         self._worker.response_ready.connect(self._on_agent_response)
         self._worker.block_update.connect(self._on_block_update)
         self._worker.error_occurred.connect(self._on_agent_error)
         self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()  # Start the worker thread
+        self._worker.start()
 
     def _on_block_update(self, block_datas: List[Dict[str, Any]]) -> None:
         block_data = block_datas[-1]
@@ -671,12 +1073,13 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                 self._streaming_message.update_last_text_block(text_content)
             else:
                 self._streaming_message.add_or_update_block(block_data)
+        elif block_type in ("image", "audio", "video"):
+            self._streaming_message.add_or_update_block(block_data)
 
         if self._current_block_type != block_type:
             self._current_block_type = block_type
 
         QTimer.singleShot(100, self._scroll_to_bottom)
-
 
     def _on_agent_response(self, response: str) -> None:
         _logger.info(f"Agent response received, length: {len(response)}")
@@ -688,9 +1091,8 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             self._streaming_message = None
             self._streaming_blocks = []
             self._streaming_text = ""
-        
-        QTimer.singleShot(10, self._scroll_to_bottom)
 
+        QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _on_agent_error(self, error: str) -> None:
         _logger.error(f"Agent error: {error}")
@@ -802,3 +1204,9 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
         if hasattr(self, "_send_btn"):
             self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
+        if hasattr(self, "_image_btn"):
+            self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        if hasattr(self, "_audio_btn"):
+            self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        if hasattr(self, "_video_btn"):
+            self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())

@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QSpinBox,
     QComboBox,
+    QFileDialog,
 )
 from src.ui.theme import Theme
 from src.agent.api_key_manager import ApiKeyManager
-from src.ui.theme import Theme
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -64,6 +64,28 @@ class EditApiKeyDialog(QDialog):
         self._model_input.setPlaceholderText("如: gpt-4, qwen-max (可选)")
         layout.addRow("模型名称:", self._model_input)
 
+        # Modal types selection
+        self._modal_group = QWidget()
+        modal_layout = QHBoxLayout(self._modal_group)
+        modal_layout.setContentsMargins(0, 0, 0, 0)
+        modal_layout.setSpacing(12)
+
+        self._text_cb = QCheckBox("文本")
+        self._text_cb.setChecked(True)
+        self._text_cb.setEnabled(False)
+
+        self._image_cb = QCheckBox("图片")
+        self._audio_cb = QCheckBox("音频")
+        self._video_cb = QCheckBox("视频")
+
+        modal_layout.addWidget(self._text_cb)
+        modal_layout.addWidget(self._image_cb)
+        modal_layout.addWidget(self._audio_cb)
+        modal_layout.addWidget(self._video_cb)
+        modal_layout.addStretch()
+
+        layout.addRow("支持类型:", self._modal_group)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -81,41 +103,34 @@ class EditApiKeyDialog(QDialog):
             if config.get("model_name"):
                 self._model_input.setText(config["model_name"])
 
-    def get_values(self) -> tuple[str | None, str | None, str | None]:
+            # Load supported types
+            supported_types = config.get("supported_types", ["text"])
+            self._image_cb.setChecked("image" in supported_types)
+            self._audio_cb.setChecked("audio" in supported_types)
+            self._video_cb.setChecked("video" in supported_types)
+
+    def get_values(self) -> tuple[str | None, str | None, str | None, List[str]]:
+        """Get dialog values including supported modal types.
+
+        Returns:
+            Tuple of (api_key, base_url, model_name, supported_types)
+        """
+        # Build supported_types list
+        supported_types = ["text"]
+        if self._image_cb.isChecked():
+            supported_types.append("image")
+        if self._audio_cb.isChecked():
+            supported_types.append("audio")
+        if self._video_cb.isChecked():
+            supported_types.append("video")
+
         return (
             self._key_input.text().strip() or None,
             self._base_url_input.text().strip() or None,
             self._model_input.text().strip() or None,
+            supported_types,
         )
 
-
-from typing import Optional, List, Dict
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QTabWidget,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QMessageBox,
-    QCheckBox,
-    QSpinBox,
-    QComboBox,
-    QFileDialog,
-)
-from src.ui.theme import Theme
-from src.agent.api_key_manager import ApiKeyManager
-from src.ui.theme import Theme
-from src.utils.logger import get_logger
-
-_logger = get_logger(__name__)
 
 # 支持的服务商列表
 SUPPORTED_PROVIDERS = [
@@ -171,6 +186,34 @@ class AddApiKeyDialog(QDialog):
         self._model_input.setPlaceholderText("如: gpt-4, qwen-max (可选)")
         layout.addRow("模型名称:", self._model_input)
 
+        # Modal types selection
+        self._modal_group = QWidget()
+        modal_layout = QHBoxLayout(self._modal_group)
+        modal_layout.setContentsMargins(0, 0, 0, 0)
+        modal_layout.setSpacing(12)
+
+        self._text_cb = QCheckBox("文本")
+        self._text_cb.setChecked(True)
+        self._text_cb.setEnabled(False)  # Text always required
+        self._text_cb.setToolTip("文本支持（必选）")
+
+        self._image_cb = QCheckBox("图片")
+        self._image_cb.setToolTip("支持图片输入")
+
+        self._audio_cb = QCheckBox("音频")
+        self._audio_cb.setToolTip("支持音频输入")
+
+        self._video_cb = QCheckBox("视频")
+        self._video_cb.setToolTip("支持视频输入")
+
+        modal_layout.addWidget(self._text_cb)
+        modal_layout.addWidget(self._image_cb)
+        modal_layout.addWidget(self._audio_cb)
+        modal_layout.addWidget(self._video_cb)
+        modal_layout.addStretch()
+
+        layout.addRow("支持类型:", self._modal_group)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -188,15 +231,31 @@ class AddApiKeyDialog(QDialog):
             self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
             self._toggle_key_btn.setText("👁")
 
-    def get_values(self) -> tuple[str, str, str | None, str | None]:
+    def get_values(self) -> tuple[str, str, str | None, str | None, List[str]]:
+        """Get dialog values including supported modal types.
+
+        Returns:
+            Tuple of (provider, api_key, base_url, model_name, supported_types)
+        """
         idx = self._provider_combo.currentIndex()
         provider = SUPPORTED_PROVIDERS[idx][0] if idx >= 0 else ""
         key = self._key_input.text().strip()
+
+        # Build supported_types list
+        supported_types = ["text"]
+        if self._image_cb.isChecked():
+            supported_types.append("image")
+        if self._audio_cb.isChecked():
+            supported_types.append("audio")
+        if self._video_cb.isChecked():
+            supported_types.append("video")
+
         return (
             provider,
             key,
             self._base_url_input.text().strip() or None,
             self._model_input.text().strip() or None,
+            supported_types,
         )
 
 
@@ -267,15 +326,28 @@ class ApiKeyPanel(QWidget):
     def _add_key(self):
         dialog = AddApiKeyDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            provider, key, base_url, model_name = dialog.get_values()
-            if provider and key:
-                try:
-                    self._manager.store_key(provider, key, base_url, model_name)
-                    self._load_keys()
-                    self.key_added.emit(provider, "***")
-                    QMessageBox.information(self, "成功", f"已添加 {provider} API密钥")
-                except Exception as e:
-                    QMessageBox.warning(self, "错误", f"添加失败: {e}")
+            provider, key, base_url, model_name, supported_types = dialog.get_values()
+            if not provider or not key:
+                QMessageBox.warning(self, "输入错误", "请填写服务商和API密钥")
+                return
+
+            try:
+                self._manager.store_key(
+                    provider,
+                    key,
+                    base_url=base_url,
+                    model_name=model_name,
+                    supported_types=supported_types,
+                )
+                self._load_keys()
+                self.key_added.emit(provider, "***")
+                _logger.info(
+                    f"添加API密钥: {provider}/{model_name or 'default'}, "
+                    f"支持类型: {supported_types}"
+                )
+                QMessageBox.information(self, "成功", f"已添加 {provider} API密钥")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"添加失败: {e}")
 
     def _edit_key(self):
         current_item = self._key_list.currentItem()
@@ -289,15 +361,41 @@ class ApiKeyPanel(QWidget):
 
         dialog = EditApiKeyDialog(provider, model_name, self._manager, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_key, new_base_url, new_model_name = dialog.get_values()
+            new_key, new_base_url, model_name_new, supported_types = dialog.get_values()
             try:
                 if new_key:
-                    self._manager.store_key(provider, new_key, new_base_url, new_model_name)
-                elif new_base_url:
-                    self._manager.update_config(provider, model_name, base_url=new_base_url)
+                    self._manager.store_key(
+                        provider,
+                        new_key,
+                        base_url=new_base_url,
+                        model_name=model_name,
+                        supported_types=supported_types,
+                    )
+                else:
+                    if new_base_url or model_name_new:
+                        update_kwargs = {}
+                        if new_base_url:
+                            update_kwargs["base_url"] = new_base_url
+                        if model_name_new:
+                            update_kwargs["model_name"] = model_name_new
+                        self._manager.update_config(
+                            provider,
+                            model_name=model_name,
+                            **update_kwargs,
+                        )
+                    self._manager.update_supported_types(
+                        provider,
+                        supported_types,
+                        model_name=model_name,
+                    )
+
                 self._load_keys()
                 self.key_modified.emit(provider)
-                display_name = f"{provider}/{new_model_name or model_name or 'default'}"
+                _logger.info(
+                    f"更新API密钥: {provider}/{model_name or 'default'}, "
+                    f"支持类型: {supported_types}"
+                )
+                display_name = f"{provider}/{model_name_new or model_name or 'default'}"
                 QMessageBox.information(self, "成功", f"已更新 {display_name} 配置")
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"更新失败: {e}")

@@ -122,6 +122,25 @@ class Database:
         """
         with self.engine.connect() as conn:
             self._migrate_add_config_json_column(conn)
+            self._migrate_add_supported_types_column(conn)
+
+    def _migrate_add_supported_types_column(self, conn) -> None:
+        """
+        迁移: 为 api_keys 表添加 supported_types 列
+        """
+        from sqlalchemy.exc import OperationalError
+
+        try:
+            conn.execute(text("SELECT supported_types FROM api_keys LIMIT 1"))
+        except OperationalError:
+            _logger.info("迁移: 为 api_keys 表添加 supported_types 列")
+            conn.execute(
+                text(
+                    "ALTER TABLE api_keys ADD COLUMN supported_types TEXT NOT NULL DEFAULT '[\"text\"]'"
+                )
+            )
+            conn.commit()
+            _logger.info("迁移完成: supported_types 列已添加")
 
     def _migrate_add_config_json_column(self, conn) -> None:
         """
