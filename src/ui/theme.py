@@ -1617,6 +1617,69 @@ class Theme:
         """
 
     @classmethod
+    def get_tool_use_block_header_frame_stylesheet(cls) -> str:
+        return f"""
+        QFrame {{
+            background-color: {cls.hex("background_secondary")};
+            border: 1px solid {cls.hex("border_primary")};
+            border-left: 3px solid {cls.hex("border_focus")};
+            border-radius: 4px;
+        }}
+        """
+
+    @classmethod
+    def get_tool_use_block_toggle_button_stylesheet(cls) -> str:
+        return f"""
+        QPushButton {{
+            background-color: transparent;
+            color: {cls.hex("text_link")};
+            border: none;
+            padding: 4px;
+            font-size: 11px;
+        }}
+        QPushButton:hover {{
+            color: {cls.hex("accent_hover")};
+        }}
+        """
+
+    @classmethod
+    def get_tool_result_block_header_frame_stylesheet(cls, is_error: bool = False) -> str:
+        border_color = cls.hex("border_primary") if not is_error else cls.hex("state_error")
+        return f"""
+        QFrame {{
+            background-color: {cls.hex("background_secondary")};
+            border: 1px solid {border_color};
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            border-bottom-left-radius: 0px;
+            border-bottom-right-radius: 0px;
+        }}
+        """
+
+    @classmethod
+    def get_tool_result_block_status_icon_stylesheet(cls, is_error: bool = False) -> str:
+        color = cls.hex("state_success") if not is_error else cls.hex("state_error")
+        return f"""
+        QLabel {{
+            color: {color};
+            font-size: 14px;
+            font-weight: bold;
+            background-color: transparent;
+        }}
+        """
+
+    @classmethod
+    def get_tool_result_block_name_stylesheet(cls) -> str:
+        return f"""
+        QLabel {{
+            color: {cls.hex("text_primary")};
+            font-size: 12px;
+            font-weight: bold;
+            background-color: transparent;
+        }}
+        """
+
+    @classmethod
     def get_tool_use_block_input_stylesheet(cls) -> str:
         return f"""
             QTextEdit {{

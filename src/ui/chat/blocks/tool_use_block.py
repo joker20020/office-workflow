@@ -84,52 +84,18 @@ class ToolUseBlockWidget(BaseBlockWidget):
 
     def _apply_styles(self) -> None:
         if self._header_frame:
-            self._header_frame.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {Theme.hex("background_secondary")};
-                    border: 1px solid {Theme.hex("border_primary")};
-                    border-left: 3px solid {Theme.hex("border_focus")};
-                    border-radius: 4px;
-                }}
-            """)
+            self._header_frame.setStyleSheet(Theme.get_tool_use_block_header_frame_stylesheet())
 
         if self._tool_name_label:
-            self._tool_name_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {Theme.hex("accent_primary")};
-                    font-size: 12px;
-                    font-weight: bold;
-                    background-color: transparent;
-                }}
-            """)
+            self._tool_name_label.setStyleSheet(Theme.get_tool_use_block_header_stylesheet())
 
         if self._input_edit:
-            self._input_edit.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: {Theme.hex("background_secondary")};
-                    color: {Theme.hex("text_primary")};
-                    border: 1px solid {Theme.hex("border_primary")};
-                    border-left: 3px solid {Theme.hex("border_focus")};
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                    font-size: 11px;
-                }}
-            """)
+            self._input_edit.setStyleSheet(Theme.get_tool_use_block_input_stylesheet())
 
         if self._toggle_input_btn:
-            self._toggle_input_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {Theme.hex("text_link")};
-                    border: none;
-                    padding: 4px;
-                    font-size: 11px;
-                }}
-                QPushButton:hover {{
-                    color: {Theme.hex("accent_hover")};
-                }}
-            """)
+            self._toggle_input_btn.setStyleSheet(
+                Theme.get_tool_use_block_toggle_button_stylesheet()
+            )
 
     def _set_input_content(self) -> None:
         if not self._input_edit:

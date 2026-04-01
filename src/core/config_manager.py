@@ -34,7 +34,13 @@ _logger = get_logger(__name__)
 _global_config_manager_instance: Optional["ConfigManager"] = None
 _global_lock = threading.Lock()
 
-DEFAULT_CONFIG: Dict[str, Any] = {"theme": "dark"}
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "theme": "dark",
+    "recent_workflows": [],
+    "agent": {
+        "system_prompt": ""  # Empty string means use default
+    },
+}
 
 
 def get_config_manager(config_path: Optional[Path] = None) -> "ConfigManager":
@@ -133,6 +139,25 @@ class ConfigManager:
             配置值，如果键不存在则返回 default
         """
         return self._config.get(key, default)
+
+    def get_nested(self, key_path: str, default: Any = None) -> Any:
+        """
+        获取嵌套配置的值，支持点记法，例如 "agent.system_prompt"。
+
+        Args:
+            key_path: 用点号分隔的键路径，如 "agent.system_prompt"。
+            default: 未找到时的默认返回值。
+
+        Returns:
+            根据路径解析出的值，如果任意一级失败则返回 default。
+        """
+        current: Any = self._config
+        for key in key_path.split("."):
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return default
+        return current
 
     def set(self, key: str, value: Any) -> None:
         """

@@ -41,6 +41,7 @@ from src.agent.chat_history import ChatHistory
 from src.agent.workflow_tools import WorkflowTools
 from src.agent.node_formatter import NodeFormatter
 from src.engine.node_engine import NodeEngine
+from src.core.config_manager import get_config_manager
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -81,6 +82,8 @@ class AgentIntegration:
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
+        self.config = get_config_manager()
+
         self._agent: Optional[Any] = None
         self._toolkit: Optional[Any] = None
         self._mcp_clients: List[Any] = []
@@ -220,7 +223,24 @@ class AgentIntegration:
 
             _logger.info("模型创建成功")
 
-            system_prompt = self._build_system_prompt()
+            system_prompt = self.config.get("system_prompt",
+                                            """
+                            你是一个智能工作流助手。
+
+                            你的能力:
+                            1. 理解用户需求，分析需要哪些节点
+                            2. 使用工具创建和配置节点
+                            3. 连接节点形成工作流
+                            4. 执行工作流
+
+                            使用建议:
+                            1. 首先使用 get_node_types 查看有哪些节点可用
+                            2. 使用 get_node_info 了解特定节点的详细信息
+                            3. 使用 search_nodes 按关键词查找相关节点
+
+                            请用自然语言与用户交流。使用工具完成工作流设计。"""
+                            )
+            print(system_prompt)
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
             _logger.info("创建ReActAgent...")
@@ -248,7 +268,6 @@ class AgentIntegration:
 
             self._register_mcp_tools()
             self._register_skills()
-
 
             self._agent.register_instance_hook(
                 hook_type="post_print",
@@ -337,22 +356,6 @@ class AgentIntegration:
                     _logger.info(f"注册Skill: {skill['name']}")
             except Exception as e:
                 _logger.error(f"注册Skill失败: {e}")
-
-    def _build_system_prompt(self) -> str:
-        return """你是一个智能工作流助手。
-
-你的能力:
-1. 理解用户需求，分析需要哪些节点
-2. 使用工具创建和配置节点
-3. 连接节点形成工作流
-4. 执行工作流
-
-使用建议:
-1. 首先使用 get_node_types 查看有哪些节点可用
-2. 使用 get_node_info 了解特定节点的详细信息
-3. 使用 search_nodes 按关键词查找相关节点
-
-请用自然语言与用户交流。使用工具完成工作流设计。"""
 
     def chat(self, message: str) -> str:
         _logger.info("=" * 50)

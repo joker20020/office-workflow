@@ -58,33 +58,10 @@ class ThinkingBlockWidget(BaseBlockWidget):
 
     def _apply_styles(self) -> None:
         if self._header_button:
-            self._header_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {Theme.hex("background_tertiary")};
-                    color: {Theme.hex("text_hint")};
-                    border: none;
-                    border-radius: 4px;
-                    padding: 6px 10px;
-                    text-align: left;
-                    font-size: 12px;
-                }}
-                QPushButton:hover {{
-                    background-color: {Theme.hex("background_hover")};
-                }}
-            """)
+            self._header_button.setStyleSheet(Theme.get_thinking_block_header_stylesheet())
 
         if self._content_edit:
-            self._content_edit.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: {Theme.hex("background_tertiary")};
-                    color: {Theme.hex("text_hint")};
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 12px;
-                    font-style: italic;
-                }}
-            """)
+            self._content_edit.setStyleSheet(Theme.get_thinking_block_content_stylesheet())
 
     def _get_header_text(self) -> str:
         arrow = "▶" if self._collapsed else "▼"

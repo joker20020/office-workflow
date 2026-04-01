@@ -90,77 +90,26 @@ class ToolResultBlockWidget(BaseBlockWidget):
             main_layout.addWidget(self._toggle_button)
 
     def _apply_styles(self) -> None:
-        if self._is_error:
-            status_color = Theme.hex("state_error")
-            border_color = Theme.hex("state_error")
-        else:
-            status_color = Theme.hex("state_success")
-            border_color = Theme.hex("border_primary")
-
-        bg_color = Theme.hex("background_secondary")
-
         if self._header_frame:
-            self._header_frame.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {bg_color};
-                    border: 1px solid {border_color};
-                    border-radius: 4px;
-                    border-bottom-left-radius: 0;
-                    border-bottom-right-radius: 0;
-                }}
-            """)
+            self._header_frame.setStyleSheet(
+                Theme.get_tool_result_block_header_frame_stylesheet(is_error=self._is_error)
+            )
 
         if self._status_icon_label:
-            self._status_icon_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {status_color};
-                    font-size: 14px;
-                    font-weight: bold;
-                    background-color: transparent;
-                }}
-            """)
+            self._status_icon_label.setStyleSheet(
+                Theme.get_tool_result_block_status_icon_stylesheet(is_error=self._is_error)
+            )
 
         if self._tool_name_label:
-            self._tool_name_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {Theme.hex("text_primary")};
-                    font-size: 12px;
-                    font-weight: bold;
-                    background-color: transparent;
-                }}
-            """)
+            self._tool_name_label.setStyleSheet(Theme.get_tool_result_block_name_stylesheet())
 
         if self._output_edit:
-            self._output_edit.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: {Theme.hex("background_tertiary")};
-                    color: {Theme.hex("text_primary")};
-                    border: 1px solid {border_color};
-                    border-top: none;
-                    border-radius: 4px;
-                    border-top-left-radius: 0;
-                    border-top-right-radius: 0;
-                    padding: 8px;
-                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                    font-size: 12px;
-                }}
-            """)
+            self._output_edit.setStyleSheet(
+                Theme.get_tool_result_block_content_stylesheet(is_error=self._is_error)
+            )
 
         if self._toggle_button:
-            self._toggle_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {Theme.hex("text_link")};
-                    border: none;
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                    font-size: 11px;
-                    text-align: left;
-                }}
-                QPushButton:hover {{
-                    background-color: {Theme.hex("background_hover")};
-                }}
-            """)
+            self._toggle_button.setStyleSheet(Theme.get_tool_result_show_more_button_stylesheet())
 
     def _detect_error_state(self, output: str) -> bool:
         output_lower = output.lower()
