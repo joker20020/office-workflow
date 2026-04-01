@@ -1,0 +1,10 @@
+{
+    "id": "com.office.excelTools",
+    "name": "Excel 工具",
+    "version": "1.0.0",
+    "author": "OfficeTools",
+    "description": "Excel 文件处理工具，包含文件对比、数据预览等节点",
+    "repository": "",
+    "branch": "main",
+    "nodes": ["excel.compare", "excel.preview"]
+}

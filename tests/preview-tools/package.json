@@ -1,0 +1,10 @@
+{
+    "id": "com.example.previewTools",
+    "name": "预览工具",
+    "version": "1.0.0",
+    "author": "Office Team",
+    "description": "文本预览工具包，提供可视化文本查看功能",
+    "repository": "https://github.com/example/preview-tools",
+    "branch": "main",
+    "nodes": ["preview.text"]
+}
