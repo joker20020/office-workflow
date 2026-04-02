@@ -67,6 +67,45 @@ def _excel_compare(
 
     coverage = len(common) / len(values1) * 100 if values1 else 0
 
+    # 生成文本报告
+    lines = []
+    lines.append("=" * 60)
+    lines.append("              Excel 对比分析报告")
+    lines.append("=" * 60)
+    lines.append("")
+    lines.append(f"【对比列】")
+    lines.append(f"  文件1 ({path1.name}): {col1}")
+    lines.append(f"  文件2 ({path2.name}): {col2}")
+    lines.append("")
+    lines.append(f"【统计概览】")
+    lines.append(f"  文件1 唯一值数量: {len(values1)}")
+    lines.append(f"  文件2 唯一值数量: {len(values2)}")
+    lines.append(f"  共同拥有: {len(common)}")
+    lines.append(f"  仅文件1有: {len(only_in_file1)}")
+    lines.append(f"  仅文件2有: {len(only_in_file2)}")
+    lines.append(f"  文件2对文件1的覆盖率: {coverage:.2f}%")
+
+    if only_in_file2:
+        lines.append("")
+        lines.append(f"【文件2 新增内容】({len(only_in_file2)} 项)")
+        for i, val in enumerate(sorted(only_in_file2), 1):
+            lines.append(f"  {i}. {val}")
+
+    if only_in_file1:
+        lines.append("")
+        lines.append(f"【文件2 缺失内容】({len(only_in_file1)} 项)")
+        for i, val in enumerate(sorted(only_in_file1), 1):
+            lines.append(f"  {i}. {val}")
+
+    if common:
+        lines.append("")
+        lines.append(f"【共同包含的内容】({len(common)} 项)")
+        for i, val in enumerate(sorted(common), 1):
+            lines.append(f"  {i}. {val}")
+
+    lines.append("")
+    lines.append("=" * 60)
+
     return {
         "file1_total": len(values1),
         "file2_total": len(values2),
@@ -77,6 +116,7 @@ def _excel_compare(
         "common_values": sorted(common),
         "only_in_file1": sorted(only_in_file1),
         "only_in_file2": sorted(only_in_file2),
+        "report_text": "\n".join(lines),
     }
 
 
@@ -109,6 +149,7 @@ excel_compare = NodeDefinition(
         ),
     ],
     outputs=[
+        PortDefinition("report_text", PortType.STRING, "对比报告", show_preview=True),
         PortDefinition("file1_total", PortType.INTEGER, "文件1唯一值数量"),
         PortDefinition("file2_total", PortType.INTEGER, "文件2唯一值数量"),
         PortDefinition("common_count", PortType.INTEGER, "共同拥有数量"),
