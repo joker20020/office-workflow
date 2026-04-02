@@ -427,7 +427,7 @@ class AgentIntegration:
 
                     # 检测中断响应
                     self._last_response_interrupted = bool(
-                        getattr(response_msg, 'metadata', {}).get("_is_interrupted", False)
+                        (getattr(response_msg, 'metadata', None) or {}).get("_is_interrupted", False)
                     )
                     if self._last_response_interrupted:
                         _logger.info("检测到中断响应")
@@ -448,7 +448,7 @@ class AgentIntegration:
 
                 # Extract all messages from agent's short-term memory
                 memory_messages = self.extract_agent_memory()
-                print(memory_messages)
+                
                 if memory_messages:
                     _logger.info(f"从agent memory获取 {len(memory_messages)} 条消息")
                     self._history.clear()
