@@ -1,0 +1,8 @@
+{
+    "name": "test_widgets",
+    "version": "1.0.0",
+    "description": "提供内联控件测试节点",
+    "author": "OfficeTools",
+    "permissions": ["node.register"],
+    "entry": "TestWidgetsPlugin"
+}

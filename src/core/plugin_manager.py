@@ -36,12 +36,12 @@ if TYPE_CHECKING:
 from src.core.event_bus import EventBus, EventType
 from src.core.permission_manager import Permission, PermissionManager, PermissionSet
 from src.core.plugin_base import PluginBase
+from src.core.plugin_sandbox import PluginSandbox, SandboxWarning
+from src.core.plugin_manifest import PluginManifest
 from src.storage.repositories import PluginPermissionRepository, PluginRepository
 from src.utils.logger import get_logger
 
 # 模块日志记录器
-_logger = get_logger(__name__)
-
 _logger = get_logger(__name__)
 
 # ================================================================
@@ -134,6 +134,8 @@ class PluginInfo:
     plugin_class: Optional[Type[PluginBase]] = None
     instance: Optional[PluginBase] = None
     loaded: bool = False
+    manifest: Optional[PluginManifest] = None
+    sandbox_warnings: Optional[List[SandboxWarning]] = None
 
 
 class PluginLoadError(Exception):
@@ -246,9 +248,32 @@ class PluginManager:
 
             # 尝试发现插件类
             try:
-                plugin_class = self._discover_plugin_class(item)
+                # 层级 1: 读取 plugin.json 清单
+                manifest = PluginManifest.from_dir(item)
+
+                # 层级 2: AST 代码扫描（仅警告，不阻止加载）
+                sandbox = PluginSandbox(
+                    permissions=(
+                        manifest.get_permission_set() if manifest else PermissionSet.empty()
+                    ),
+                )
+                sandbox_warnings = sandbox.validate_source(item)
+                if sandbox_warnings:
+                    warning_strs = [str(w) for w in sandbox_warnings]
+                    _logger.warning(
+                        f"插件 {item.name} AST 扫描发现 {len(sandbox_warnings)} 个警告:"
+                    )
+                    for w in warning_strs:
+                        _logger.warning(f"  - {w}")
+
+                # 层级 3: 在沙箱受限环境中加载模块
+                plugin_class = self._discover_plugin_class(item, sandbox)
                 if plugin_class is not None:
                     plugin_name = plugin_class.name
+
+                    # 如果有清单，以清单的 name 为准
+                    if manifest and manifest.name:
+                        plugin_name = manifest.name
 
                     # 检查是否重复
                     if plugin_name in self._discovered:
@@ -263,6 +288,8 @@ class PluginManager:
                         name=plugin_name,
                         module_path=item,
                         plugin_class=plugin_class,
+                        manifest=manifest,
+                        sandbox_warnings=sandbox_warnings if sandbox_warnings else None,
                     )
                     discovered_names.append(plugin_name)
 
@@ -272,12 +299,17 @@ class PluginManager:
 
         return discovered_names
 
-    def _discover_plugin_class(self, plugin_dir: Path) -> Optional[Type[PluginBase]]:
+    def _discover_plugin_class(
+        self,
+        plugin_dir: Path,
+        sandbox: Optional[PluginSandbox] = None,
+    ) -> Optional[Type[PluginBase]]:
         """
         在插件目录中发现插件类
 
         Args:
             plugin_dir: 插件目录路径
+            sandbox: 可选的沙箱实例，提供则使用受限环境执行模块
 
         Returns:
             找到的插件类，如果没有则返回 None
@@ -296,18 +328,38 @@ class PluginManager:
         sys.modules[spec.name] = module
 
         try:
-            spec.loader.exec_module(module)
+            if sandbox is not None:
+                # 在沙箱受限环境中执行模块
+                sandbox.safe_exec_module(spec, module)
+            else:
+                spec.loader.exec_module(module)
         except Exception as e:
             _logger.error(f"加载插件模块失败: {init_file}, 错误: {e}")
             return None
 
         # 查找 PluginBase 的子类
+        # 如果有 manifest.entry，优先查找指定类名
+        manifest = PluginManifest.from_dir(plugin_dir)
+        target_class_name = manifest.get_entry_class_name() if manifest else None
+
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
 
             # 检查是否是类且是 PluginBase 的子类（但不是 PluginBase 本身）
             if isinstance(attr, type) and issubclass(attr, PluginBase) and attr is not PluginBase:
+                if target_class_name and attr_name != target_class_name:
+                    continue
                 return attr
+
+        # 如果指定了入口类但未找到，回退到查找任意 PluginBase 子类
+        if target_class_name:
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type) and issubclass(attr, PluginBase) and attr is not PluginBase:
+                    _logger.warning(
+                        f"插件入口类 {target_class_name} 未找到，使用 {attr_name}"
+                    )
+                    return attr
 
         return None
 
@@ -351,16 +403,19 @@ class PluginManager:
 
             # 权限检查（如果提供了权限管理器）
             if self.permission_manager:
-                # required_perms = info.plugin_class.get_required_permissions()
-                # self._check_and_grant_permissions(name, required_perms)
                 granted_permissions = self.permission_manager.get_granted_permissions(name)
             else:
                 granted_permissions = set()
+
+            # 创建沙箱
+            perm_set = PermissionSet.from_list(list(granted_permissions))
+            sandbox = PluginSandbox(permissions=perm_set)
 
             # 设置加载状态
             instance._set_loaded(True, context)
 
             # 调用插件的生命周期方法（优先 on_enable，如不存在则回退到 on_load）
+            # 层级 5: 使用沙箱超时保护
             if context is not None:
                 from src.core.permission_proxy import PermissionProxy
 
@@ -371,22 +426,22 @@ class PluginManager:
                     config_repository=self._plugin_repository,
                 )
                 if callable(getattr(instance, "on_enable", None)):
-                    instance.on_enable(proxy)
+                    sandbox.run_with_timeout(instance.on_enable, args=(proxy,))
                 else:
                     # 回退到兼容的 on_load
                     on_load = getattr(instance, "on_load", None)
                     if callable(on_load):
-                        on_load(proxy)
+                        sandbox.run_with_timeout(on_load, args=(proxy,))
                     else:
                         _logger.warning(f"Plugin {name} has no on_enable/on_load(proxy) method.")
             else:
                 # 没有上下文时直接调用（测试场景）
                 if callable(getattr(instance, "on_enable", None)):
-                    instance.on_enable(None)
+                    sandbox.run_with_timeout(instance.on_enable, args=(None,))
                 else:
                     on_load = getattr(instance, "on_load", None)
                     if callable(on_load):
-                        on_load(None)
+                        sandbox.run_with_timeout(on_load, args=(None,))
                     else:
                         _logger.warning(f"Plugin {name} has no on_enable/on_load(None) method.")
 

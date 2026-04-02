@@ -944,6 +944,7 @@ class PluginPermissionRepository:
             # 创建新的插件记录
             new_record = PluginRecord(name=plugin_name)
             session.add(new_record)
+            session.flush()
             _logger.debug(f"创建插件记录: {plugin_name}")
 
 

@@ -1,0 +1,8 @@
+{
+    "name": "workflow_tools",
+    "version": "1.0.0",
+    "description": "为AI助手提供工作流和节点操作能力",
+    "author": "OfficeTools",
+    "permissions": ["agent.tool", "node.read"],
+    "entry": "WorkflowToolsPlugin"
+}
