@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from PySide6.QtGui import QIcon
+from PySide6.QtCore import QDir
 
 from src.agent import (
     AgentIntegration,
@@ -165,7 +166,10 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         """设置UI"""
-        self.setWindowIcon(QIcon("resources/logo.ico"))
+        # 使用应用图标（兼容开发目录和打包路径）
+        app_icon = self._load_app_icon()
+        if app_icon and not app_icon.isNull():
+            self.setWindowIcon(app_icon)
         self.setWindowTitle("办公小工具整合平台")
         self.setMinimumSize(1200, 800)
         self.resize(1280, 900)
@@ -213,6 +217,31 @@ class MainWindow(QMainWindow):
         self._nav_rail.add_item("plugins", "插件管理", "🧩")
         self._nav_rail.add_item("packages", "节点包", "📦")
         self._nav_rail.add_item("settings", "设置", "⚙️")
+
+    @staticmethod
+    def _load_app_icon() -> QIcon:
+        """加载应用图标（多尺寸 PNG，兼容开发目录和打包路径）。
+
+        搜索优先级：
+          1. <项目根>/resources/logo.png（开发模式）
+          2. <项目根>/resources/logo.ico（开发模式备用）
+          3. PySide6 的 QApplication.applicationDirPath()/../resources/（打包模式）
+        """
+        from pathlib import Path
+
+        candidates = [
+            Path("resources/logo.png"),
+            Path("resources/logo.ico"),
+            Path(__file__).resolve().parent.parent.parent / "resources" / "logo.png",
+            Path(__file__).resolve().parent.parent.parent / "resources" / "logo.ico",
+        ]
+
+        for path in candidates:
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+
+        return QIcon()
 
     def _create_home_page(self) -> QWidget:
         """创建首页"""

@@ -18,7 +18,8 @@
 """
 
 from enum import Enum
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import QApplication
 
 
 class ThemeType(Enum):
@@ -35,6 +36,9 @@ class Theme:
     提供统一的颜色常量和样式表定义。
     所有UI组件应使用此处的颜色，确保视觉一致性。
     """
+
+    # Emoji 字体回退（用于包含 emoji 图标的组件样式）
+    _emoji_font_family: str = ""
 
     # ==================== 颜色常量 ====================
 
@@ -138,6 +142,57 @@ class Theme:
         if cls._current_theme == ThemeType.DARK:
             return cls.DARK_COLORS
         return cls.LIGHT_COLORS
+
+    @classmethod
+    def init_emoji_font(cls) -> None:
+        """初始化 emoji 字体回退字符串，供包含 emoji 的组件样式使用。
+
+        应在 QApplication 创建后调用一次。
+        """
+        import platform
+        if platform.system() != "Linux":
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        default_family = app.font().family()
+        candidates = ["Noto Color Emoji", "Emoji One", "Twemoji Mozilla", "Segoe UI Emoji"]
+        available = [default_family]
+        try:
+            from PySide6.QtGui import QFontDatabase
+            db = QFontDatabase
+            for c in candidates:
+                if db.families().__contains__(c):
+                    available.append(c)
+        except Exception:
+            available.append("Noto Color Emoji")
+        cls._emoji_font_family = ", ".join(f'"{f}"' for f in available)
+
+    @classmethod
+    def emoji_font_css(cls) -> str:
+        """返回用于 QSS 的 font-family 声明（含 emoji 回退）。
+
+        在样式表中使用: font-family: {Theme.emoji_font_css()};
+        如果尚未初始化或非 Linux，返回空字符串。
+        """
+        if cls._emoji_font_family:
+            return f"font-family: {cls._emoji_font_family};"
+        return ""
+
+    @classmethod
+    def apply_emoji_to_font(cls, font: QFont) -> None:
+        """将 emoji 字体回退应用到一个 QFont 对象上（用于 QPainter 绘制 emoji）。
+
+        Args:
+            font: 要修改的 QFont 对象
+        """
+        if not cls._emoji_font_family:
+            return
+        families = [f.strip('" ') for f in cls._emoji_font_family.split(",")]
+        if len(families) >= 2:
+            font.setFamily(families[0])
+            for sub in families[1:]:
+                font.insertSubstitution(families[0], sub)
 
     @classmethod
     def set_theme(cls, theme: ThemeType) -> None:
@@ -353,6 +408,7 @@ class Theme:
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 outline: none;
+                {cls.emoji_font_css()}
             }}
             QTreeWidget::item {{
                 padding: 4px;
@@ -521,6 +577,7 @@ class Theme:
             QLabel#quickActionIcon {{
                 font-size: 32px;
                 background-color: transparent;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1594,6 +1651,7 @@ class Theme:
             QLabel {{
                 font-size: {size}px;
                 background-color: transparent;
+                {cls.emoji_font_css()}
             }}
         """
 

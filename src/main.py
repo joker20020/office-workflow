@@ -19,12 +19,13 @@ import sys
 from pathlib import Path
 from typing import Set, cast
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
 from src.core.app_context import AppContext
 from src.core.permission_manager import Permission
 from src.ui.main_window import MainWindow
+from src.ui.theme import Theme
 from src.utils.logger import get_logger
 from src.utils.error_handler import install_error_handler
 
@@ -118,43 +119,75 @@ def _setup_emoji_font(app: QApplication) -> None:
 
     Linux 上 Qt 默认字体（如 Ubuntu Sans）不包含 emoji 字形，
     需要将 emoji 字体加入 font-family 回退列表。
+    通过 Theme.init_emoji_font() 初始化，各组件样式表引用
+    Theme.emoji_font_css() 来应用。
+    """
+    Theme.init_emoji_font()
+    if Theme._emoji_font_family:
+        _logger.info(f"已设置 emoji 字体回退: {Theme._emoji_font_family}")
+
+
+def _install_linux_icon(project_root: Path) -> None:
+    """安装应用图标到 Linux 图标主题目录，让任务栏/Dock 能找到。
+
+    GNOME/KDE/Wayland 任务栏通过 desktop file 的 Icon= 字段
+    在 XDG 图标主题目录中查找应用图标。
+    将 PNG 图标安装到 ~/.local/share/icons/ 即可被识别。
     """
     import platform
+    import shutil
 
     if platform.system() != "Linux":
         return
 
-    default_font = app.font()
-    font = QFont(default_font.family(), default_font.pointSize())
+    icon_dir = Path.home() / ".local" / "share" / "icons" / "hicolor"
+    app_icon_name = "OfficeWorkflow"
 
-    # 构造回退字体列表：默认字体 + emoji 字体
-    emoji_families = []
-    try:
-        from PySide6.QtGui import QFontDatabase
+    # 安装各尺寸 PNG 到 hicolor 图标主题目录
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    installed = False
+    for s in sizes:
+        src = project_root / "resources" / f"logo_{s}.png"
+        if not src.exists():
+            continue
+        dest_dir = icon_dir / f"{s}x{s}" / "apps"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{app_icon_name}.png"
+        if not dest.exists() or src.stat().st_mtime > dest.stat().st_mtime:
+            shutil.copy2(src, dest)
+            installed = True
 
-        db = QFontDatabase
-        for candidate in ("Noto Color Emoji", "Emoji One", "Twemoji Mozilla", "Segoe UI Emoji"):
-            if db.families().__contains__(candidate):
-                emoji_families.append(candidate)
-    except Exception:
-        pass
-
-    if emoji_families:
-        # QFont.setStyleHint 无法直接设 fallback，但我们可以
-        # 通过 QSS 全局 font-family 实现
-        families = [default_font.family()] + emoji_families
-        font_family_list = ", ".join(f'"{f}"' for f in families)
-        app.setStyleSheet(
-            f"* {{ font-family: {font_family_list}; }}\n" + (app.styleSheet() or "")
+    # 安装 .desktop 文件
+    desktop_src = project_root / "resources" / "OfficeWorkflow.desktop"
+    if desktop_src.exists():
+        apps_dir = Path.home() / ".local" / "share" / "applications"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        desktop_dest = apps_dir / "OfficeWorkflow.desktop"
+        desktop_content = desktop_src.read_text(encoding="utf-8")
+        # 替换 Exec 为实际的 python 启动命令
+        desktop_content = desktop_content.replace(
+            "Exec=/usr/bin/env python3 %f/main.py",
+            f"Exec={shutil.which('python3') or '/usr/bin/python3'} {project_root / 'main.py'}",
         )
-        _logger.info(f"已设置 emoji 字体回退: {font_family_list}")
-    else:
-        # 无法检测到 emoji 字体时，尝试直接用系统默认 + Noto Color Emoji
-        font_family_list = f'"{default_font.family()}", "Noto Color Emoji"'
-        app.setStyleSheet(
-            f"* {{ font-family: {font_family_list}; }}\n" + (app.styleSheet() or "")
+        desktop_content = desktop_content.replace(
+            "Icon=OfficeWorkflow",
+            f"Icon={app_icon_name}",
         )
-        _logger.info(f"已设置 emoji 字体回退 (fallback): {font_family_list}")
+        desktop_dest.write_text(desktop_content, encoding="utf-8")
+        import os
+        desktop_dest.chmod(0o755)
+        installed = True
+
+    if installed:
+        # 刷新图标缓存
+        try:
+            import subprocess
+            subprocess.run(["gtk-update-icon-cache", "-f",
+                           str(Path.home() / ".local" / "share" / "icons" / "hicolor")],
+                          capture_output=True, timeout=5)
+        except Exception:
+            pass
+        _logger.info("Linux 图标和 desktop 文件已安装")
 
 
 def main() -> int:
@@ -174,6 +207,26 @@ def main() -> int:
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("OfficeTools")
     app.setDesktopFileName("OfficeWorkflow")
+
+    # 设置应用图标（Linux 任务栏/Dock 和 Windows 任务栏需要）
+    from pathlib import Path as _P
+    _project_root = _P(__file__).resolve().parent.parent
+    _icon_candidates = [
+        _project_root / "resources" / "logo.png",
+        _project_root / "resources" / "logo.ico",
+        _P("resources/logo.png"),
+        _P("resources/logo.ico"),
+    ]
+    _app_icon = QIcon()
+    for _ic in _icon_candidates:
+        _icon = QIcon(str(_ic))
+        if not _icon.isNull():
+            _app_icon = _icon
+            break
+    if not _app_icon.isNull():
+        app.setWindowIcon(_app_icon)
+        # Linux: 安装图标到用户图标主题目录，让任务栏能找到
+        _install_linux_icon(_project_root)
 
     # Linux 上默认字体可能不包含 emoji 字形，需要设置字体回退
     _setup_emoji_font(app)

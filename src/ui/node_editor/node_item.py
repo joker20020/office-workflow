@@ -567,6 +567,7 @@ class NodeGraphicsItem(QGraphicsObject):
         painter.setPen(QPen(Qt.GlobalColor.white))
         font = QFont()
         font.setPointSize(12)
+        Theme.apply_emoji_to_font(font)
         painter.setFont(font)
         painter.drawText(
             QRectF(self.PADDING, 0, 20, self.HEADER_HEIGHT),

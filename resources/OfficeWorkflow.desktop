@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OfficeWorkflow
+Name[zh_CN]=办公小工具整合平台
+Comment=Office Workflow Tools Platform
+Comment[zh_CN]=基于节点编辑器的智能办公工具整合平台
+Icon=OfficeWorkflow
+Exec=/usr/bin/env python3 %f/main.py
+Categories=Office;Utility;
+StartupNotify=true

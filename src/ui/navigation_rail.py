@@ -93,7 +93,8 @@ class NavItem(QPushButton, ThemeAwareMixin):
         # 图标标签 - 存储为实例变量以便主题刷新
         if self._icon:
             self._icon_label = QLabel(self._icon)
-            self._icon_label.setStyleSheet("font-size: 18px;")
+            emoji_css = Theme.emoji_font_css()
+            self._icon_label.setStyleSheet(f"font-size: 18px; {emoji_css}")
             layout.addWidget(self._icon_label)
 
         # 文字标签 - 存储为实例变量以便主题刷新
@@ -116,7 +117,8 @@ class NavItem(QPushButton, ThemeAwareMixin):
 
         # 刷新内部标签的样式（清除缓存，让父样式生效）
         if hasattr(self, "_icon_label"):
-            self._icon_label.setStyleSheet("font-size: 18px;")
+            emoji_css = Theme.emoji_font_css()
+            self._icon_label.setStyleSheet(f"font-size: 18px; {emoji_css}")
         if hasattr(self, "_text_label"):
             self._text_label.setStyleSheet("")  # 清除样式，继承父样式
 
