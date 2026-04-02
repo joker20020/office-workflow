@@ -701,6 +701,28 @@ class Theme:
         """
 
     @classmethod
+    @classmethod
+    def get_chat_stop_button_stylesheet(cls) -> str:
+        """获取对话停止按钮样式表"""
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("state_error")};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("danger_hover_bg")};
+            }}
+            QPushButton:disabled {{
+                background-color: {cls.hex("background_tertiary")};
+                color: {cls.hex("text_secondary")};
+            }}
+        """
+
+    @classmethod
     def get_chat_clear_button_stylesheet(cls) -> str:
         """获取对话清空按钮样式表"""
         return f"""

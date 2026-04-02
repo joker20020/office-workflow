@@ -104,6 +104,8 @@ class AgentIntegration:
         self._provider: str = ""
         self._model_name: str = ""
         self._base_url: str = ""
+        self._current_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._last_response_interrupted: bool = False
 
         if history_repository:
             if session_id:
@@ -416,11 +418,19 @@ class AgentIntegration:
                 _logger.info(f"Model: {self._model_name}")
                 _logger.info(f"Base URL: {self._base_url}")
 
-                loop = asyncio.new_event_loop()
+                self._current_loop = asyncio.new_event_loop()
+                loop = self._current_loop
                 try:
                     _logger.info("执行异步调用...")
                     response_msg = loop.run_until_complete(self._agent(msg))
                     _logger.info(f"异步调用完成，响应类型: {type(response_msg)}")
+
+                    # 检测中断响应
+                    self._last_response_interrupted = bool(
+                        getattr(response_msg, 'metadata', {}).get("_is_interrupted", False)
+                    )
+                    if self._last_response_interrupted:
+                        _logger.info("检测到中断响应")
 
                     text_blocks = response_msg.get_content_blocks("text")
                     _logger.info(f"响应内容块: {text_blocks}")
@@ -428,6 +438,7 @@ class AgentIntegration:
                     _logger.info(f"响应内容类型: {type(response)}")
                     _logger.info(f"响应内容长度: {len(str(response)) if response else 0}")
                 finally:
+                    self._current_loop = None
                     loop.close()
                     _logger.info("事件循环已关闭")
 
@@ -588,6 +599,39 @@ class AgentIntegration:
             )
         else:
             raise ValueError("Video block must have 'url' or 'data' field")
+
+    def interrupt(self, reason: str = "用户中断") -> bool:
+        """中断当前 Agent 执行
+
+        通过 asyncio.run_coroutine_threadsafe 将 agent.interrupt()
+        调度到正在运行的事件循环中，线程安全。
+
+        Args:
+            reason: 中断原因
+
+        Returns:
+            是否成功调度中断
+        """
+        if not self._agent or not self._current_loop:
+            _logger.warning("无法中断: Agent 未运行")
+            return False
+
+        try:
+            interrupt_msg = Msg(name="system", content=reason, role="system")
+            asyncio.run_coroutine_threadsafe(
+                self._agent.interrupt(interrupt_msg),
+                self._current_loop,
+            )
+            _logger.info(f"已调度中断: {reason}")
+            return True
+        except Exception as e:
+            _logger.error(f"中断 Agent 失败: {e}")
+            return False
+
+    @property
+    def is_running(self) -> bool:
+        """Agent 是否正在处理请求"""
+        return self._current_loop is not None
 
     def reset(self) -> None:
         _logger.info("重置Agent...")

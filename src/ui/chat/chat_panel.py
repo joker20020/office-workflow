@@ -172,6 +172,7 @@ def _normalize_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 class AgentWorker(QThread):
     response_ready = Signal(str)
+    response_interrupted = Signal(str)
     block_update = Signal(list)
     error_occurred = Signal(str)
 
@@ -186,6 +187,16 @@ class AgentWorker(QThread):
         self._agent = agent
         self._message = message
         self._streaming_callback = streaming_callback
+
+    def cancel(self) -> bool:
+        """请求中断当前 Agent 执行
+
+        从 UI 线程调用，通过 asyncio.run_coroutine_threadsafe
+        将 agent.interrupt() 调度到 Worker 线程的事件循环中。
+        """
+        if self._agent:
+            return self._agent.interrupt("用户点击停止按钮")
+        return False
 
     def run(self) -> None:
         try:
@@ -205,7 +216,11 @@ class AgentWorker(QThread):
             if self._streaming_callback:
                 self._agent.unregister_streaming_callback(self._streaming_callback)
 
-            self.response_ready.emit(response)
+            if self._agent._last_response_interrupted:
+                _logger.info("AgentWorker: 响应被中断")
+                self.response_interrupted.emit(response)
+            else:
+                self.response_ready.emit(response)
         except Exception as e:
             _logger.error(f"AgentWorker: 发生错误: {e}", exc_info=True)
             self.error_occurred.emit(str(e))
@@ -586,16 +601,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         self._send_btn = QPushButton("发送")
         self._send_btn.setFixedHeight(32)
-        self._send_btn.clicked.connect(self._send_message)
+        self._send_btn.clicked.connect(self._on_action_button_clicked)
         self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
         self._send_btn.setEnabled(False)
+        self._is_send_mode = True  # True=发送模式, False=停止模式
 
         # 左侧附件按钮
         button_layout.addWidget(self._image_btn)
         button_layout.addWidget(self._audio_btn)
         button_layout.addWidget(self._video_btn)
         button_layout.addStretch()
-        # 右侧发送按钮
+        # 右侧发送/停止按钮
         button_layout.addWidget(self._send_btn)
 
         layout.addWidget(self._preview_scroll)
@@ -1052,8 +1068,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                 self._set_status("Agent初始化失败")
 
     def _on_text_changed(self) -> None:
+        if not self._is_send_mode:
+            return
         has_text = bool(self._input_text.toPlainText().strip())
         self._send_btn.setEnabled(has_text and self._current_provider is not None)
+
+    def _on_action_button_clicked(self) -> None:
+        """发送/停止按钮统一点击处理"""
+        if self._is_send_mode:
+            self._send_message()
+        else:
+            self._on_stop_clicked()
 
     def _create_streaming_callback(self) -> Callable:
         """Create streaming callback for real-time block updates.
@@ -1128,10 +1153,11 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             return
 
         self._set_status("思考中...")
-        self._send_btn.setEnabled(False)
+        self._set_stop_mode(True)
 
         self._worker = AgentWorker(self._agent, message_content, self._create_streaming_callback())
         self._worker.response_ready.connect(self._on_agent_response)
+        self._worker.response_interrupted.connect(self._on_agent_interrupted)
         self._worker.block_update.connect(self._on_block_update)
         self._worker.error_occurred.connect(self._on_agent_error)
         self._worker.finished.connect(self._on_worker_finished)
@@ -1198,11 +1224,52 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
     def _on_worker_finished(self) -> None:
         _logger.info("AgentWorker完成")
-        self._send_btn.setEnabled(self._current_provider is not None)
+        self._set_stop_mode(False)
         self._current_block_type = "unknown"
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
+
+    def _set_stop_mode(self, stop: bool) -> None:
+        """切换发送按钮为停止模式或恢复发送模式"""
+        self._is_send_mode = not stop
+        if stop:
+            self._send_btn.setText("停止")
+            self._send_btn.setEnabled(True)
+            self._send_btn.setStyleSheet(Theme.get_chat_stop_button_stylesheet())
+        else:
+            self._send_btn.setText("发送")
+            self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
+            has_text = bool(self._input_text.toPlainText().strip())
+            self._send_btn.setEnabled(has_text and self._current_provider is not None)
+
+    def _on_stop_clicked(self) -> None:
+        """处理停止按钮点击 — 中断 Agent 执行"""
+        if self._worker:
+            self._send_btn.setEnabled(False)
+            self._set_status("正在停止...")
+            success = self._worker.cancel()
+            if not success:
+                _logger.warning("停止失败: Agent 可能已完成")
+                self._set_status("停止失败")
+
+    def _on_agent_interrupted(self, response: str) -> None:
+        """处理被中断的 Agent 响应 — 保留已流式输出的部分内容"""
+        _logger.info(f"Agent 响应被中断, 已输出内容: {len(response)} 字符")
+        self._set_status("已停止")
+
+        if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
+            if self._streaming_blocks:
+                self._streaming_message.add_or_update_block({
+                    "type": "text",
+                    "text": "\n\n--- *回复已被中断* ---",
+                })
+                self._streaming_message._blocks = self._streaming_blocks.copy()
+            self._streaming_message = None
+            self._streaming_blocks = []
+            self._streaming_text = ""
+
+        QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _add_message_widget(self, role: str, content: Any) -> None:
         if isinstance(content, list) and content and isinstance(content[0], dict):
@@ -1298,7 +1365,10 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         if hasattr(self, "_input_text"):
             self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
         if hasattr(self, "_send_btn"):
-            self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
+            if self._is_send_mode:
+                self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
+            else:
+                self._send_btn.setStyleSheet(Theme.get_chat_stop_button_stylesheet())
         if hasattr(self, "_image_btn"):
             self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_audio_btn"):
