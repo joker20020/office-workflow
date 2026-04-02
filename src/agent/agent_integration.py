@@ -51,7 +51,7 @@ except ImportError as e:
 
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.chat_history import ChatHistory
-from src.agent.workflow_tools import WorkflowTools
+from src.agent.tool_registry import AgentToolRegistry
 from src.agent.node_formatter import NodeFormatter
 from src.engine.node_engine import NodeEngine
 from src.core.config_manager import get_config_manager
@@ -79,7 +79,6 @@ class AgentIntegration:
         self,
         api_key_manager: ApiKeyManager,
         node_engine: NodeEngine,
-        workflow_tools: Optional[WorkflowTools] = None,
         mcp_manager: Optional["McpServerManager"] = None,
         skill_manager: Optional["SkillManager"] = None,
         history_repository: Optional["ChatHistoryRepository"] = None,
@@ -91,7 +90,6 @@ class AgentIntegration:
 
         self._api_manager = api_key_manager
         self._node_engine = node_engine
-        self._workflow_tools = workflow_tools
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
@@ -229,14 +227,13 @@ class AgentIntegration:
                             3. 连接节点形成工作流
                             4. 执行工作流
 
-                            使用建议:
-                            1. 首先使用 get_node_types 查看有哪些节点可用
-                            2. 使用 get_node_info 了解特定节点的详细信息
-                            3. 使用 search_nodes 按关键词查找相关节点
-
                             请用自然语言与用户交流。使用工具完成工作流设计。""",
             )
 
+            self._register_registry_tools()
+            self._register_mcp_tools()
+            self._register_skills()
+            
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
             _logger.info("创建ReActAgent...")
@@ -258,13 +255,6 @@ class AgentIntegration:
                 hook=self._create_streaming_hook(),
             )
 
-            if self._workflow_tools:
-                self._register_workflow_tools()
-                _logger.info("工作流工具注册完成")
-
-            self._register_mcp_tools()
-            self._register_skills()
-
             self._initialized = True
             _logger.info(f"Agent初始化成功: provider={provider}, model={self._model_name}")
             _logger.info("=" * 50)
@@ -275,15 +265,20 @@ class AgentIntegration:
             _logger.error("=" * 50)
             return False
 
-    def _register_workflow_tools(self) -> None:
-        if not self._workflow_tools or not AGENTSCOPE_AVAILABLE:
+    def _register_registry_tools(self) -> None:
+        """从 AgentToolRegistry 注册所有已注册的工具函数"""
+        if not AGENTSCOPE_AVAILABLE:
             return
 
-        tools = self._workflow_tools.get_all_tools()
+        tools = AgentToolRegistry.instance().get_all_tools()
+        
         for tool_func in tools:
             self._toolkit.register_tool_function(tool_func)
 
-        _logger.info(f"已注册 {len(tools)} 个工作流工具")
+        if tools:
+            _logger.info(f"已从注册中心加载 {len(tools)} 个工具")
+        else:
+            _logger.info("注册中心无工具可加载")
 
     def _register_mcp_tools(self) -> None:
         if not self._mcp_manager or not AGENTSCOPE_AVAILABLE:

@@ -31,6 +31,7 @@ from src.agent.agent_integration import AgentIntegration
 from src.agent.chat_history import ChatHistory
 from src.agent.mcp_server_manager import McpServerManager
 from src.agent.skill_manager import SkillManager
+from src.agent.tool_registry import AgentToolRegistry
 
 __all__ = [
     "ApiKeyManager",
@@ -40,4 +41,5 @@ __all__ = [
     "ChatHistory",
     "McpServerManager",
     "SkillManager",
+    "AgentToolRegistry",
 ]

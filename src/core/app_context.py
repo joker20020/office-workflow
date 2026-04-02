@@ -44,6 +44,7 @@ from src.engine.node_engine import (
 )
 from src.storage.database import Database
 from src.storage.repositories import PluginPermissionRepository
+from src.engine.node_graph import NodeGraph
 from src.utils.logger import get_logger
 
 # Optional singletons (best-effort imports)
@@ -148,6 +149,7 @@ class AppContext:
         self._plugin_manager: Optional[PluginManager] = None
         self._database: Optional[Database] = None
         self._node_engine: Optional[NodeEngine] = None
+        self._node_graph: Optional["NodeGraph"] = None
         # 后向兼容的单例引用容器（在后续通过单例 Getter 使用）
         self._package_manager = None
         self._api_key_manager = None
@@ -217,6 +219,21 @@ class AppContext:
     def node_engine(self) -> NodeEngine:
         """获取节点引擎（单例）"""
         return get_node_engine()
+
+    @property
+    def node_graph(self) -> Optional["NodeGraph"]:
+        """获取当前工作流图"""
+        return self._node_graph
+
+    def set_node_graph(self, graph: Optional[NodeGraph]) -> None:
+        """设置当前工作流图（供MainWindow调用）"""
+        self._node_graph = graph
+
+    @property
+    def tool_registry(self):
+        """获取 Agent 工具注册中心（单例）"""
+        from src.agent.tool_registry import AgentToolRegistry
+        return AgentToolRegistry.instance()
 
     @property
     def is_initialized(self) -> bool:

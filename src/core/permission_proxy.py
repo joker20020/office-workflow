@@ -23,14 +23,18 @@
     bus.subscribe(EventType.APP_STARTED, handler)  # 检查 EVENT_SUBSCRIBE 权限
 """
 
-from typing import Optional, Set, TYPE_CHECKING
+from typing import Callable, List, Optional, Set, TYPE_CHECKING
 
 from src.core.app_context import AppContext
 from src.core.event_bus import EventBus, EventType
 from src.core.permission_manager import Permission, PermissionDeniedError
 from src.engine.node_engine import NodeEngine
+from src.engine.node_graph import NodeGraph
 from src.storage.database import Database
 from src.storage.repositories import PluginRepository
+
+if TYPE_CHECKING:
+    from src.agent.tool_registry import AgentToolRegistry
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -430,6 +434,71 @@ class GuardedConfigStore:
         return self._repository.update_config(self._plugin_name, updates)
 
 
+class GuardedToolRegistry:
+    """
+    受保护的 Agent 工具注册中心
+
+    包装 AgentToolRegistry，在操作前检查权限：
+    - register(): 需要 AGENT_TOOL 权限
+    - unregister(): 需要 AGENT_TOOL 权限
+    - get_all_tools(): 无需权限检查（只读）
+    - has_group(): 无需权限检查（只读）
+    """
+
+    def __init__(
+        self,
+        tool_registry: "AgentToolRegistry",
+        granted_permissions: Set[Permission],
+        plugin_name: str,
+    ):
+        self._tool_registry = tool_registry
+        self._granted_permissions = granted_permissions
+        self._plugin_name = plugin_name
+
+    def register(self, group_name: str, tools: List[Callable]) -> None:
+        """
+        注册一组工具函数（需要 AGENT_TOOL 权限）
+
+        Args:
+            group_name: 工具组名称
+            tools: 工具函数列表
+
+        Raises:
+            PermissionDeniedError: 没有 AGENT_TOOL 权限时
+        """
+        if Permission.AGENT_TOOL not in self._granted_permissions:
+            raise PermissionDeniedError(
+                Permission.AGENT_TOOL,
+                f"插件 '{self._plugin_name}' 需要 AGENT_TOOL 权限才能注册工具",
+            )
+        self._tool_registry.register(group_name, tools)
+
+    def unregister(self, group_name: str) -> None:
+        """
+        注销一组工具函数（需要 AGENT_TOOL 权限）
+
+        Args:
+            group_name: 工具组名称
+
+        Raises:
+            PermissionDeniedError: 没有 AGENT_TOOL 权限时
+        """
+        if Permission.AGENT_TOOL not in self._granted_permissions:
+            raise PermissionDeniedError(
+                Permission.AGENT_TOOL,
+                f"插件 '{self._plugin_name}' 需要 AGENT_TOOL 权限才能注销工具",
+            )
+        self._tool_registry.unregister(group_name)
+
+    def get_all_tools(self) -> List[Callable]:
+        """获取所有已注册的工具函数（无需权限检查）"""
+        return self._tool_registry.get_all_tools()
+
+    def has_group(self, group_name: str) -> bool:
+        """检查工具组是否已注册（无需权限检查）"""
+        return self._tool_registry.has_group(group_name)
+
+
 class PermissionProxy:
     """
     权限代理
@@ -507,6 +576,38 @@ class PermissionProxy:
         """
         return GuardedNodeEngine(
             node_engine=self._context.node_engine,
+            granted_permissions=self.granted_permissions,
+            plugin_name=self.plugin_name,
+        )
+
+    @property
+    def node_graph(self) -> Optional["NodeGraph"]:
+        """
+        获取当前工作流图（需要 NODE_READ 权限）
+
+        Returns:
+            当前 NodeGraph 实例
+
+        Raises:
+            PermissionDeniedError: 没有 NODE_READ 权限时
+        """
+        if Permission.NODE_READ not in self.granted_permissions:
+            raise PermissionDeniedError(
+                Permission.NODE_READ,
+                f"插件 '{self.plugin_name}' 需要 NODE_READ 权限才能访问工作流图",
+            )
+        return self._context.node_graph
+
+    @property
+    def tool_registry(self) -> GuardedToolRegistry:
+        """
+        获取受保护的工具注册中心
+
+        Returns:
+            GuardedToolRegistry 实例
+        """
+        return GuardedToolRegistry(
+            tool_registry=self._context.tool_registry,
             granted_permissions=self.granted_permissions,
             plugin_name=self.plugin_name,
         )

@@ -31,7 +31,6 @@ from PySide6.QtGui import QIcon
 
 from src.agent import (
     AgentIntegration,
-    WorkflowTools,
 )
 from src.agent.api_key_manager import get_api_key_manager
 from src.agent.mcp_server_manager import get_mcp_server_manager
@@ -111,7 +110,10 @@ class MainWindow(QMainWindow):
         self._permission_repository = PluginPermissionRepository(self._db)
         self._plugin_repository = PluginRepository(self._db)
         self._node_graph = NodeGraph(name="默认工作流")
-        self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
+
+        # 将 node_graph 设置到 app_context，使插件可以访问
+        if self._app_context is not None:
+            self._app_context.set_node_graph(self._node_graph)
 
         packages_dir = Path("node_packages")
         if _HAS_PACKAGE_MANAGER_SINGLETON and get_node_package_manager is not None:
@@ -136,12 +138,9 @@ class MainWindow(QMainWindow):
         loaded_count = self._package_manager.load_all_enabled()
         _logger.info(f"已加载 {loaded_count} 个节点包")
 
-        self._workflow_tools = WorkflowTools(self._node_graph, self._node_engine)
-
         self._agent_integration = AgentIntegration(
             api_key_manager=self._api_key_manager,
             node_engine=self._node_engine,
-            workflow_tools=self._workflow_tools,
             mcp_manager=self._mcp_manager,
             skill_manager=self._skill_manager,
             history_repository=self._history_repository,
@@ -149,6 +148,16 @@ class MainWindow(QMainWindow):
 
         self._theme_manager = ThemeManager.instance()
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
+
+        # 订阅 EventBus 事件以响应插件操作的工作流变更
+        if self._app_context is not None:
+            from src.core.event_bus import EventType
+            self._app_context.event_bus.subscribe(
+                EventType.WORKFLOW_STARTED, self._on_workflow_event_graph_changed
+            )
+            self._app_context.event_bus.subscribe(
+                EventType.NODE_EXECUTED, self._on_workflow_event_node_value_changed
+            )
 
         self._setup_ui()
 
@@ -378,7 +387,10 @@ class MainWindow(QMainWindow):
         return self._agent_integration
 
     def _on_graph_changed(self) -> None:
-        """处理graph_changed信号 - 在主线程中刷新节点编辑器"""
+        """处理graph_changed信号 - 在主线程中刷新节点编辑器（供直接调用）"""
+
+    def _on_workflow_event_graph_changed(self, event_data=None) -> None:
+        """EventBus 事件处理器：工作流图变更"""
         import threading
 
         _logger.info(
@@ -415,6 +427,16 @@ class MainWindow(QMainWindow):
 
         node_item.set_widget_value(port_name, value)
         _logger.info(f"已同步控件值: {port_name} = {value}")
+
+    def _on_workflow_event_node_value_changed(self, event_data: dict) -> None:
+        """EventBus 事件处理器：节点值变更"""
+        if not isinstance(event_data, dict):
+            return
+        node_id = event_data.get("node_id")
+        port_name = event_data.get("port_name")
+        value = event_data.get("value")
+        if node_id and port_name:
+            self._on_node_value_changed(node_id, port_name, value)
 
     def _on_plugin_enabled_changed(self, plugin_name: str, enabled: bool) -> None:
         """处理插件启用状态改变事件"""
