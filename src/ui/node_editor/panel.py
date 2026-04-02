@@ -11,7 +11,7 @@
 from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 import json
-from PySide6.QtCore import Qt, Signal, QMimeData, QEvent
+from PySide6.QtCore import Qt, Signal, QMimeData, QEvent, QThread
 from PySide6.QtGui import QAction, QDrag
 from PySide6.QtWidgets import (
     QToolBar,
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from src.engine.definitions import NodeDefinition
 from src.engine.node_graph import NodeGraph, NodeState
-from src.engine.node_engine import NodeEngine, get_node_engine
+from src.engine.node_engine import NodeEngine, get_node_engine, ExecutionResult
 from src.engine.serialization import serialize_graph, deserialize_graph
 from src.ui.node_editor.scene import NodeEditorScene
 from src.ui.node_editor.view import NodeEditorView
@@ -40,6 +40,69 @@ if TYPE_CHECKING:
     from src.core.app_context import AppContext
 
 _logger = get_logger(__name__)
+
+
+class WorkflowRunner(QThread):
+    """在工作线程中执行工作流，通过 Signal 回调更新 UI。"""
+
+    finished = Signal(dict)          # {node_id: ExecutionResult}
+    error = Signal(str)
+    node_state_changed = Signal(str)  # node_id — 每个节点执行完后触发 UI 刷新
+
+    def __init__(self, engine: NodeEngine, graph: NodeGraph, parent=None):
+        super().__init__(parent)
+        self._engine = engine
+        self._graph = graph
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            import threading
+            _logger.info(f"[Thread: {threading.current_thread().name}] 工作流执行线程启动")
+
+            # 获取执行顺序
+            from src.engine.node_graph import CyclicDependencyError
+            try:
+                execution_order = self._graph.get_execution_order()
+            except CyclicDependencyError as e:
+                self.error.emit(str(e))
+                return
+
+            # 重置所有节点状态
+            for node in self._graph.nodes.values():
+                node.state = NodeState.IDLE
+                node.error_message = None
+                node.outputs.clear()
+
+            results: dict[str, ExecutionResult] = {}
+
+            for node_id in execution_order:
+                if self._cancel:
+                    _logger.info("工作流执行被用户取消")
+                    break
+
+                node = self._graph.get_node(node_id)
+                if node is None:
+                    continue
+
+                result = self._engine.execute_node(node, self._graph)
+                results[node_id] = result
+
+                # 通知 UI 刷新该节点（Signal 自动跨线程 marshal 到主线程）
+                self.node_state_changed.emit(node_id)
+
+                if not result.success:
+                    _logger.warning(f"工作流执行中断: 节点 {node_id[:8]}... 失败")
+                    break
+
+            self.finished.emit(results)
+
+        except Exception as e:
+            _logger.error(f"工作流执行线程异常: {e}", exc_info=True)
+            self.error.emit(str(e))
 
 
 class NodeEditorPanel(QWidget, ThemeAwareMixin):
@@ -61,7 +124,9 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         self._event_bus = event_bus
         self._subscription_id: Optional[str] = None
         self._unsubscription_id: Optional[str] = None
+        self._exec_sub_id: Optional[str] = None
         self._graph: Optional[NodeGraph] = None
+        self._runner: Optional[WorkflowRunner] = None
         self._setup_ui()
         self._connect_signals()
         if event_bus:
@@ -108,6 +173,13 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         self._execute_btn.setToolTip("执行工作流 (F5)")
         self._execute_btn.clicked.connect(self._on_execute)
         toolbar.addWidget(self._execute_btn)
+
+        self._stop_btn = QToolButton()
+        self._stop_btn.setText("⏹ 停止")
+        self._stop_btn.setToolTip("停止执行")
+        self._stop_btn.clicked.connect(self._on_stop_execution)
+        self._stop_btn.setVisible(False)
+        toolbar.addWidget(self._stop_btn)
 
         toolbar.addSeparator()
 
@@ -285,28 +357,65 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
         self._status_label.setText("执行中...")
         self._execute_btn.setEnabled(False)
+        self._stop_btn.setVisible(True)
 
-        try:
-            results = self._engine.execute_graph(self._graph)
-            success_count = sum(1 for r in results.values() if r.success)
-            total_count = len(results)
+        self._runner = WorkflowRunner(self._engine, self._graph, parent=self)
+        self._runner.finished.connect(self._on_execution_finished)
+        self._runner.error.connect(self._on_execution_error)
+        self._runner.node_state_changed.connect(self._on_node_state_changed)
+        self._runner.start()
 
-            if success_count == total_count:
-                self._status_label.setText(f"✅ 执行成功: {success_count}/{total_count}")
-                self.workflow_executed.emit(True)
-                self._update_all_output_widgets()
-            else:
-                self._status_label.setText(f"❌ 执行失败: {success_count}/{total_count}")
-                self.workflow_executed.emit(False)
-                self._update_all_output_widgets()
+    def _on_stop_execution(self) -> None:
+        """停止正在执行的工作流"""
+        if self._runner and self._runner.isRunning():
+            self._runner.cancel()
+            self._status_label.setText("正在停止...")
 
-        except Exception as e:
-            self._status_label.setText(f"❌ 执行错误: {str(e)}")
+    def _on_execution_finished(self, results: dict) -> None:
+        """工作流执行完成回调（在主线程通过 Signal 触发）"""
+        success_count = sum(1 for r in results.values() if r.success)
+        total_count = len(results)
+
+        if success_count == total_count:
+            self._status_label.setText(f"✅ 执行成功: {success_count}/{total_count}")
+            self.workflow_executed.emit(True)
+        else:
+            self._status_label.setText(f"❌ 执行失败: {success_count}/{total_count}")
             self.workflow_executed.emit(False)
-            _logger.error(f"执行工作流失败: {e}", exc_info=True)
 
-        finally:
-            self._execute_btn.setEnabled(True)
+        self._update_all_output_widgets()
+        self._cleanup_execution()
+
+    def _on_execution_error(self, error_msg: str) -> None:
+        """工作流执行错误回调"""
+        self._status_label.setText(f"❌ 执行错误: {error_msg}")
+        self.workflow_executed.emit(False)
+        self._cleanup_execution()
+
+    def _cleanup_execution(self) -> None:
+        """清理执行状态"""
+        self._execute_btn.setEnabled(True)
+        self._stop_btn.setVisible(False)
+        self._runner = None
+
+    def _on_node_state_changed(self, node_id: str) -> None:
+        """节点状态变化回调 — 由 WorkflowRunner 通过 Signal 触发（主线程安全）"""
+        node_item = self._scene._node_items.get(node_id)
+        if not node_item:
+            return
+
+        # 触发重绘以更新节点颜色
+        node_item.update()
+
+        # 实时更新输出预览
+        node = self._graph.get_node(node_id) if self._graph else None
+        if node and node.state == NodeState.SUCCESS and node.outputs:
+            for port_name, value in node.outputs.items():
+                node_item.set_output_value(port_name, value)
+        elif node and node.state == NodeState.ERROR and node.error_message:
+            for port_def in node_item._definition.outputs:
+                if port_def.show_preview:
+                    node_item.set_output_error(port_def.name, node.error_message)
 
     def _update_all_output_widgets(self) -> None:
         """更新所有节点的输出预览控件"""

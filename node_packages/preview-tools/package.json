@@ -1,10 +1,21 @@
 {
     "id": "com.example.previewTools",
     "name": "预览工具",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "Office Team",
-    "description": "文本预览工具包，提供可视化文本查看功能",
+    "description": "数据可视化预览工具包，支持文本、图像、音频、视频、数字、布尔、列表、字典、文件、数据表的预览",
     "repository": "https://github.com/example/preview-tools",
     "branch": "main",
-    "nodes": ["preview.text"]
+    "nodes": [
+        "preview.text",
+        "preview.image",
+        "preview.audio",
+        "preview.video",
+        "preview.number",
+        "preview.boolean",
+        "preview.list",
+        "preview.dict",
+        "preview.file",
+        "preview.dataframe"
+    ]
 }

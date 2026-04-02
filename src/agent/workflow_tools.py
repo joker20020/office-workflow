@@ -5,11 +5,11 @@ import json
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QThread
 
 from src.agent.node_formatter import NodeFormatter
-from src.engine.node_engine import NodeEngine
-from src.engine.node_graph import NodeGraph
+from src.engine.node_engine import NodeEngine, ExecutionResult
+from src.engine.node_graph import NodeGraph, NodeState
 from src.utils.logger import get_logger
 
 try:
@@ -35,6 +35,58 @@ def _make_response(content: Any, success: bool = True, metadata: Optional[Dict] 
     return content
 
 
+class _AgentWorkflowRunner(QThread):
+    """Agent 工作流执行线程 — 在后台执行工作流，结果直接存储在实例中。"""
+
+    node_state_changed = Signal(str)  # node_id — 通知 UI 实时刷新
+
+    def __init__(self, engine: NodeEngine, graph: NodeGraph, parent=None):
+        super().__init__(parent)
+        self._engine = engine
+        self._graph = graph
+        self.results: Dict[str, ExecutionResult] = {}
+        self.error_message: Optional[str] = None
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            from src.engine.node_graph import CyclicDependencyError
+
+            execution_order = self._graph.get_execution_order()
+
+            # 重置节点状态
+            for node in self._graph.nodes.values():
+                node.state = NodeState.IDLE
+                node.error_message = None
+                node.outputs.clear()
+
+            for node_id in execution_order:
+                if self._cancel:
+                    break
+
+                node = self._graph.get_node(node_id)
+                if node is None:
+                    continue
+
+                result = self._engine.execute_node(node, self._graph)
+                self.results[node_id] = result
+
+                # 通知 UI 刷新该节点颜色
+                self.node_state_changed.emit(node_id)
+
+                if not result.success:
+                    break
+
+        except CyclicDependencyError as e:
+            self.error_message = str(e)
+        except Exception as e:
+            _logger.error(f"Agent 工作流执行线程异常: {e}", exc_info=True)
+            self.error_message = str(e)
+
+
 class WorkflowTools(QObject):
     """
     工作流操作工具集
@@ -45,7 +97,7 @@ class WorkflowTools(QObject):
     - connect_nodes: 连接节点
     - disconnect_nodes: 断开连接
     - set_node_value: 设置节点值
-    - execute_workflow: 执行工作流
+    - execute_workflow: 执行工作流（子线程，不阻塞主线程）
     - list_nodes: 列出所有节点
     - list_connections: 列出所有连接
     - get_node_types: 获取可用节点类型
@@ -56,16 +108,21 @@ class WorkflowTools(QObject):
     信号:
         - graph_changed: 图发生变化时发出（节点添加/删除/连接等）
         - node_value_changed: 节点值变化时发出（用于UI同步控件值）
+        - workflow_executed: 工作流执行完成时发出（结果摘要）
     """
 
     graph_changed = Signal()
     node_value_changed = Signal(str, str, object)  # node_id, port_name, value
+    workflow_executed = Signal(dict)  # 执行结果摘要
 
     def __init__(self, node_graph: NodeGraph, node_engine: NodeEngine, parent=None):
         super().__init__(parent)
         self._graph = node_graph
         self._engine = node_engine
         self._tools: Dict[str, callable] = {}
+        self._runner: Optional[_AgentWorkflowRunner] = None
+        self._pending_result: Optional[Dict[str, ExecutionResult]] = None
+        self._pending_error: Optional[str] = None
         self._register_tools()
 
     def _register_tools(self) -> None:
@@ -262,16 +319,37 @@ class WorkflowTools(QObject):
             return _make_response({"success": False, "error": str(e)}, success=False)
 
     def _tool_execute_workflow(self) -> Any:
-        """执行当前工作流中的所有节点。
+        """执行当前工作流中的所有节点（子线程执行，不阻塞主线程）。
 
         Returns:
             包含每个节点执行结果的响应
         """
         try:
-            results = self._engine.execute_graph(self._graph)
+            self._runner = _AgentWorkflowRunner(self._engine, self._graph, parent=self)
+            self._runner.node_state_changed.connect(self._on_node_state_changed)
+            self._runner.start()
 
+            # 等待执行完成（带超时），同步返回给 Agent
+            success = self._runner.wait(60000)  # 60秒超时
+
+            if not success:
+                self._runner.cancel()
+                self._runner.wait(2000)
+                return _make_response(
+                    {"success": False, "error": "工作流执行超时（60秒）"}, success=False
+                )
+
+            if self._runner.error_message:
+                return _make_response(
+                    {"success": False, "error": self._runner.error_message}, success=False
+                )
+
+            results = self._runner.results or {}
             success_count = sum(1 for r in results.values() if r.success)
             failed_count = len(results) - success_count
+
+            # 通知 UI 更新输出预览
+            self.workflow_executed.emit(results)
 
             return _make_response(
                 {
@@ -292,6 +370,11 @@ class WorkflowTools(QObject):
         except Exception as e:
             _logger.error(f"执行工作流失败: {e}", exc_info=True)
             return _make_response({"success": False, "error": str(e)}, success=False)
+
+    def _on_node_state_changed(self, node_id: str) -> None:
+        """节点状态变化 — 通知 UI 刷新节点颜色"""
+        # 由 _AgentWorkflowRunner 通过 Signal 触发，自动 marshal 到主线程
+        pass
 
     def _tool_list_nodes(self) -> Any:
         """列出工作流中的所有节点。
