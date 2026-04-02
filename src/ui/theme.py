@@ -728,6 +728,49 @@ class Theme:
             QPushButton {{
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("background_hover")};
+            }}
+            QPushButton:pressed {{
+                background-color: {cls.hex("background_selected")};
+            }}
+        """
+
+    @classmethod
+    def get_media_play_button_stylesheet(cls) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {cls.hex("border_focus")};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("accent_hover_bg")};
+            }}
+            QPushButton:pressed {{
+                background-color: {cls.hex("accent_pressed_bg")};
+            }}
+        """
+
+    @classmethod
+    def get_small_icon_button_stylesheet(cls) -> str:
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {cls.hex("text_hint")};
+                border: none;
+                font-size: 12px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                color: #e74c3c;
             }}
         """
 
@@ -817,6 +860,7 @@ class Theme:
             }}
             QListWidget::item:selected {{
                 background-color: {cls.hex("background_selected")};
+                color: {cls.hex("text_primary")};
             }}
         """
 
@@ -921,6 +965,7 @@ class Theme:
             }}
             QListWidget::item:selected {{
                 background-color: {cls.hex("background_selected")};
+                color: {cls.hex("text_primary")};
             }}
             QListWidget::item:selected QLabel {{
                 color: {cls.hex("text_primary")};

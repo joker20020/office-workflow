@@ -799,3 +799,201 @@ class PluginManager:
 
     # Alias for backward compatibility
     unload_all_plugins = unload_all
+
+    def install_from_git(
+        self,
+        repository_url: str,
+        branch: str = "main",
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> "PluginInstallResult":
+        """从 Git 仓库安装插件。
+
+        Args:
+            repository_url: Git 仓库 URL
+            branch: 分支名，默认 main
+            progress_callback: 进度回调 (percent, message)
+
+        Returns:
+            PluginInstallResult
+        """
+        from src.nodes.git_utils import GitUtils
+
+        if progress_callback:
+            progress_callback(10, "正在克隆仓库...")
+
+        # 从 URL 推导插件目录名
+        repo_name = repository_url.rstrip("/").split("/")[-1]
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+        target_path = self.plugins_dir / repo_name
+
+        if target_path.exists():
+            return PluginInstallResult(
+                success=False,
+                message=f"目录已存在: {target_path}，请先卸载后再安装",
+            )
+
+        result = GitUtils.clone(repository_url, target_path, branch)
+        if not result.success:
+            return PluginInstallResult(success=False, message=result.message)
+
+        if progress_callback:
+            progress_callback(60, "正在验证插件...")
+
+        # 验证是否为有效插件
+        plugin_class = self._discover_plugin_class(target_path)
+        if plugin_class is None:
+            # 无效插件，清理
+            import shutil
+            shutil.rmtree(target_path, ignore_errors=True)
+            return PluginInstallResult(
+                success=False,
+                message="目录中未找到有效的插件（需要 __init__.py 中定义 PluginBase 子类）",
+            )
+
+        if progress_callback:
+            progress_callback(80, "正在注册插件...")
+
+        # 注册到 discovered
+        plugin_name = plugin_class.name
+        self._discovered[plugin_name] = PluginInfo(
+            name=plugin_name,
+            module_path=target_path,
+            plugin_class=plugin_class,
+        )
+
+        if progress_callback:
+            progress_callback(100, f"插件 '{plugin_name}' 安装成功")
+
+        return PluginInstallResult(
+            success=True,
+            message=f"插件 '{plugin_name}' 安装成功",
+            plugin_name=plugin_name,
+        )
+
+    def install_from_local(
+        self,
+        local_path: Path,
+        copy: bool = True,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> "PluginInstallResult":
+        """从本地目录安装插件。
+
+        Args:
+            local_path: 本地插件目录路径
+            copy: True 则复制文件，False 则创建符号链接
+            progress_callback: 进度回调
+
+        Returns:
+            PluginInstallResult
+        """
+        import shutil
+
+        if not local_path.exists() or not local_path.is_dir():
+            return PluginInstallResult(success=False, message=f"目录不存在: {local_path}")
+
+        if progress_callback:
+            progress_callback(10, "正在验证插件...")
+
+        # 验证是否为有效插件
+        plugin_class = self._discover_plugin_class(local_path)
+        if plugin_class is None:
+            return PluginInstallResult(
+                success=False,
+                message="目录中未找到有效的插件（需要 __init__.py 中定义 PluginBase 子类）",
+            )
+
+        plugin_name = plugin_class.name
+        target_path = self.plugins_dir / local_path.name
+
+        if target_path.exists():
+            return PluginInstallResult(
+                success=False,
+                message=f"目录已存在: {target_path}，请先卸载后再安装",
+            )
+
+        if progress_callback:
+            progress_callback(40, "正在安装文件...")
+
+        try:
+            if copy:
+                shutil.copytree(local_path, target_path)
+            else:
+                target_path.symlink_to(local_path.resolve())
+        except Exception as e:
+            return PluginInstallResult(success=False, message=f"安装失败: {e}")
+
+        if progress_callback:
+            progress_callback(80, "正在注册插件...")
+
+        self._discovered[plugin_name] = PluginInfo(
+            name=plugin_name,
+            module_path=target_path,
+            plugin_class=plugin_class,
+        )
+
+        if progress_callback:
+            progress_callback(100, f"插件 '{plugin_name}' 安装成功")
+
+        return PluginInstallResult(
+            success=True,
+            message=f"插件 '{plugin_name}' 安装成功",
+            plugin_name=plugin_name,
+        )
+
+    def uninstall_plugin(self, name: str) -> bool:
+        """卸载并删除插件。
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            是否成功
+        """
+        import shutil
+
+        if name not in self._discovered:
+            _logger.warning(f"插件 '{name}' 未找到")
+            return False
+
+        info = self._discovered[name]
+
+        # 先卸载
+        if info.loaded:
+            try:
+                self.unload_plugin(name)
+            except Exception as e:
+                _logger.error(f"卸载插件失败: {e}")
+
+        # 删除文件
+        if info.module_path and info.module_path.exists():
+            try:
+                if info.module_path.is_symlink():
+                    info.module_path.unlink()
+                else:
+                    shutil.rmtree(info.module_path, ignore_errors=True)
+            except Exception as e:
+                _logger.error(f"删除插件文件失败: {e}")
+                return False
+
+        # 移除注册
+        del self._discovered[name]
+
+        # 清理数据库
+        if self._repository:
+            try:
+                self._repository.revoke_all_permissions(name)
+            except Exception:
+                pass
+
+        _logger.info(f"插件 '{name}' 已卸载并删除")
+        return True
+
+
+@dataclass
+class PluginInstallResult:
+    """插件安装结果"""
+
+    success: bool
+    message: str
+    plugin_name: Optional[str] = None

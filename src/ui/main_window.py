@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QStatusBar,
     QStackedWidget,
     QWidget,
@@ -231,8 +232,12 @@ class MainWindow(QMainWindow):
         """创建插件管理页面"""
         self._plugin_panel = PluginPanel()
 
+        if self._app_context is not None:
+            self._plugin_panel.set_plugin_manager(self._app_context.plugin_manager)
+
         self._plugin_panel.plugin_enabled_changed.connect(self._on_plugin_enabled_changed)
         self._plugin_panel.permission_edit_requested.connect(self._on_permission_edit_requested)
+        self._plugin_panel.plugin_uninstall_requested.connect(self._on_plugin_uninstall_requested)
         self._plugin_panel.refresh_requested.connect(self._on_plugin_refresh_requested)
 
         return self._plugin_panel
@@ -444,6 +449,20 @@ class MainWindow(QMainWindow):
         total_count = len(results)
         self._status_bar.showMessage(f"插件刷新完成: {success_count}/{total_count} 成功")
         _logger.info(f"插件刷新完成: {success_count}/{total_count} 成功")
+
+    def _on_plugin_uninstall_requested(self, plugin_name: str) -> None:
+        """Handle plugin uninstall request"""
+        _logger.info(f"用户请求卸载插件: {plugin_name}")
+        if self._app_context is None:
+            _logger.warning("AppContext未初始化，无法卸载插件")
+            return
+        plugin_manager = self._app_context.plugin_manager
+        success = plugin_manager.uninstall_plugin(plugin_name)
+        if success:
+            self._status_bar.showMessage(f"插件已卸载: {plugin_name}")
+            self.refresh_plugin_panel()
+        else:
+            QMessageBox.warning(self, "失败", f"卸载插件 {plugin_name} 失败")
 
     def _show_permission_dialog(self, plugin_name: str) -> None:
         if self._app_context is None:

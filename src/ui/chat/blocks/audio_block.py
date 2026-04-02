@@ -90,23 +90,7 @@ class AudioBlockWidget(BaseBlockWidget):
             """)
 
         if self._play_btn:
-            self._play_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {Theme.hex("border_focus")};
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    min-width: 80px;
-                }}
-                QPushButton:hover {{
-                    background-color: {Theme.hex("accent_hover_bg")};
-                }}
-                QPushButton:pressed {{
-                    background-color: {Theme.hex("accent_pressed_bg")};
-                }}
-            """)
+            self._play_btn.setStyleSheet(Theme.get_media_play_button_stylesheet())
 
     def get_content(self) -> str:
         return "[音频]"

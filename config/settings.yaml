@@ -28,4 +28,4 @@ system_prompt: '你是一个智能工作流助手。
 
 
   请用自然语言与用户交流。使用工具完成工作流设计。'
-theme: light
+theme: dark

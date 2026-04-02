@@ -191,6 +191,82 @@ from src.ui.chat.message_widget import MarkdownMessageWidget
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
+class SessionItemWidget(QWidget):
+    """单个会话项组件 — 悬停时显示删除按钮"""
+
+    def __init__(self, session: Dict, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.session_id = session.get("id", "")
+        self._setup_ui(session)
+
+    def _setup_ui(self, session: Dict) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 4, 6)
+        layout.setSpacing(6)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(1)
+
+        title = session.get("title", "未命名会话")
+        self._title_label = QLabel(title)
+        self._title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.hex("text_primary")};
+                font-size: 13px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        info_layout.addWidget(self._title_label)
+
+        msg_count = session.get("message_count", 0)
+        updated = session.get("updated_at", "")[:10]
+        self._meta_label = QLabel(f"{msg_count}条消息 · {updated}")
+        self._meta_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.hex("text_secondary")};
+                font-size: 11px;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        info_layout.addWidget(self._meta_label)
+
+        layout.addLayout(info_layout, 1)
+
+        self._delete_btn = QPushButton("✕")
+        self._delete_btn.setFixedSize(22, 22)
+        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_btn.setToolTip("删除此会话")
+        self._delete_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {Theme.hex("text_hint")};
+                border: none;
+                font-size: 13px;
+                border-radius: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.hex("danger_hover_bg")};
+                color: white;
+            }}
+        """)
+        self._delete_btn.hide()
+        layout.addWidget(self._delete_btn)
+
+    def set_delete_handler(self, handler) -> None:
+        self._delete_btn.clicked.connect(handler)
+
+    def enterEvent(self, event) -> None:
+        self._delete_btn.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._delete_btn.hide()
+        super().leaveEvent(event)
+
+
 class SessionListWidget(QWidget, ThemeAwareMixin):
     """会话列表组件 - 显示历史会话，支持切换、新建和删除"""
 
@@ -230,20 +306,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         self._list_widget = QListWidget()
         self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
         self._list_widget.itemClicked.connect(self._on_item_clicked)
-        self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list_widget, 1)
-
-        self._delete_area = QFrame()
-        self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
-        delete_layout = QHBoxLayout(self._delete_area)
-        delete_layout.setContentsMargins(8, 8, 8, 8)
-
-        self._delete_btn = QPushButton("删除选中会话")
-        self._delete_btn.clicked.connect(self._on_delete_clicked)
-        self._delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
-        delete_layout.addWidget(self._delete_btn)
-
-        layout.addWidget(self._delete_area)
 
         self.setMinimumWidth(200)
         self.setMaximumWidth(300)
@@ -253,30 +316,21 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         if session_id:
             self.session_selected.emit(session_id)
 
-    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
-        session_id = item.data(Qt.ItemDataRole.UserRole)
-        if session_id:
-            self.session_selected.emit(session_id)
-
-    def _on_delete_clicked(self) -> None:
-        current_item = self._list_widget.currentItem()
-        if current_item:
-            session_id = current_item.data(Qt.ItemDataRole.UserRole)
-            if session_id:
-                self.session_delete_requested.emit(session_id)
+    def _on_delete_session(self, session_id: str) -> None:
+        self.session_delete_requested.emit(session_id)
 
     def set_sessions(self, sessions: List[Dict]) -> None:
         """设置会话列表"""
         self._list_widget.clear()
         for session in sessions:
             item = QListWidgetItem()
-            title = session.get("title", "未命名会话")
-            msg_count = session.get("message_count", 0)
-            updated = session.get("updated_at", "")[:10]  # 只取日期部分
-
-            item.setText(f"{title}\n{msg_count}条消息 · {updated}")
             item.setData(Qt.ItemDataRole.UserRole, session["id"])
+            item.setSizeHint(QSize(0, 52))
             self._list_widget.addItem(item)
+
+            widget = SessionItemWidget(session, self._list_widget)
+            widget.set_delete_handler(lambda checked, sid=session["id"]: self._on_delete_session(sid))
+            self._list_widget.setItemWidget(item, widget)
 
     def select_session(self, session_id: str) -> None:
         self._list_widget.blockSignals(True)
@@ -299,10 +353,6 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
         if hasattr(self, "_list_widget"):
             self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
-        if hasattr(self, "_delete_area"):
-            self._delete_area.setStyleSheet(Theme.get_delete_area_stylesheet())
-        if hasattr(self, "_delete_btn"):
-            self._delete_btn.setStyleSheet(Theme.get_session_delete_button_stylesheet())
 
 
 class ChatPanel(QWidget, ThemeAwareMixin):
@@ -605,18 +655,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         remove_btn = QPushButton("✕")
         remove_btn.setFixedSize(16, 16)
-        remove_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {Theme.hex("text_secondary")};
-                border: none;
-                font-size: 12px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                color: #e74c3c;
-            }}
-        """)
+        remove_btn.setStyleSheet(Theme.get_small_icon_button_stylesheet())
         remove_btn.clicked.connect(lambda checked, a=attachment: self._remove_attachment(a))
 
         bottom.addWidget(name_label, 1)
@@ -673,18 +712,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         play_btn = QPushButton("▶")
         play_btn.setFixedSize(28, 28)
-        play_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {Theme.hex("border_focus")};
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {Theme.hex("accent_hover_bg")};
-            }}
-        """)
+        play_btn.setStyleSheet(Theme.get_media_play_button_stylesheet())
 
         player = QMediaPlayer(widget)
         audio_output = QAudioOutput(widget)

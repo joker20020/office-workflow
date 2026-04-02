@@ -476,6 +476,7 @@ class PackagePanel(QWidget, ThemeAwareMixin):
 
         self._refresh_btn = QPushButton("刷新")
         self._refresh_btn.setFixedWidth(60)
+        self._refresh_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._refresh_btn.clicked.connect(self._on_refresh)
         layout.addWidget(self._refresh_btn)
 
