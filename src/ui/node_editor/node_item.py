@@ -540,7 +540,7 @@ class NodeGraphicsItem(QGraphicsObject):
 
         # 选中状态
         if self.isSelected():
-            border_color = Theme.NODE_SELECTED_BORDER
+            border_color = Theme.color("border_focus")
         elif self._is_hovered:
             border_color = Theme.color("node_border_hover")
         else:

@@ -233,6 +233,25 @@ class SessionItemWidget(QWidget):
 
         title = session.get("title", "未命名会话")
         self._title_label = QLabel(title)
+        info_layout.addWidget(self._title_label)
+
+        msg_count = session.get("message_count", 0)
+        updated = session.get("updated_at", "")[:10]
+        self._meta_label = QLabel(f"{msg_count}条消息 · {updated}")
+        info_layout.addWidget(self._meta_label)
+
+        layout.addLayout(info_layout, 1)
+
+        self._delete_btn = QPushButton("✕")
+        self._delete_btn.setFixedSize(22, 22)
+        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_btn.setToolTip("删除此会话")
+        self._delete_btn.hide()
+        layout.addWidget(self._delete_btn)
+
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
         self._title_label.setStyleSheet(f"""
             QLabel {{
                 color: {Theme.hex("text_primary")};
@@ -243,11 +262,6 @@ class SessionItemWidget(QWidget):
                 padding: 0px;
             }}
         """)
-        info_layout.addWidget(self._title_label)
-
-        msg_count = session.get("message_count", 0)
-        updated = session.get("updated_at", "")[:10]
-        self._meta_label = QLabel(f"{msg_count}条消息 · {updated}")
         self._meta_label.setStyleSheet(f"""
             QLabel {{
                 color: {Theme.hex("text_secondary")};
@@ -257,14 +271,6 @@ class SessionItemWidget(QWidget):
                 padding: 0px;
             }}
         """)
-        info_layout.addWidget(self._meta_label)
-
-        layout.addLayout(info_layout, 1)
-
-        self._delete_btn = QPushButton("✕")
-        self._delete_btn.setFixedSize(22, 22)
-        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._delete_btn.setToolTip("删除此会话")
         self._delete_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
@@ -278,11 +284,12 @@ class SessionItemWidget(QWidget):
                 color: white;
             }}
         """)
-        self._delete_btn.hide()
-        layout.addWidget(self._delete_btn)
 
     def set_delete_handler(self, handler) -> None:
         self._delete_btn.clicked.connect(handler)
+
+    def refresh_theme(self) -> None:
+        self._apply_styles()
 
     def enterEvent(self, event) -> None:
         self._delete_btn.show()
@@ -379,6 +386,12 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
             self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
         if hasattr(self, "_list_widget"):
             self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
+            # Refresh all session item widgets
+            for i in range(self._list_widget.count()):
+                item = self._list_widget.item(i)
+                widget = self._list_widget.itemWidget(item)
+                if widget and hasattr(widget, "refresh_theme"):
+                    widget.refresh_theme()
 
 
 class ChatPanel(QWidget, ThemeAwareMixin):
@@ -1292,3 +1305,26 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_video_btn"):
             self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        # 刷新附件预览区域
+        if hasattr(self, "_preview_scroll"):
+            self._preview_scroll.setStyleSheet(f"""
+                QScrollArea {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+        if hasattr(self, "_preview_container"):
+            self._preview_container.setStyleSheet("background: transparent;")
+        # 刷新已有预览卡片的样式
+        if hasattr(self, "_preview_layout"):
+            for i in range(self._preview_layout.count()):
+                item = self._preview_layout.itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), QFrame):
+                    card = item.widget()
+                    card.setStyleSheet(f"""
+                        QFrame {{
+                            background-color: {Theme.hex("background_secondary")};
+                            border: 1px solid {Theme.hex("border_primary")};
+                            border-radius: 6px;
+                        }}
+                    """)

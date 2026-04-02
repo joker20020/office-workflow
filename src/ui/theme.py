@@ -154,6 +154,8 @@ class Theme:
             raise ValueError(f"无效的主题类型: {theme}，必须是 ThemeType.DARK 或 ThemeType.LIGHT")
         cls._current_theme = theme
         cls._QCOLORS.clear()
+        # Update class-level QColor constants to match current theme
+        cls._update_color_attributes()
 
     @classmethod
     def get_current_theme(cls) -> ThemeType:
@@ -346,23 +348,57 @@ class Theme:
     def get_node_tree_stylesheet(cls) -> str:
         """获取节点树样式表"""
         return f"""
-            QTreeWidget {{ 
-                border: none; 
-                background-color: {cls.hex("background_secondary")}; 
+            QTreeWidget {{
+                border: none;
+                background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 outline: none;
             }}
-            QTreeWidget::item {{ 
-                padding: 4px; 
+            QTreeWidget::item {{
+                padding: 4px;
                 color: {cls.hex("text_primary")};
             }}
-            QTreeWidget::item:hover {{ 
-                background-color: {cls.hex("background_hover")}; 
+            QTreeWidget::item:hover {{
+                background-color: {cls.hex("background_hover")};
             }}
-            QTreeWidget::item:selected {{ 
+            QTreeWidget::item:selected {{
                 background-color: transparent;
                 border: 1px solid {cls.hex("border_secondary")};
                 color: {cls.hex("text_primary")};
+            }}
+            QScrollBar:vertical {{
+                background-color: {cls.hex("background_secondary")};
+                width: 8px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {cls.hex("background_tertiary")};
+                border-radius: 4px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {cls.hex("background_selected")};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar:horizontal {{
+                background-color: {cls.hex("background_secondary")};
+                height: 8px;
+                margin: 0;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {cls.hex("background_tertiary")};
+                border-radius: 4px;
+                min-width: 20px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {cls.hex("background_selected")};
+            }}
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                width: 0;
             }}
             QToolTip {{
                 background-color: {cls.hex("background_pressed")};
@@ -839,6 +875,52 @@ class Theme:
             }}
             QCheckBox::indicator:hover {{
                 border-color: {cls.hex("border_hover")};
+            }}
+            QComboBox {{
+                background-color: {cls.hex("background_secondary")};
+                color: {cls.hex("text_primary")};
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 4px;
+                padding: 6px 12px;
+                min-width: 120px;
+            }}
+            QComboBox:hover {{
+                border-color: {cls.hex("border_secondary")};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {cls.hex("background_secondary")};
+                color: {cls.hex("text_primary")};
+                selection-background-color: {cls.hex("background_selected")};
+                border: 1px solid {cls.hex("border_primary")};
+            }}
+            QSpinBox {{
+                background-color: {cls.hex("background_secondary")};
+                color: {cls.hex("text_primary")};
+                border: 1px solid {cls.hex("border_primary")};
+                border-radius: 4px;
+                padding: 6px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {cls.hex("background_tertiary")};
+                border: none;
+                width: 16px;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {cls.hex("background_selected")};
+            }}
+            QPushButton {{
+                background-color: {cls.hex("background_tertiary")};
+                color: {cls.hex("text_primary")};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {cls.hex("background_hover")};
             }}
         """
 
@@ -1808,6 +1890,25 @@ class Theme:
     CONNECTION_DEFAULT = QColor(180, 180, 180)
     CONNECTION_HOVER = QColor(220, 220, 220)
     CONNECTION_SELECTED = QColor(33, 150, 243)
+
+    @classmethod
+    def _update_color_attributes(cls) -> None:
+        """Update class-level QColor constants to match current theme"""
+        cls.NODE_BACKGROUND = cls.color("node_bg_idle")
+        cls.NODE_BORDER = cls.color("node_border_normal")
+        cls.NODE_SELECTED_BORDER = cls.color("border_focus")
+        cls.NODE_TEXT = cls.color("node_title")
+        cls.NODE_HEADER = cls.color("node_border_normal")
+        cls.NODE_STATE_IDLE = cls.color("state_idle")
+        cls.NODE_STATE_RUNNING = cls.color("state_running")
+        cls.NODE_STATE_SUCCESS = cls.color("state_success")
+        cls.NODE_STATE_ERROR = cls.color("state_error")
+        cls.GRID_MINOR = cls.color("grid_minor")
+        cls.GRID_MAJOR = cls.color("grid_major")
+        cls.GRID_BACKGROUND = cls.color("grid_background")
+        cls.CONNECTION_DEFAULT = cls.color("text_secondary")
+        cls.CONNECTION_HOVER = cls.color("text_primary")
+        cls.CONNECTION_SELECTED = cls.color("border_focus")
 
 
 # 创建全局主题实例

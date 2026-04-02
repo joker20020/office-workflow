@@ -63,9 +63,6 @@ class NodeEditorScene(QGraphicsScene):
 
     # 网格设置 - 使用主题系统
     GRID_SIZE = 20
-    GRID_COLOR_MAJOR = Theme.GRID_MAJOR
-    GRID_COLOR_MINOR = Theme.GRID_MINOR
-    BACKGROUND_COLOR = Theme.GRID_BACKGROUND
 
     def __init__(self, parent=None):
         """
@@ -91,10 +88,6 @@ class NodeEditorScene(QGraphicsScene):
 
         # 场景设置
         self.setSceneRect(-5000, -5000, 10000, 10000)
-
-        # 网格画笔
-        self._grid_pen_minor = Theme.color("grid_minor")
-        self._grid_pen_major = Theme.color("grid_major")
 
         _logger.debug("NodeEditorScene 初始化完成")
 
@@ -400,15 +393,15 @@ class NodeEditorScene(QGraphicsScene):
         """
         super().drawBackground(painter, rect)
 
-        # 填充背景
-        painter.fillRect(rect, self.BACKGROUND_COLOR)
+        # 填充背景 - 使用动态主题颜色
+        painter.fillRect(rect, Theme.color("grid_background"))
 
         # 计算网格范围
         left = int(rect.left()) - (int(rect.left()) % self.GRID_SIZE)
         top = int(rect.top()) - (int(rect.top()) % self.GRID_SIZE)
 
         # 绘制细网格
-        painter.setPen(self._grid_pen_minor)
+        painter.setPen(Theme.color("grid_minor"))
         x = left
         while x <= rect.right():
             painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
@@ -420,7 +413,7 @@ class NodeEditorScene(QGraphicsScene):
             y += self.GRID_SIZE
 
         # 绘制粗网格（每5格）
-        painter.setPen(self._grid_pen_major)
+        painter.setPen(Theme.color("grid_major"))
         x = left
         while x <= rect.right():
             if x % (self.GRID_SIZE * 5) == 0:
@@ -432,6 +425,17 @@ class NodeEditorScene(QGraphicsScene):
             if y % (self.GRID_SIZE * 5) == 0:
                 painter.drawLine(int(rect.left()), y, int(rect.right()), y)
             y += self.GRID_SIZE
+
+    def refresh_theme(self) -> None:
+        """刷新主题 - 使所有视图重绘背景"""
+        for view in self.views():
+            view.resetCachedContent()
+            view.viewport().update()
+        # 刷新所有节点和连接
+        for node_item in self._node_items.values():
+            node_item.update()
+        for conn_item in self._connection_items.values():
+            conn_item.update()
 
     # ==================== 端口拖拽连接 ====================
 

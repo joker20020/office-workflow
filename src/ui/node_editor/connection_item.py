@@ -52,10 +52,6 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
     LINE_WIDTH_HOVER = 3
     LINE_WIDTH_SELECTED = 4
     CONTROL_POINT_DISTANCE = 100
-    # 使用主题系统的颜色
-    DEFAULT_COLOR = Theme.CONNECTION_DEFAULT
-    HOVER_COLOR = Theme.CONNECTION_HOVER
-    SELECTED_COLOR = Theme.CONNECTION_SELECTED
 
     def __init__(
         self,
@@ -74,19 +70,16 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
         self.setZValue(-1)
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemIsSelectable)
-        self._pen = QPen(self.DEFAULT_COLOR)
+        color = source_port.color
+        self._pen = QPen(color)
         self._pen.setWidth(self.LINE_WIDTH)
         self._pen.setCosmetic(True)
-        self._pen_hover = QPen(self.HOVER_COLOR)
+        self._pen_hover = QPen(color.lighter(130))
         self._pen_hover.setWidth(self.LINE_WIDTH_HOVER)
         self._pen_hover.setCosmetic(True)
-        self._pen_selected = QPen(self.SELECTED_COLOR)
+        self._pen_selected = QPen(color.lighter(150))
         self._pen_selected.setWidth(self.LINE_WIDTH_SELECTED)
         self._pen_selected.setCosmetic(True)
-        color = source_port.color
-        self._pen.setColor(color)
-        self._pen_hover.setColor(color.lighter(130))
-        self._pen_selected.setColor(color.lighter(150))
         self.setPen(self._pen)
         source_port.add_connection(self)
         target_port.add_connection(self)

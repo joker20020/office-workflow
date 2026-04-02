@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt, Signal, QPointF, QRectF, QPoint
 from PySide6.QtGui import QWheelEvent, QMouseEvent, QKeyEvent, QPainter
 from PySide6.QtWidgets import QGraphicsView, QWidget, QApplication
 
+from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
-class NodeEditorView(QGraphicsView):
+class NodeEditorView(QGraphicsView, ThemeAwareMixin):
     """
     节点编辑器视图
 
@@ -50,12 +51,18 @@ class NodeEditorView(QGraphicsView):
 
     def __init__(self, scene: "NodeEditorScene", parent: Optional[QWidget] = None):
         super().__init__(scene, parent)
+        self._setup_theme_awareness()
         self._scene = scene
         self._zoom = 1.0
         self._panning = False
         self._last_mouse_pos = QPointF()
         self._setup_view()
         _logger.debug("NodeEditorView 初始化完成")
+
+    def refresh_theme(self) -> None:
+        """刷新主题 - 通知场景更新"""
+        if hasattr(self, '_scene') and self._scene:
+            self._scene.refresh_theme()
 
     def _setup_view(self) -> None:
         """配置视图属性"""

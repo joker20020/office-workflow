@@ -13,6 +13,7 @@ wheels/
 .*_cache/
 .sisyphus/
 .opencode/
+.claude/
 logs/
 
 data/
