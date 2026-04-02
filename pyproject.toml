@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     # UI框架
-    "PySide6>=6.6.0,<6.9.0",
+    "PySide6>=6.8.0",
     # AI Agent框架
     "agentscope>=1.0.17",
     # 持久化层

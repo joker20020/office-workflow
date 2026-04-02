@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.11.*"
 
 [[package]]
@@ -714,7 +714,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pymupdf", specifier = ">=1.26.3" },
-    { name = "pyside6", specifier = ">=6.6.0,<6.9.0" },
+    { name = "pyside6", specifier = ">=6.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.2.0" },

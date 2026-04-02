@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Set, cast
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from src.core.app_context import AppContext
@@ -112,6 +113,50 @@ def _create_permission_request_callback():
     return on_permission_request
 
 
+def _setup_emoji_font(app: QApplication) -> None:
+    """配置全局字体以支持 emoji 显示。
+
+    Linux 上 Qt 默认字体（如 Ubuntu Sans）不包含 emoji 字形，
+    需要将 emoji 字体加入 font-family 回退列表。
+    """
+    import platform
+
+    if platform.system() != "Linux":
+        return
+
+    default_font = app.font()
+    font = QFont(default_font.family(), default_font.pointSize())
+
+    # 构造回退字体列表：默认字体 + emoji 字体
+    emoji_families = []
+    try:
+        from PySide6.QtGui import QFontDatabase
+
+        db = QFontDatabase
+        for candidate in ("Noto Color Emoji", "Emoji One", "Twemoji Mozilla", "Segoe UI Emoji"):
+            if db.families().__contains__(candidate):
+                emoji_families.append(candidate)
+    except Exception:
+        pass
+
+    if emoji_families:
+        # QFont.setStyleHint 无法直接设 fallback，但我们可以
+        # 通过 QSS 全局 font-family 实现
+        families = [default_font.family()] + emoji_families
+        font_family_list = ", ".join(f'"{f}"' for f in families)
+        app.setStyleSheet(
+            f"* {{ font-family: {font_family_list}; }}\n" + (app.styleSheet() or "")
+        )
+        _logger.info(f"已设置 emoji 字体回退: {font_family_list}")
+    else:
+        # 无法检测到 emoji 字体时，尝试直接用系统默认 + Noto Color Emoji
+        font_family_list = f'"{default_font.family()}", "Noto Color Emoji"'
+        app.setStyleSheet(
+            f"* {{ font-family: {font_family_list}; }}\n" + (app.styleSheet() or "")
+        )
+        _logger.info(f"已设置 emoji 字体回退 (fallback): {font_family_list}")
+
+
 def main() -> int:
     """
     应用程序主入口
@@ -129,6 +174,9 @@ def main() -> int:
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("OfficeTools")
     app.setDesktopFileName("OfficeWorkflow")
+
+    # Linux 上默认字体可能不包含 emoji 字形，需要设置字体回退
+    _setup_emoji_font(app)
 
     _logger.debug("QApplication 创建完成")
 
