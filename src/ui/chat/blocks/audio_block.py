@@ -90,6 +90,7 @@ class AudioBlockWidget(BaseBlockWidget):
                     border: 1px solid {border};
                     border-radius: 4px;
                     padding: 8px;
+                    {Theme.emoji_font_css()}
                 }}
             """)
 

@@ -106,6 +106,7 @@ class VideoBlockWidget(BaseBlockWidget):
                     border-radius: 4px;
                     color: {Theme.hex("text_hint")};
                     font-size: 28px;
+                    {Theme.emoji_font_css()}
                 }}
             """)
 

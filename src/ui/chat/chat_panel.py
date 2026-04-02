@@ -764,6 +764,12 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         icon = QLabel("🎵")
         icon.setFixedWidth(20)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(f"""
+            QLabel {{
+                background: transparent;
+                {Theme.emoji_font_css()}
+            }}
+        """)
 
         play_btn = QPushButton("▶")
         play_btn.setFixedSize(28, 28)
@@ -824,6 +830,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                 border: none;
                 border-radius: 11px;
                 font-size: 10px;
+                {Theme.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {Theme.hex("accent_hover_bg")};

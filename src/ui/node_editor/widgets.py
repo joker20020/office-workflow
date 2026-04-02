@@ -527,7 +527,10 @@ class FilePickerButton(InlineWidgetBase):
         # 构建过滤器字符串
         filter_str = ";;".join(self._filters) if self._filters else "所有文件 (*)"
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", filter_str)
+        # 使用顶层窗口作为父窗口，避免嵌入 QGraphicsProxyWidget 时
+        # Windows 平台模态对话框因焦点丢失而立即关闭
+        parent_window = self.window()
+        file_path, _ = QFileDialog.getOpenFileName(parent_window, "选择文件", "", filter_str)
 
         if file_path:
             self.set_value(file_path)

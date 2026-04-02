@@ -115,6 +115,7 @@ class ImageBlockWidget(BaseBlockWidget):
                     padding: 4px;
                     color: {text_color};
                     font-size: {font_size};
+                    {Theme.emoji_font_css()}
                 }}
             """)
 

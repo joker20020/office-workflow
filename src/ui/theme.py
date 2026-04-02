@@ -86,6 +86,14 @@ class Theme:
         "danger_pressed_bg": "#B71C1C",
         "success_hover_bg": "#43A047",
         "success_pressed_bg": "#388E3C",
+        # Block card colors
+        "card_background": "#252526",
+        "card_border": "#3c3c3c",
+        "card_header_hover": "#2a2a2b",
+        "thinking_accent": "#FFA726",
+        "tool_accent": "#42A5F5",
+        "success_accent": "#66BB6A",
+        "error_accent": "#EF5350",
     }
 
     LIGHT_COLORS = {
@@ -131,6 +139,14 @@ class Theme:
         "danger_pressed_bg": "#C62828",
         "success_hover_bg": "#4CAF50",
         "success_pressed_bg": "#388E3C",
+        # Block card colors
+        "card_background": "#ffffff",
+        "card_border": "#e0e0e0",
+        "card_header_hover": "#f0f0f0",
+        "thinking_accent": "#FB8C00",
+        "tool_accent": "#1E88E5",
+        "success_accent": "#43A047",
+        "error_accent": "#E53935",
     }
 
     _current_theme: ThemeType = ThemeType.DARK
@@ -732,6 +748,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 13px;
+                {cls.emoji_font_css()}
             }}
             QTextEdit:focus {{
                 border: 1px solid {cls.hex("border_focus")};
@@ -749,6 +766,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 8px 16px;
                 font-size: 13px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("accent_hover_bg")};
@@ -758,7 +776,6 @@ class Theme:
             }}
         """
 
-    @classmethod
     @classmethod
     def get_chat_stop_button_stylesheet(cls) -> str:
         """获取对话停止按钮样式表"""
@@ -770,6 +787,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 8px 16px;
                 font-size: 13px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("danger_hover_bg")};
@@ -791,6 +809,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 4px 12px;
                 font-size: 12px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("background_selected")};
@@ -805,6 +824,7 @@ class Theme:
                 color: {cls.hex("accent_primary")};
                 font-size: 16px;
                 font-weight: bold;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -848,6 +868,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 12px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("background_hover")};
@@ -866,6 +887,7 @@ class Theme:
                 border: none;
                 border-radius: 14px;
                 font-size: 12px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("accent_hover_bg")};
@@ -1090,6 +1112,7 @@ class Theme:
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 13px;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1793,6 +1816,7 @@ class Theme:
                 padding: 6px 10px;
                 text-align: left;
                 font-size: 12px;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("background_selected")};
@@ -1810,6 +1834,7 @@ class Theme:
                 padding: 8px;
                 font-style: italic;
                 font-size: 12px;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1821,6 +1846,7 @@ class Theme:
                 font-size: 12px;
                 font-weight: bold;
                 padding: 4px 0;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1844,6 +1870,7 @@ class Theme:
             border: none;
             padding: 4px;
             font-size: 11px;
+            {cls.emoji_font_css()}
         }}
         QPushButton:hover {{
             color: {cls.hex("accent_hover")};
@@ -1873,6 +1900,7 @@ class Theme:
             font-size: 14px;
             font-weight: bold;
             background-color: transparent;
+            {cls.emoji_font_css()}
         }}
         """
 
@@ -1899,6 +1927,7 @@ class Theme:
                 padding: 8px;
                 font-family: monospace;
                 font-size: 11px;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1928,6 +1957,7 @@ class Theme:
                 padding: 8px;
                 font-family: monospace;
                 font-size: 11px;
+                {cls.emoji_font_css()}
             }}
         """
 
@@ -1941,9 +1971,110 @@ class Theme:
                 padding: 4px 8px;
                 font-size: 11px;
                 text-align: left;
+                {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
                 color: {cls.hex("accent_hover")};
+            }}
+        """
+
+    # ==================== Block 卡片统一样式 ====================
+
+    @classmethod
+    def get_block_card_stylesheet(cls, accent_color_key: str = "tool_accent") -> str:
+        """获取 block 卡片外框样式。
+
+        Args:
+            accent_color_key: 左侧强调色 key (thinking_accent/tool_accent/success_accent/error_accent)
+        """
+        return f"""
+            QFrame#blockCard {{
+                background-color: {cls.hex("card_background")};
+                border: 1px solid {cls.hex("card_border")};
+                border-left: 3px solid {cls.hex(accent_color_key)};
+                border-radius: 6px;
+            }}
+        """
+
+    @classmethod
+    def get_block_card_header_stylesheet(cls, accent_color_key: str = "tool_accent") -> str:
+        """获取 block 卡片标题区样式。
+
+        Args:
+            accent_color_key: 悬停时的左侧强调色
+        """
+        return f"""
+            QFrame#blockHeader {{
+                background-color: transparent;
+                border: none;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+                padding: 6px 10px;
+            }}
+            QFrame#blockHeader:hover {{
+                background-color: {cls.hex("card_header_hover")};
+            }}
+        """
+
+    @classmethod
+    def get_block_card_icon_stylesheet(cls) -> str:
+        """获取 block 卡片图标标签样式"""
+        return f"""
+            QLabel {{
+                background-color: transparent;
+                border: none;
+                font-size: 14px;
+                {cls.emoji_font_css()}
+            }}
+        """
+
+    @classmethod
+    def get_block_card_title_stylesheet(cls, color_key: str = "text_primary") -> str:
+        """获取 block 卡片标题标签样式"""
+        return f"""
+            QLabel {{
+                color: {cls.hex(color_key)};
+                font-size: 12px;
+                font-weight: bold;
+                background-color: transparent;
+                border: none;
+            }}
+        """
+
+    @classmethod
+    def get_block_card_content_stylesheet(
+        cls,
+        content_type: str = "code",
+        is_error: bool = False,
+    ) -> str:
+        """获取 block 卡片内容区样式。
+
+        Args:
+            content_type: "code" (等宽字体) 或 "text" (普通字体, 用于 thinking)
+            is_error: 是否错误状态
+        """
+        if is_error:
+            text_color = cls.hex("state_error")
+        elif content_type == "thinking":
+            text_color = cls.hex("text_hint")
+        else:
+            text_color = cls.hex("text_primary")
+
+        font_family = "font-family: monospace;" if content_type == "code" else ""
+        font_style = "font-style: italic;" if content_type == "thinking" else ""
+
+        return f"""
+            QTextEdit {{
+                background-color: transparent;
+                color: {text_color};
+                border: none;
+                border-bottom-left-radius: 5px;
+                border-bottom-right-radius: 5px;
+                padding: 6px 10px;
+                font-size: 12px;
+                {font_family}
+                {font_style}
+                {cls.emoji_font_css()}
             }}
         """
 

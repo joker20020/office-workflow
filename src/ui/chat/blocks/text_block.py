@@ -55,7 +55,23 @@ class TextBlockWidget(BaseBlockWidget):
         if not self._content_edit:
             return
         doc = self._content_edit.document()
-        doc.setTextWidth(self._content_edit.width())
+
+        # 获取可用文本宽度：优先用自身宽度，否则向上查找父级
+        w = self._content_edit.width()
+        if w <= 0:
+            p = self.parentWidget()
+            while p:
+                if p.width() > 0:
+                    w = p.width()
+                    break
+                p = p.parentWidget()
+        if w <= 0:
+            w = 600
+
+        # 减去 QSS padding (get_message_content_edit_stylesheet: padding 8px)
+        text_w = w - 16
+        doc.setTextWidth(max(text_w, 50))
+
         doc_height = doc.documentLayout().documentSize().height()
         margins = self._content_edit.contentsMargins()
         total_height = int(doc_height + margins.top() + margins.bottom() + 16)
