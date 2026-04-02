@@ -354,26 +354,27 @@ class Theme:
     def get_toolbar_stylesheet(cls) -> str:
         """获取工具栏样式表"""
         return f"""
-            QToolBar {{ 
-                background-color: {cls.hex("background_secondary")}; 
+            QToolBar {{
+                background-color: {cls.hex("background_secondary")};
                 border-bottom: 1px solid {cls.hex("border_primary")};
                 padding: 4px;
                 spacing: 4px;
             }}
-            QToolButton {{ 
+            QToolButton {{
                 padding: 6px 12px;
                 border: none;
                 border-radius: 3px;
                 background-color: transparent;
                 color: {cls.hex("text_primary")};
+                {cls.emoji_font_css()}
             }}
-            QToolButton:hover {{ 
+            QToolButton:hover {{
                 background-color: {cls.hex("background_hover")};
             }}
-            QToolButton:pressed {{ 
+            QToolButton:pressed {{
                 background-color: {cls.hex("background_pressed")};
             }}
-            QToolBar::separator {{ 
+            QToolBar::separator {{
                 margin: 0;
                 border-image: none;
             }}

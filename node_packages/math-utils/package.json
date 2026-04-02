@@ -1,10 +1,20 @@
 {
     "id": "com.example.mathUtils",
     "name": "数学工具",
-    "version": "1.2.0",
-    "author": "测试作者",
-    "description": "数学计算工具包，包含基础运算、统计计算等功能",
-    "repository": "https://github.com/example/math-utils",
+    "version": "2.0.0",
+    "author": "OfficeTools",
+    "description": "完整数学运算工具包：四则运算、比较运算、聚合运算、舍入运算、三角函数、随机数、条件选择",
+    "repository": "",
     "branch": "main",
-    "nodes": ["math.add", "math.subtract", "math.multiply", "math.divide", "math.average"]
+    "nodes": [
+        "math.add", "math.subtract", "math.multiply", "math.divide", "math.modulo", "math.power", "math.integer_divide",
+        "math.absolute", "math.negate", "math.sign",
+        "math.equal", "math.not_equal", "math.greater", "math.less", "math.greater_equal", "math.less_equal",
+        "math.min", "math.max", "math.clamp", "math.sum", "math.average",
+        "math.round", "math.ceil", "math.floor",
+        "math.sqrt", "math.log",
+        "math.sin", "math.cos", "math.tan", "math.deg_to_rad", "math.rad_to_deg",
+        "math.random", "math.random_int",
+        "math.condition"
+    ]
 }
