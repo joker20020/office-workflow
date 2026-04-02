@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QWidget,
 )
+from PySide6.QtGui import QIcon
 
 from src.agent import (
     AgentIntegration,
@@ -154,6 +155,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         """设置UI"""
+        self.setWindowIcon(QIcon("resources/logo.ico"))
         self.setWindowTitle("办公小工具整合平台")
         self.setMinimumSize(1200, 800)
         self.resize(1280, 900)
