@@ -1,7 +1,7 @@
 recent_workflows:
 - file_path: /home/jdy/Documents/Github/office/workflows/默认工作流.json
-  id: 6742b519-c250-432b-838d-0676b6b10f67
-  modified: 2026-03-31 15:15
+  id: 4eb6ff51-2557-4f69-9707-58ac2e0ac02b
+  modified: 2026-04-02 17:46
   node_count: 0
   title: 默认工作流
 system_prompt: '你是一个智能工作流助手。

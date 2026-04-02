@@ -125,9 +125,10 @@ def main() -> int:
 
     # 1. 创建 QApplication
     app = QApplication(sys.argv)
-    app.setApplicationName("办公小工具整合平台")
+    app.setApplicationName("OfficeWorkflow")
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("OfficeTools")
+    app.setDesktopFileName("OfficeWorkflow")
 
     _logger.debug("QApplication 创建完成")
 
