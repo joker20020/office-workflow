@@ -957,8 +957,8 @@ class Theme:
                 background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                margin: 2px 4px;
-                padding: 8px 12px;
+                margin: 1px 4px;
+                padding: 0px;
             }}
             QListWidget::item:hover {{
                 background-color: {cls.hex("background_hover")};

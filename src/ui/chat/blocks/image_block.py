@@ -20,6 +20,7 @@ class ImageBlockWidget(BaseBlockWidget):
         parent=None,
     ):
         self._image_label: QLabel = None  # type: ignore
+        self._placeholder = False
         super().__init__(block_data, parent)
 
     def _setup_ui(self) -> None:
@@ -28,14 +29,21 @@ class ImageBlockWidget(BaseBlockWidget):
         layout.setSpacing(4)
 
         self._image_label = QLabel()
-        self._image_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setScaledContents(False)
+        self._image_label.setMinimumSize(200, 150)
         self._image_label.setMaximumSize(400, 300)
         self._image_label.setWordWrap(True)
 
         self._load_image()
 
         layout.addWidget(self._image_label)
+
+    def _show_placeholder(self, text: str = "🖼 图片") -> None:
+        """Show a styled placeholder when image cannot be loaded."""
+        self._placeholder = True
+        self._image_label.setText(text)
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _load_image(self) -> None:
         source = self._block_data.get("source", {})
@@ -46,13 +54,16 @@ class ImageBlockWidget(BaseBlockWidget):
         elif source_type == "base64":
             self._load_from_base64(source)
         else:
-            self._image_label.setText("[未知的图片源]")
+            self._show_placeholder("🖼 图片 (无来源)")
 
     def _load_from_url(self, source: Dict[str, Any]) -> None:
         url = source.get("url", "")
+        if not url:
+            self._show_placeholder("🖼 图片 (路径为空)")
+            return
 
         if url.startswith(("http://", "https://")):
-            self._image_label.setText(f"[图片: {url}]")
+            self._show_placeholder("🖼 图片 (网络)")
         else:
             pixmap = QPixmap(url)
             if not pixmap.isNull():
@@ -64,13 +75,13 @@ class ImageBlockWidget(BaseBlockWidget):
                 )
                 self._image_label.setPixmap(scaled_pixmap)
             else:
-                self._image_label.setText(f"[无法加载图片: {url}]")
+                self._show_placeholder("🖼 图片 (无法加载)")
 
     def _load_from_base64(self, source: Dict[str, Any]) -> None:
         data = source.get("data", "")
 
         if not data:
-            self._image_label.setText("[空的图片数据]")
+            self._show_placeholder("🖼 图片 (无数据)")
             return
 
         try:
@@ -86,19 +97,24 @@ class ImageBlockWidget(BaseBlockWidget):
                 )
                 self._image_label.setPixmap(scaled_pixmap)
             else:
-                self._image_label.setText("[无效的图片数据]")
-        except Exception as e:
-            self._image_label.setText(f"[图片加载失败: {e}]")
+                self._show_placeholder("🖼 图片 (数据无效)")
+        except Exception:
+            self._show_placeholder("🖼 图片 (加载失败)")
 
     def _apply_styles(self) -> None:
         if self._image_label:
+            bg = Theme.hex("background_secondary")
+            border = Theme.hex("border_primary")
+            text_color = Theme.hex("text_hint") if self._placeholder else Theme.hex("text_secondary")
+            font_size = "28px" if self._placeholder else "12px"
             self._image_label.setStyleSheet(f"""
                 QLabel {{
-                    background-color: {Theme.hex("background_secondary")};
-                    border: 1px solid {Theme.hex("border_primary")};
+                    background-color: {bg};
+                    border: 1px solid {border};
                     border-radius: 4px;
                     padding: 4px;
-                    color: {Theme.hex("text_secondary")};
+                    color: {text_color};
+                    font-size: {font_size};
                 }}
             """)
 

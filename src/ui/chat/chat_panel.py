@@ -146,6 +146,30 @@ def _extract_blocks_from_msg(msg: Any) -> List[Dict[str, Any]]:
     return [{"type": "text", "text": str(content)}]
 
 
+def _normalize_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize block data to ensure media blocks have proper 'source' format.
+
+    Converts legacy formats like {"type": "image", "url": "..."} to
+    {"type": "image", "source": {"type": "url", "url": "..."}}.
+    """
+    normalized = []
+    for block in blocks:
+        block_type = block.get("type", "text")
+        if block_type in ("image", "audio", "video") and "source" not in block:
+            url = block.get("url", "")
+            if url.startswith("file://"):
+                url = url[7:]
+            block = {
+                "type": block_type,
+                "source": {
+                    "type": "url",
+                    "url": url,
+                },
+            }
+        normalized.append(block)
+    return normalized
+
+
 class AgentWorker(QThread):
     response_ready = Signal(str)
     block_update = Signal(list)
@@ -201,11 +225,11 @@ class SessionItemWidget(QWidget):
 
     def _setup_ui(self, session: Dict) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 4, 6)
+        layout.setContentsMargins(12, 8, 4, 8)
         layout.setSpacing(6)
 
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(1)
+        info_layout.setSpacing(3)
 
         title = session.get("title", "未命名会话")
         self._title_label = QLabel(title)
@@ -216,6 +240,7 @@ class SessionItemWidget(QWidget):
                 font-weight: bold;
                 background: transparent;
                 border: none;
+                padding: 0px;
             }}
         """)
         info_layout.addWidget(self._title_label)
@@ -229,6 +254,7 @@ class SessionItemWidget(QWidget):
                 font-size: 11px;
                 background: transparent;
                 border: none;
+                padding: 0px;
             }}
         """)
         info_layout.addWidget(self._meta_label)
@@ -325,7 +351,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         for session in sessions:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, session["id"])
-            item.setSizeHint(QSize(0, 52))
+            item.setSizeHint(QSize(0, 58))
             self._list_widget.addItem(item)
 
             widget = SessionItemWidget(session, self._list_widget)
@@ -924,7 +950,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             content = msg.get("content", "")
 
             if isinstance(content, list) and content and isinstance(content[0], dict):
-                blocks = content
+                blocks = _normalize_blocks(content)
             elif isinstance(content, str):
                 blocks = [{"type": "text", "text": content}]
             else:
@@ -972,6 +998,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._video_btn.setVisible(has_video)
 
         has_multimodal = any([has_image, has_audio, has_video])
+
+        # 移除当前附件中不受支持的类型
+        if self._attachments:
+            type_map = {"image": has_image, "audio": has_audio, "video": has_video}
+            removed_types = [t for t, ok in type_map.items() if not ok]
+            if removed_types:
+                to_remove = [a for a in self._attachments if a.get("type") in removed_types]
+                for attachment in to_remove:
+                    self._remove_attachment(attachment)
+                if to_remove:
+                    _logger.info(f"切换API密钥后移除不支持的附件: {[a['type'] for a in to_remove]}")
 
         _logger.info(
             f"切换API密钥: {provider}/{model_name or 'default'}, "
@@ -1036,6 +1073,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         if not text and not self._attachments:
             return
 
+        display_blocks = None
         if self._attachments:
             content = [{"type": "text", "text": text}]
             for attachment in self._attachments:
@@ -1046,6 +1084,19 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                     }
                 )
             message_content = content
+
+            # Build display blocks with proper source for block widgets
+            display_blocks = [{"type": "text", "text": text}] if text else []
+            for attachment in self._attachments:
+                display_blocks.append(
+                    {
+                        "type": attachment["type"],
+                        "source": {
+                            "type": "url",
+                            "url": attachment["path"],
+                        },
+                    }
+                )
         else:
             message_content = text
 
@@ -1053,7 +1104,10 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._attachments.clear()
         self._clear_preview_area()
 
-        self.add_message("user", text)
+        if display_blocks:
+            self._add_message_widget("user", display_blocks)
+        else:
+            self._add_message_widget("user", text)
         self.message_sent.emit(text)
 
         if not self._agent or not self._agent.is_initialized:

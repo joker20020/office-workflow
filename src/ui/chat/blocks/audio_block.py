@@ -21,6 +21,7 @@ class AudioBlockWidget(BaseBlockWidget):
         self._audio_output: Optional[QAudioOutput] = None
         self._info_label: QLabel = None  # type: ignore
         self._play_btn: QPushButton = None  # type: ignore
+        self._has_source = False
         super().__init__(block_data, parent)
 
     def _setup_ui(self) -> None:
@@ -38,31 +39,27 @@ class AudioBlockWidget(BaseBlockWidget):
         self._init_media_player()
 
     def _init_media_player(self) -> None:
+        source = self._block_data.get("source", {})
+        source_type = source.get("type", "")
+        url = source.get("url", "") if source_type == "url" else ""
+
+        if not url:
+            self._info_label.setText("🎵 音频 (无来源)")
+            self._play_btn.setEnabled(False)
+            return
+
+        self._has_source = True
         self._player = QMediaPlayer(self)
         self._audio_output = QAudioOutput(self)
         self._player.setAudioOutput(self._audio_output)
         self._player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self._load_audio_source()
 
-    def _load_audio_source(self) -> None:
-        source = self._block_data.get("source", {})
-        source_type = source.get("type", "")
-
-        if source_type == "url":
-            url = source.get("url", "")
-            if url:
-                if url.startswith(("http://", "https://")):
-                    self._player.setSource(QUrl(url))
-                    self._info_label.setText(f"🎵 音频: {url}")
-                else:
-                    self._player.setSource(QUrl.fromLocalFile(url))
-                    self._info_label.setText("🎵 音频")
-            else:
-                self._info_label.setText("[无效的音频源]")
-        elif source_type == "base64":
-            self._info_label.setText("[Base64音频暂不支持]")
+        if url.startswith(("http://", "https://")):
+            self._player.setSource(QUrl(url))
+            self._info_label.setText(f"🎵 音频")
         else:
-            self._info_label.setText("[未知的音频源]")
+            self._player.setSource(QUrl.fromLocalFile(url))
+            self._info_label.setText("🎵 音频")
 
     def _toggle_play(self) -> None:
         if not self._player:
@@ -80,12 +77,19 @@ class AudioBlockWidget(BaseBlockWidget):
             self._play_btn.setText("▶ 播放")
 
     def _apply_styles(self) -> None:
+        bg = Theme.hex("background_secondary")
+        border = Theme.hex("border_primary")
+
         if self._info_label:
+            color = Theme.hex("text_hint") if not self._has_source else Theme.hex("text_primary")
             self._info_label.setStyleSheet(f"""
                 QLabel {{
-                    color: {Theme.hex("text_primary")};
+                    color: {color};
                     font-size: 13px;
-                    background-color: transparent;
+                    background-color: {bg};
+                    border: 1px solid {border};
+                    border-radius: 4px;
+                    padding: 8px;
                 }}
             """)
 

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 from src.ui.chat.blocks.base import BaseBlockWidget
 from src.ui.theme import Theme
@@ -21,7 +21,9 @@ class VideoBlockWidget(BaseBlockWidget):
         self._player: Optional[QMediaPlayer] = None
         self._audio_output: Optional[QAudioOutput] = None
         self._video_widget: Optional[QVideoWidget] = None
+        self._placeholder_label: Optional[QLabel] = None
         self._play_btn: QPushButton = None  # type: ignore
+        self._has_source = False
         super().__init__(block_data, parent)
 
     def _setup_ui(self) -> None:
@@ -29,37 +31,44 @@ class VideoBlockWidget(BaseBlockWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        self._video_widget = QVideoWidget()
-        self._video_widget.setMaximumSize(400, 300)
-        layout.addWidget(self._video_widget)
+        source = self._block_data.get("source", {})
+        source_type = source.get("type", "")
+        url = source.get("url", "") if source_type == "url" else ""
+
+        if not url:
+            # Show placeholder instead of video widget
+            self._placeholder_label = QLabel("🎬 视频 (无来源)")
+            self._placeholder_label.setMinimumSize(200, 150)
+            self._placeholder_label.setMaximumSize(400, 300)
+            self._placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(self._placeholder_label)
+        else:
+            self._has_source = True
+            self._video_widget = QVideoWidget()
+            self._video_widget.setMinimumSize(200, 150)
+            self._video_widget.setMaximumSize(400, 300)
+            layout.addWidget(self._video_widget)
 
         self._play_btn = QPushButton("▶ 播放")
         self._play_btn.clicked.connect(self._toggle_play)
+        if not self._has_source:
+            self._play_btn.setEnabled(False)
         layout.addWidget(self._play_btn)
 
-        self._init_media_player()
+        if self._has_source:
+            self._init_media_player(url)
 
-    def _init_media_player(self) -> None:
+    def _init_media_player(self, url: str) -> None:
         self._player = QMediaPlayer(self)
         self._audio_output = QAudioOutput(self)
         self._player.setAudioOutput(self._audio_output)
         self._player.setVideoOutput(self._video_widget)
         self._player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self._load_video_source()
 
-    def _load_video_source(self) -> None:
-        source = self._block_data.get("source", {})
-        source_type = source.get("type", "")
-
-        if source_type == "url":
-            url = source.get("url", "")
-            if url:
-                if url.startswith(("http://", "https://")):
-                    self._player.setSource(QUrl(url))
-                else:
-                    self._player.setSource(QUrl.fromLocalFile(url))
-        elif source_type == "base64":
-            pass
+        if url.startswith(("http://", "https://")):
+            self._player.setSource(QUrl(url))
+        else:
+            self._player.setSource(QUrl.fromLocalFile(url))
 
     def _toggle_play(self) -> None:
         if not self._player:
@@ -77,12 +86,26 @@ class VideoBlockWidget(BaseBlockWidget):
             self._play_btn.setText("▶ 播放")
 
     def _apply_styles(self) -> None:
+        bg = Theme.hex("background_secondary")
+        border = Theme.hex("border_primary")
+
         if self._video_widget:
             self._video_widget.setStyleSheet(f"""
                 QVideoWidget {{
                     background-color: {Theme.hex("background_primary")};
-                    border: 1px solid {Theme.hex("border_primary")};
+                    border: 1px solid {border};
                     border-radius: 4px;
+                }}
+            """)
+
+        if self._placeholder_label:
+            self._placeholder_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg};
+                    border: 1px solid {border};
+                    border-radius: 4px;
+                    color: {Theme.hex("text_hint")};
+                    font-size: 28px;
                 }}
             """)
 

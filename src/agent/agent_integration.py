@@ -410,11 +410,9 @@ class AgentIntegration:
                             content_blocks.append(VideoBlock(type="video", source=source))
                             text_parts.append("[视频]")
 
-                    history_text = " ".join(text_parts)
-                    self._history.add_message("user", history_text)
-                    _logger.info(f"多模态消息已添加到历史记录: {history_text[:50]}...")
-
                     msg = Msg(name="User", content=content_blocks, role="user")
+                    self._history.add_message(msg=msg)
+                    _logger.info(f"多模态消息已添加到历史记录: {len(content_blocks)} 个内容块")
 
                 _logger.info(f"Msg对象创建成功: {msg}")
 
@@ -534,9 +532,8 @@ class AgentIntegration:
                             content_blocks.append(VideoBlock(type="video", source=source))
                             text_parts.append("[视频]")
 
-                    history_text = " ".join(text_parts)
-                    self._history.add_message("user", history_text)
                     msg = Msg(name="User", content=content_blocks, role="user")
+                    self._history.add_message(msg=msg)
 
                 _logger.info("[异步] 调用Agent...")
 
@@ -633,6 +630,7 @@ class AgentIntegration:
                 if role not in ["user", "assistant", "system"]:
                     continue
                 if role == "user":
+                    # user message is add, skip here
                     break
 
                 messages.append(msg_dict)
