@@ -532,7 +532,7 @@ class NodePackageManager:
             "version": manifest.version,
             "author": manifest.author,
             "description": manifest.description,
-            "repository_url": f"local://{local_path}",
+            "repository_url": manifest.repository,
             "branch": "local",
             "local_path": str(final_path),
             "enabled": True,
