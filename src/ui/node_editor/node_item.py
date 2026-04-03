@@ -535,6 +535,8 @@ class NodeGraphicsItem(QGraphicsObject):
             bg_color = Theme.color("node_bg_success")
         elif self._node.state == NodeState.ERROR:
             bg_color = Theme.color("node_bg_error")
+        elif self._node.state == NodeState.SKIPPED:
+            bg_color = Theme.color("node_bg_skipped")
         else:
             bg_color = Theme.color("node_bg_idle")
 

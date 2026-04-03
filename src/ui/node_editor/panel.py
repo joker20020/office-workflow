@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from src.engine.definitions import NodeDefinition
 from src.engine.node_graph import NodeGraph, NodeState
-from src.engine.node_engine import NodeEngine, get_node_engine, ExecutionResult
+from src.engine.node_engine import NodeEngine, get_node_engine, ExecutionResult, _ExecutionCancelled
 from src.engine.serialization import serialize_graph, deserialize_graph
 from src.ui.node_editor.scene import NodeEditorScene
 from src.ui.node_editor.view import NodeEditorView
@@ -43,66 +43,71 @@ _logger = get_logger(__name__)
 
 
 class WorkflowRunner(QThread):
-    """在工作线程中执行工作流，通过 Signal 回调更新 UI。"""
+    """在工作线程中执行工作流，委托 NodeEngine 处理控制流逻辑。"""
 
     finished = Signal(dict)          # {node_id: ExecutionResult}
     error = Signal(str)
-    node_state_changed = Signal(str)  # node_id — 每个节点执行完后触发 UI 刷新
+    node_state_changed = Signal(str)  # node_id — 每个节点状态变化时触发 UI 刷新
 
     def __init__(self, engine: NodeEngine, graph: NodeGraph, parent=None):
         super().__init__(parent)
         self._engine = engine
         self._graph = graph
         self._cancel = False
+        self._sub_ids: list = []
 
     def cancel(self) -> None:
         self._cancel = True
 
+    def _on_node_completed(self, node_id: str, state: NodeState) -> None:
+        """engine 回调：仅用于取消检测。"""
+        if self._cancel:
+            raise _ExecutionCancelled()
+
+    def _on_node_event(self, event) -> None:
+        """事件总线回调：节点开始/完成时发射 Qt 信号通知 UI。"""
+        node_id = event.data.get("node_id") if event.data else None
+        if node_id:
+            self.node_state_changed.emit(node_id)
+
     def run(self) -> None:
+        from src.core.event_bus import EventType
+        from src.engine.node_graph import CyclicDependencyError
+
+        # 订阅节点执行事件
+        event_bus = self._engine.event_bus
+        if event_bus:
+            self._sub_ids.append(
+                event_bus.subscribe(EventType.NODE_STARTED, self._on_node_event)
+            )
+            self._sub_ids.append(
+                event_bus.subscribe(EventType.NODE_EXECUTED, self._on_node_event)
+            )
+
         try:
-            import threading
-            _logger.info(f"[Thread: {threading.current_thread().name}] 工作流执行线程启动")
-
-            # 获取执行顺序
-            from src.engine.node_graph import CyclicDependencyError
-            try:
-                execution_order = self._graph.get_execution_order()
-            except CyclicDependencyError as e:
-                self.error.emit(str(e))
-                return
-
-            # 重置所有节点状态
-            for node in self._graph.nodes.values():
-                node.state = NodeState.IDLE
-                node.error_message = None
-                node.outputs.clear()
-
-            results: dict[str, ExecutionResult] = {}
-
-            for node_id in execution_order:
-                if self._cancel:
-                    _logger.info("工作流执行被用户取消")
-                    break
-
-                node = self._graph.get_node(node_id)
-                if node is None:
-                    continue
-
-                result = self._engine.execute_node(node, self._graph)
-                results[node_id] = result
-
-                # 通知 UI 刷新该节点（Signal 自动跨线程 marshal 到主线程）
-                self.node_state_changed.emit(node_id)
-
-                if not result.success:
-                    _logger.warning(f"工作流执行中断: 节点 {node_id[:8]}... 失败")
-                    break
-
+            results = self._engine.execute_graph(
+                self._graph, on_node_completed=self._on_node_completed
+            )
             self.finished.emit(results)
-
+        except _ExecutionCancelled:
+            _logger.info("工作流执行被用户取消")
+            results = {
+                nid: ExecutionResult(success=True, node_id=nid)
+                for nid, node in self._graph.nodes.items()
+                if node.state in (NodeState.SUCCESS, NodeState.SKIPPED)
+            }
+            self.finished.emit(results)
+        except CyclicDependencyError as e:
+            self.error.emit(str(e))
         except Exception as e:
             _logger.error(f"工作流执行线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
+        finally:
+            # 取消订阅，避免残留订阅者
+            if event_bus:
+                for sub_id in self._sub_ids:
+                    event_bus.unsubscribe(sub_id)
+            self._sub_ids.clear()
 
 
 class NodeEditorPanel(QWidget, ThemeAwareMixin):
@@ -262,6 +267,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
             "io": "输入输出",
             "general": "通用",
             "data": "数据处理",
+            "flow": "流程控制",
         }
 
         for cat, nodes in sorted(categories.items()):

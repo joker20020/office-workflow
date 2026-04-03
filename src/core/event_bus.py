@@ -91,6 +91,7 @@ class EventType(Enum):
     # 节点事件
     NODE_REGISTERED = "node.registered"  # 节点注册
     NODE_UNREGISTERED = "node.unregistered"  # 节点注销
+    NODE_STARTED = "node.started"  # 节点开始执行
     NODE_EXECUTED = "node.executed"  # 节点执行完成
 
     # 工作流事件

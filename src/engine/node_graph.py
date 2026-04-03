@@ -62,6 +62,7 @@ class NodeState(Enum):
     RUNNING = "running"  # 执行中（黄色）
     SUCCESS = "success"  # 成功（绿色）
     ERROR = "error"  # 失败（红色）
+    SKIPPED = "skipped"  # 已跳过（暗灰色）— 因分支未激活而被跳过
 
     @property
     def color(self) -> str:
@@ -71,6 +72,7 @@ class NodeState(Enum):
             NodeState.RUNNING: "#FFC107",  # 黄色
             NodeState.SUCCESS: "#4CAF50",  # 绿色
             NodeState.ERROR: "#F44336",  # 红色
+            NodeState.SKIPPED: "#9E9E9E",  # 暗灰色（跳过）
         }
         return colors.get(self, "#616161")
 
@@ -444,14 +446,19 @@ class NodeGraph:
 
     # ==================== 拓扑排序 ====================
 
-    def get_execution_order(self) -> List[str]:
+    def get_execution_order(self, node_registry=None) -> List[str]:
         """
         获取拓扑排序后的执行顺序
 
         使用 Kahn 算法进行拓扑排序，确保：
         1. 被依赖的节点先执行
         2. 依赖其他节点的节点后执行
-        3. 检测循环依赖
+        3. 检测循环依赖（允许回边）
+
+        Args:
+            node_registry: 节点注册表（可选），用于元数据驱动的回边检测。
+                若提供，使用 PortDefinition.role=="feedback" 检测回边；
+                若为 None，走旧的硬编码路径（向后兼容）。
 
         Returns:
             节点ID列表，按执行顺序排列
@@ -467,10 +474,40 @@ class NodeGraph:
             >>> order.index(n1.id) < order.index(n2.id)
             True
         """
-        # 计算每个节点的入度（依赖数量）
+        # 识别循环回边
+        back_edges = set()
+        for conn in self.connections.values():
+            src_node = self.nodes.get(conn.source_node)
+            tgt_node = self.nodes.get(conn.target_node)
+            if not src_node or not tgt_node:
+                continue
+
+            is_back_edge = False
+            if node_registry is not None:
+                # 元数据驱动：检查源端口是否具有 role="feedback"
+                src_def = node_registry.get(src_node.node_type)
+                if src_def:
+                    for port in src_def.outputs:
+                        if port.name == conn.source_port and port.role == "feedback":
+                            is_back_edge = True
+                            break
+            else:
+                # 向后兼容：硬编码回边检测
+                if (
+                    src_node.node_type == "flow.loop_end"
+                    and tgt_node.node_type == "flow.for_each"
+                ):
+                    is_back_edge = True
+
+            if is_back_edge:
+                back_edges.add(conn.id)
+
+        # 计算每个节点的入度（依赖数量），排除循环回边
         in_degree: Dict[str, int] = {node_id: 0 for node_id in self.nodes}
 
         for conn in self.connections.values():
+            if conn.id in back_edges:
+                continue  # 忽略循环回边
             if conn.target_node in in_degree:
                 in_degree[conn.target_node] += 1
 
@@ -488,6 +525,8 @@ class NodeGraph:
 
             # 减少后续节点的入度
             for conn in self.get_outgoing_connections(node_id):
+                if conn.id in back_edges:
+                    continue  # 忽略循环回边
                 target = conn.target_node
                 if target in in_degree:
                     in_degree[target] -= 1
@@ -504,6 +543,117 @@ class NodeGraph:
 
         _logger.debug(f"拓扑排序完成: {len(result)} 个节点")
         return result
+
+    # ==================== 控制流辅助 ====================
+
+    def trace_downstream(self, node_id: str, port_name: str) -> Set[str]:
+        """从指定节点的指定输出端口出发，BFS 追踪所有下游可达节点。
+
+        用于分支追踪：从 flow.if 的非活跃输出端口找出需要跳过的节点。
+
+        Args:
+            node_id: 起始节点 ID
+            port_name: 起始输出端口名称
+
+        Returns:
+            所有下游可达节点的 ID 集合（不含起始节点自身）
+        """
+        visited: Set[str] = set()
+        queue: List[str] = []
+
+        # 找到从指定端口出发的所有直接下游节点
+        for conn in self.get_outgoing_connections(node_id):
+            if conn.source_port == port_name:
+                target = conn.target_node
+                if target not in visited:
+                    visited.add(target)
+                    queue.append(target)
+
+        # BFS 追踪
+        while queue:
+            current = queue.pop(0)
+            for conn in self.get_outgoing_connections(current):
+                target = conn.target_node
+                if target not in visited:
+                    visited.add(target)
+                    queue.append(target)
+
+        return visited
+
+    def get_loop_body(self, for_each_node_id: str, node_registry=None) -> tuple:
+        """获取循环节点对应的循环体节点列表和 loop_end 节点 ID。
+
+        循环体 = loop_start 的输出端口到配对的 loop_end 之间、按拓扑排序的所有节点。
+
+        Args:
+            for_each_node_id: 循环开始节点（flow_type="loop_start"）的 ID
+            node_registry: 节点注册表（可选），用于元数据驱动的 loop_end 检测
+
+        Returns:
+            (body_node_ids, loop_end_node_id) — 循环体节点 ID 列表和 loop_end 节点 ID。
+            如果没有配对的 loop_end，返回 ([], None)。
+        """
+        node = self.nodes.get(for_each_node_id)
+        if node is None:
+            return ([], None)
+
+        # 验证节点类型
+        if node_registry is not None:
+            node_def = node_registry.get(node.node_type)
+            if not node_def or node_def.flow_type != "loop_start":
+                return ([], None)
+        else:
+            # 向后兼容
+            if node.node_type != "flow.for_each":
+                return ([], None)
+
+        # 找到配对的 flow.loop_end：从 for_each 出发能到达的 loop_end 节点
+        loop_end_id: Optional[str] = None
+        visited: Set[str] = set()
+        queue: List[str] = []
+
+        # 从 for_each 的所有输出连接开始 BFS
+        for conn in self.get_outgoing_connections(for_each_node_id):
+            target = conn.target_node
+            if target not in visited:
+                visited.add(target)
+                queue.append(target)
+
+        while queue:
+            current_id = queue.pop(0)
+            current = self.nodes.get(current_id)
+            if current:
+                is_loop_end = False
+                if node_registry is not None:
+                    cur_def = node_registry.get(current.node_type)
+                    if cur_def and cur_def.flow_type == "loop_end":
+                        is_loop_end = True
+                else:
+                    if current.node_type == "flow.loop_end":
+                        is_loop_end = True
+                if is_loop_end:
+                    loop_end_id = current_id
+                    break
+            for conn in self.get_outgoing_connections(current_id):
+                target = conn.target_node
+                if target not in visited and target != for_each_node_id:
+                    visited.add(target)
+                    queue.append(target)
+
+        if loop_end_id is None:
+            return ([], None)
+
+        # 循环体 = 从 for_each 可达、但还未经过 loop_end 的节点
+        # 按 topological order 排列
+        body_nodes: List[str] = []
+        all_nodes = self.get_execution_order(node_registry=node_registry)
+        for_each_idx = all_nodes.index(for_each_node_id) if for_each_node_id in all_nodes else -1
+        loop_end_idx = all_nodes.index(loop_end_id) if loop_end_id in all_nodes else -1
+
+        if for_each_idx >= 0 and loop_end_idx >= 0 and loop_end_idx > for_each_idx:
+            body_nodes = all_nodes[for_each_idx + 1 : loop_end_idx]
+
+        return (body_nodes, loop_end_id)
 
     # ==================== 其他操作 ====================
 

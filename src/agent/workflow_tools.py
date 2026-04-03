@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import QObject, Signal, QThread
 
 from src.agent.node_formatter import NodeFormatter
-from src.engine.node_engine import NodeEngine, ExecutionResult
+from src.engine.node_engine import NodeEngine, ExecutionResult, _ExecutionCancelled
 from src.engine.node_graph import NodeGraph, NodeState
 from src.utils.logger import get_logger
 
@@ -36,7 +36,7 @@ def _make_response(content: Any, success: bool = True, metadata: Optional[Dict] 
 
 
 class _AgentWorkflowRunner(QThread):
-    """Agent 工作流执行线程 — 在后台执行工作流，结果直接存储在实例中。"""
+    """Agent 工作流执行线程 — 委托 NodeEngine 处理控制流逻辑。"""
 
     node_state_changed = Signal(str)  # node_id — 通知 UI 实时刷新
 
@@ -47,44 +47,53 @@ class _AgentWorkflowRunner(QThread):
         self.results: Dict[str, ExecutionResult] = {}
         self.error_message: Optional[str] = None
         self._cancel = False
+        self._sub_ids: list = []
 
     def cancel(self) -> None:
         self._cancel = True
 
+    def _on_node_completed(self, node_id: str, state: NodeState) -> None:
+        """engine 回调：仅用于取消检测。"""
+        if self._cancel:
+            raise _ExecutionCancelled()
+
+    def _on_node_event(self, event) -> None:
+        """事件总线回调：节点状态变化时发射 Qt 信号通知 UI。"""
+        node_id = event.data.get("node_id") if event.data else None
+        if node_id:
+            self.node_state_changed.emit(node_id)
+
     def run(self) -> None:
+        from src.core.event_bus import EventType
+        from src.engine.node_graph import CyclicDependencyError
+
+        # 订阅节点执行事件
+        event_bus = self._engine.event_bus
+        if event_bus:
+            self._sub_ids.append(
+                event_bus.subscribe(EventType.NODE_STARTED, self._on_node_event)
+            )
+            self._sub_ids.append(
+                event_bus.subscribe(EventType.NODE_EXECUTED, self._on_node_event)
+            )
+
         try:
-            from src.engine.node_graph import CyclicDependencyError
-
-            execution_order = self._graph.get_execution_order()
-
-            # 重置节点状态
-            for node in self._graph.nodes.values():
-                node.state = NodeState.IDLE
-                node.error_message = None
-                node.outputs.clear()
-
-            for node_id in execution_order:
-                if self._cancel:
-                    break
-
-                node = self._graph.get_node(node_id)
-                if node is None:
-                    continue
-
-                result = self._engine.execute_node(node, self._graph)
-                self.results[node_id] = result
-
-                # 通知 UI 刷新该节点颜色
-                self.node_state_changed.emit(node_id)
-
-                if not result.success:
-                    break
-
+            self.results = self._engine.execute_graph(
+                self._graph, on_node_completed=self._on_node_completed
+            )
+        except _ExecutionCancelled:
+            _logger.info("Agent 工作流执行被取消")
         except CyclicDependencyError as e:
             self.error_message = str(e)
         except Exception as e:
             _logger.error(f"Agent 工作流执行线程异常: {e}", exc_info=True)
             self.error_message = str(e)
+        finally:
+            # 取消订阅，避免残留订阅者
+            if event_bus:
+                for sub_id in self._sub_ids:
+                    event_bus.unsubscribe(sub_id)
+            self._sub_ids.clear()
 
 
 class WorkflowTools(QObject):

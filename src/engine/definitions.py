@@ -241,6 +241,7 @@ class PortDefinition:
     default: Any = None
     widget_type: Optional[str] = None  # 输入端口内联控件类型
     show_preview: bool = False  # 输出端口是否显示预览
+    role: Optional[str] = None  # 端口角色: "branch"=分支门控, "feedback"=反馈回边, None=普通
 
     def __post_init__(self):
         if isinstance(self.type, str):
@@ -312,6 +313,9 @@ class NodeDefinition:
 
     # 执行函数
     execute: Optional[Callable[..., Dict[str, Any]]] = field(default=None, repr=False)
+
+    # 控制流元数据
+    flow_type: Optional[str] = None  # "branch"=分支, "loop_start"=循环开始, "loop_end"=循环结束, None=普通
 
     def get_input_port(self, name: str) -> Optional[PortDefinition]:
         """
@@ -418,6 +422,7 @@ class NodeDefinition:
                     "required": p.required,
                     "default": p.default,
                     "widget_type": p.widget_type,
+                    "role": p.role,
                 }
                 for p in self.inputs
             ],
@@ -426,9 +431,11 @@ class NodeDefinition:
                     "name": p.name,
                     "type": p.type.value,
                     "description": p.description,
+                    "role": p.role,
                 }
                 for p in self.outputs
             ],
+            "flow_type": self.flow_type,
         }
 
     def __repr__(self) -> str:

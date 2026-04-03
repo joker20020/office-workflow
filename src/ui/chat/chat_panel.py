@@ -1228,6 +1228,9 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._streaming_message = None
         self._streaming_blocks = []
         self._streaming_text = ""
+        # 立即恢复按钮状态，允许用户重新执行
+        if not self._is_send_mode:
+            self._set_stop_mode(False)
 
     def _on_worker_finished(self) -> None:
         _logger.info("AgentWorker完成")
@@ -1302,10 +1305,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._status_label.setText(status)
 
     def _clear_chat(self) -> None:
-        """清空当前对话"""
+        """清空当前对话（同时清空数据库中的会话记录）"""
         self._clear_messages_ui()
 
         if self._agent:
+            # 清空数据库会话记录 + 内存历史
+            if hasattr(self._agent, "_history") and self._agent._history:
+                try:
+                    self._agent._history.clear_all()
+                    _logger.info("数据库会话记录已清空")
+                except Exception as e:
+                    _logger.warning(f"清空数据库会话记录失败: {e}")
             self._agent.reset()
 
         self._set_status("就绪" if self._current_provider else "请选择API密钥")

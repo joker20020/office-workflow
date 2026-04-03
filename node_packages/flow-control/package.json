@@ -1,0 +1,13 @@
+{
+    "id": "com.example.flowControl",
+    "name": "流程控制",
+    "version": "1.0.0",
+    "author": "Office Team",
+    "description": "条件分支和循环控制节点，支持 if/else 分支、分支合并、列表迭代循环",
+    "nodes": [
+        "flow.if",
+        "flow.merge",
+        "flow.for_each",
+        "flow.loop_end"
+    ]
+}

@@ -645,9 +645,22 @@ class NodeEditorScene(QGraphicsScene):
         if not start_port.port_type.is_compatible_with(end_port.port_type):
             return False
 
-        # 不能连接到同一个节点
+        # 不能连接到同一个节点（除非是循环回边）
+        from src.ui.node_editor.node_item import NodeGraphicsItem
+
         start_node = start_port.parentItem()
         end_node = end_port.parentItem()
+
+        if isinstance(start_node, NodeGraphicsItem) and isinstance(
+            end_node, NodeGraphicsItem
+        ):
+            # 允许 loop_end 的 feedback 端口连接回 loop_start（回边）
+            if (
+                start_node._definition.flow_type == "loop_end"
+                and end_node._definition.flow_type == "loop_start"
+            ):
+                return True
+
         if start_node == end_node:
             return False
 

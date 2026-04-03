@@ -1,8 +1,13 @@
 recent_workflows:
+- file_path: /home/jdy/Documents/Github/office/workflows/loop_test.json
+  id: 79b321ee-dcf7-4bde-9708-8d2bc7e8c8e1
+  modified: 2026-04-03 10:40
+  node_count: 4
+  title: 默认工作流
 - file_path: /home/jdy/Documents/Github/office/workflows/默认工作流.json
-  id: 4eb6ff51-2557-4f69-9707-58ac2e0ac02b
-  modified: 2026-04-02 17:46
-  node_count: 0
+  id: 6454c5f6-bf9e-45f7-bdd2-cd36486e38b2
+  modified: 2026-04-03 10:04
+  node_count: 6
   title: 默认工作流
 system_prompt: '你是一个智能工作流助手。
 
