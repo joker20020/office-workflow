@@ -1,0 +1,113 @@
+{
+  "id": "condition-example-001",
+  "name": "条件分支示例",
+  "nodes": [
+    {
+      "id": "node-score",
+      "node_type": "input.integer",
+      "position": [-400.0, 0.0],
+      "widget_values": {
+        "value": 85
+      }
+    },
+    {
+      "id": "node-threshold",
+      "node_type": "input.integer",
+      "position": [-400.0, 200.0],
+      "widget_values": {
+        "value": 60
+      }
+    },
+    {
+      "id": "node-compare",
+      "node_type": "math.greater_equal",
+      "position": [-100.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-pass-text",
+      "node_type": "input.string",
+      "position": [-200.0, -150.0],
+      "widget_values": {
+        "value": "恭喜通过！"
+      }
+    },
+    {
+      "id": "node-fail-text",
+      "node_type": "input.string",
+      "position": [-200.0, 350.0],
+      "widget_values": {
+        "value": "抱歉，未通过。"
+      }
+    },
+    {
+      "id": "node-branch",
+      "node_type": "flow.if",
+      "position": [200.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview-pass",
+      "node_type": "preview.text",
+      "position": [500.0, -80.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview-fail",
+      "node_type": "preview.text",
+      "position": [500.0, 280.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-001",
+      "source_node": "node-score",
+      "source_port": "output",
+      "target_node": "node-compare",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-002",
+      "source_node": "node-threshold",
+      "source_port": "output",
+      "target_node": "node-compare",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-003",
+      "source_node": "node-compare",
+      "source_port": "result",
+      "target_node": "node-branch",
+      "target_port": "condition"
+    },
+    {
+      "id": "conn-004",
+      "source_node": "node-pass-text",
+      "source_port": "output",
+      "target_node": "node-branch",
+      "target_port": "then_value"
+    },
+    {
+      "id": "conn-005",
+      "source_node": "node-fail-text",
+      "source_port": "output",
+      "target_node": "node-branch",
+      "target_port": "else_value"
+    },
+    {
+      "id": "conn-006",
+      "source_node": "node-branch",
+      "source_port": "then_out",
+      "target_node": "node-preview-pass",
+      "target_port": "text"
+    },
+    {
+      "id": "conn-007",
+      "source_node": "node-branch",
+      "source_port": "else_out",
+      "target_node": "node-preview-fail",
+      "target_port": "text"
+    }
+  ]
+}

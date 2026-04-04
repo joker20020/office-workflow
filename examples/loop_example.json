@@ -1,0 +1,111 @@
+{
+  "id": "loop-example-001",
+  "name": "列表循环示例（无需 loop_end）",
+  "nodes": [
+    {
+      "id": "node-prices",
+      "node_type": "input.list",
+      "position": [-400.0, 0.0],
+      "widget_values": {
+        "value": [100, 200, 350, 80, 500]
+      }
+    },
+    {
+      "id": "node-multiplier",
+      "node_type": "input.float",
+      "position": [-400.0, 200.0],
+      "widget_values": {
+        "value": 1.08
+      }
+    },
+    {
+      "id": "node-for-each",
+      "node_type": "flow.for_each",
+      "position": [-50.0, 0.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-multiply",
+      "node_type": "math.multiply",
+      "position": [250.0, 0.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-round",
+      "node_type": "math.round",
+      "position": [500.0, 0.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-decimals",
+      "node_type": "input.integer",
+      "position": [250.0, 200.0],
+      "widget_values": {
+        "value": 2
+      }
+    },
+    {
+      "id": "node-preview-results",
+      "node_type": "preview.list",
+      "position": [750.0, -100.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview-count",
+      "node_type": "preview.number",
+      "position": [750.0, 100.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-prices-to-foreach",
+      "source_node": "node-prices",
+      "source_port": "output",
+      "target_node": "node-for-each",
+      "target_port": "items"
+    },
+    {
+      "id": "conn-foreach-item-to-mul",
+      "source_node": "node-for-each",
+      "source_port": "item",
+      "target_node": "node-multiply",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-multiplier-to-mul",
+      "source_node": "node-multiplier",
+      "source_port": "output",
+      "target_node": "node-multiply",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-mul-to-round",
+      "source_node": "node-multiply",
+      "source_port": "result",
+      "target_node": "node-round",
+      "target_port": "value"
+    },
+    {
+      "id": "conn-decimals-to-round",
+      "source_node": "node-decimals",
+      "source_port": "output",
+      "target_node": "node-round",
+      "target_port": "decimals"
+    },
+    {
+      "id": "conn-foreach-results-preview",
+      "source_node": "node-for-each",
+      "source_port": "results",
+      "target_node": "node-preview-results",
+      "target_port": "data"
+    },
+    {
+      "id": "conn-foreach-count-preview",
+      "source_node": "node-for-each",
+      "source_port": "count",
+      "target_node": "node-preview-count",
+      "target_port": "number"
+    }
+  ]
+}

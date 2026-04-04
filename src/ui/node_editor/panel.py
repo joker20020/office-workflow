@@ -72,7 +72,6 @@ class WorkflowRunner(QThread):
 
     def run(self) -> None:
         from src.core.event_bus import EventType
-        from src.engine.node_graph import CyclicDependencyError
 
         # 订阅节点执行事件
         event_bus = self._engine.event_bus
@@ -97,8 +96,6 @@ class WorkflowRunner(QThread):
                 if node.state in (NodeState.SUCCESS, NodeState.SKIPPED)
             }
             self.finished.emit(results)
-        except CyclicDependencyError as e:
-            self.error.emit(str(e))
         except Exception as e:
             _logger.error(f"工作流执行线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
@@ -511,6 +508,13 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
             self._graph = graph
             self._scene.set_graph(graph)
 
+            # 恢复节点输出到 UI widget
+            for node_id, node in graph.nodes.items():
+                node_item = self._scene.get_node_item(node_id)
+                if node_item and node.outputs:
+                    for port_name, value in node.outputs.items():
+                        node_item.set_output_value(port_name, value)
+
             self._status_label.setText(f"已加载: {Path(file_path).name}")
             _logger.info(f"工作流已加载: {file_path}")
         except json.JSONDecodeError as e:
@@ -585,6 +589,14 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
             json_str = Path(file_path).read_text(encoding="utf-8")
             graph = deserialize_graph(json_str)
             self.set_graph(graph)
+
+            # 恢复节点输出到 UI widget
+            for node_id, node in graph.nodes.items():
+                node_item = self._scene.get_node_item(node_id)
+                if node_item and node.outputs:
+                    for port_name, value in node.outputs.items():
+                        node_item.set_output_value(port_name, value)
+
             self._status_label.setText(f"已加载: {Path(file_path).name}")
             _logger.info(f"工作流已加载: {file_path}")
         except json.JSONDecodeError as e:

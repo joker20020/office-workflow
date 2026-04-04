@@ -150,12 +150,9 @@ class MainWindow(QMainWindow):
         self._theme_manager = ThemeManager.instance()
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
 
-        # 订阅 EventBus 事件以响应插件操作的工作流变更
+        # 订阅 EventBus 事件以响应节点值变更
         if self._app_context is not None:
             from src.core.event_bus import EventType
-            self._app_context.event_bus.subscribe(
-                EventType.WORKFLOW_STARTED, self._on_workflow_event_graph_changed
-            )
             self._app_context.event_bus.subscribe(
                 EventType.NODE_EXECUTED, self._on_workflow_event_node_value_changed
             )
@@ -417,24 +414,6 @@ class MainWindow(QMainWindow):
 
     def _on_graph_changed(self) -> None:
         """处理graph_changed信号 - 在主线程中刷新节点编辑器（供直接调用）"""
-
-    def _on_workflow_event_graph_changed(self, event_data=None) -> None:
-        """EventBus 事件处理器：工作流图变更"""
-        import threading
-
-        _logger.info(
-            f"[Thread: {threading.current_thread().name}] 收到graph_changed信号，准备刷新节点编辑器"
-        )
-        if hasattr(self, "_node_editor_panel") and self._node_editor_panel is not None:
-            _logger.info(
-                f"[Thread: {threading.current_thread().name}] 调用set_graph刷新，节点数: {len(self._node_graph.nodes)}"
-            )
-            self._node_editor_panel.set_graph(self._node_graph)
-            _logger.info(f"[Thread: {threading.current_thread().name}] set_graph调用完成")
-        else:
-            _logger.warning(
-                f"[Thread: {threading.current_thread().name}] _node_editor_panel未初始化，跳过刷新"
-            )
 
     def _on_node_value_changed(self, node_id: str, port_name: str, value: Any) -> None:
         """处理node_value_changed信号 - 同步控件显示"""

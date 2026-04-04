@@ -1,0 +1,100 @@
+{
+  "id": "example-parallel-001",
+  "name": "4. 并行执行 + 合并",
+  "description": "演示两个并行分支同时执行，最后合并结果。两个数学运算独立执行后通过 merge 节点合并。",
+  "nodes": [
+    {
+      "id": "node-input",
+      "node_type": "input.float",
+      "position": [-600.0, 100.0],
+      "widget_values": { "value": 10.0 }
+    },
+    {
+      "id": "node-three",
+      "node_type": "input.float",
+      "position": [-400.0, -150.0],
+      "widget_values": { "value": 3.0 }
+    },
+    {
+      "id": "node-five",
+      "node_type": "input.float",
+      "position": [-400.0, 350.0],
+      "widget_values": { "value": 5.0 }
+    },
+    {
+      "id": "node-multiply",
+      "node_type": "math.multiply",
+      "position": [-50.0, -50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-add",
+      "node_type": "math.add",
+      "position": [-50.0, 250.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-merge",
+      "node_type": "flow.merge",
+      "position": [300.0, 100.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview",
+      "node_type": "preview.number",
+      "position": [650.0, 100.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-input-multiply",
+      "source_node": "node-input",
+      "source_port": "output",
+      "target_node": "node-multiply",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-three-multiply",
+      "source_node": "node-three",
+      "source_port": "output",
+      "target_node": "node-multiply",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-input-add",
+      "source_node": "node-input",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-five-add",
+      "source_node": "node-five",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-multiply-merge",
+      "source_node": "node-multiply",
+      "source_port": "result",
+      "target_node": "node-merge",
+      "target_port": "true_in"
+    },
+    {
+      "id": "conn-add-merge",
+      "source_node": "node-add",
+      "source_port": "result",
+      "target_node": "node-merge",
+      "target_port": "false_in"
+    },
+    {
+      "id": "conn-merge-preview",
+      "source_node": "node-merge",
+      "source_port": "result",
+      "target_node": "node-preview",
+      "target_port": "number"
+    }
+  ]
+}

@@ -74,12 +74,20 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
         self._pen = QPen(color)
         self._pen.setWidth(self.LINE_WIDTH)
         self._pen.setCosmetic(True)
+        if connection.is_back_edge:
+            self._pen.setStyle(Qt.PenStyle.DashLine)
+
         self._pen_hover = QPen(color.lighter(130))
         self._pen_hover.setWidth(self.LINE_WIDTH_HOVER)
         self._pen_hover.setCosmetic(True)
+        if connection.is_back_edge:
+            self._pen_hover.setStyle(Qt.PenStyle.DashLine)
+
         self._pen_selected = QPen(color.lighter(150))
         self._pen_selected.setWidth(self.LINE_WIDTH_SELECTED)
         self._pen_selected.setCosmetic(True)
+        if connection.is_back_edge:
+            self._pen_selected.setStyle(Qt.PenStyle.DashLine)
         self.setPen(self._pen)
         source_port.add_connection(self)
         target_port.add_connection(self)

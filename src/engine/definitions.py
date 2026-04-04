@@ -314,9 +314,6 @@ class NodeDefinition:
     # 执行函数
     execute: Optional[Callable[..., Dict[str, Any]]] = field(default=None, repr=False)
 
-    # 控制流元数据
-    flow_type: Optional[str] = None  # "branch"=分支, "loop_start"=循环开始, "loop_end"=循环结束, None=普通
-
     def get_input_port(self, name: str) -> Optional[PortDefinition]:
         """
         获取指定名称的输入端口
@@ -435,7 +432,6 @@ class NodeDefinition:
                 }
                 for p in self.outputs
             ],
-            "flow_type": self.flow_type,
         }
 
     def __repr__(self) -> str:

@@ -21,7 +21,6 @@ from src.engine.definitions import (
 )
 from src.engine.node_graph import (
     Connection,
-    CyclicDependencyError,
     Node,
     NodeGraph,
     NodeState,
@@ -46,7 +45,6 @@ __all__ = [
     "Connection",
     "NodeGraph",
     "NodeState",
-    "CyclicDependencyError",
     # 执行引擎
     "NodeRegistry",
     "NodeEngine",

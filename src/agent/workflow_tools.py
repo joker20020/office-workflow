@@ -65,7 +65,6 @@ class _AgentWorkflowRunner(QThread):
 
     def run(self) -> None:
         from src.core.event_bus import EventType
-        from src.engine.node_graph import CyclicDependencyError
 
         # 订阅节点执行事件
         event_bus = self._engine.event_bus
@@ -83,8 +82,6 @@ class _AgentWorkflowRunner(QThread):
             )
         except _ExecutionCancelled:
             _logger.info("Agent 工作流执行被取消")
-        except CyclicDependencyError as e:
-            self.error_message = str(e)
         except Exception as e:
             _logger.error(f"Agent 工作流执行线程异常: {e}", exc_info=True)
             self.error_message = str(e)

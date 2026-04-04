@@ -1,0 +1,79 @@
+{
+  "id": "example-linear-001",
+  "name": "1. 线性链 - 简单计算",
+  "nodes": [
+    {
+      "id": "node-a",
+      "node_type": "input.float",
+      "position": [-500.0, 0.0],
+      "widget_values": { "value": 10.0 }
+    },
+    {
+      "id": "node-b",
+      "node_type": "input.float",
+      "position": [-500.0, 150.0],
+      "widget_values": { "value": 5.0 }
+    },
+    {
+      "id": "node-add",
+      "node_type": "math.add",
+      "position": [-150.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-c",
+      "node_type": "input.float",
+      "position": [-500.0, 300.0],
+      "widget_values": { "value": 2.0 }
+    },
+    {
+      "id": "node-multiply",
+      "node_type": "math.multiply",
+      "position": [200.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview",
+      "node_type": "preview.number",
+      "position": [550.0, 50.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-1",
+      "source_node": "node-a",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-2",
+      "source_node": "node-b",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-3",
+      "source_node": "node-add",
+      "source_port": "result",
+      "target_node": "node-multiply",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-4",
+      "source_node": "node-c",
+      "source_port": "output",
+      "target_node": "node-multiply",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-5",
+      "source_node": "node-multiply",
+      "source_port": "result",
+      "target_node": "node-preview",
+      "target_port": "number"
+    }
+  ]
+}

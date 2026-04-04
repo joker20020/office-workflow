@@ -1,0 +1,115 @@
+{
+  "id": "example-loop-001",
+  "name": "3. 循环 - 累加计数器（回边连接）",
+  "description": "演示通过回边连接实现的循环。条件节点判断 counter < limit，True 时走 true_out 回边继续循环，False 时走 false_out 退出到预览。",
+  "nodes": [
+    {
+      "id": "node-start",
+      "node_type": "input.float",
+      "position": [-600.0, -100.0],
+      "widget_values": { "value": 0.0 }
+    },
+    {
+      "id": "node-step",
+      "node_type": "input.float",
+      "position": [-600.0, -250.0],
+      "widget_values": { "value": 1.0 }
+    },
+    {
+      "id": "node-add",
+      "node_type": "math.add",
+      "position": [-200.0, -100.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-limit",
+      "node_type": "input.float",
+      "position": [-600.0, 200.0],
+      "widget_values": { "value": 5.0 }
+    },
+    {
+      "id": "node-less-than",
+      "node_type": "math.less",
+      "position": [150.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-condition",
+      "node_type": "flow.condition",
+      "position": [500.0, 50.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview",
+      "node_type": "preview.number",
+      "position": [850.0, 50.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-start-add",
+      "source_node": "node-start",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-step-add",
+      "source_node": "node-step",
+      "source_port": "output",
+      "target_node": "node-add",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-add-compare",
+      "source_node": "node-add",
+      "source_port": "result",
+      "target_node": "node-less-than",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-limit-compare",
+      "source_node": "node-limit",
+      "source_port": "output",
+      "target_node": "node-less-than",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-compare-condition",
+      "source_node": "node-less-than",
+      "source_port": "result",
+      "target_node": "node-condition",
+      "target_port": "condition"
+    },
+    {
+      "id": "conn-add-true-value",
+      "source_node": "node-add",
+      "source_port": "result",
+      "target_node": "node-condition",
+      "target_port": "true_value"
+    },
+    {
+      "id": "conn-add-false-value",
+      "source_node": "node-add",
+      "source_port": "result",
+      "target_node": "node-condition",
+      "target_port": "false_value"
+    },
+    {
+      "id": "conn-condition-preview",
+      "source_node": "node-condition",
+      "source_port": "false_out",
+      "target_node": "node-preview",
+      "target_port": "number"
+    },
+    {
+      "id": "conn-feedback",
+      "source_node": "node-condition",
+      "source_port": "true_out",
+      "target_node": "node-start",
+      "target_port": "value",
+      "is_back_edge": true
+    }
+  ]
+}

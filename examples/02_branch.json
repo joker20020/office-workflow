@@ -1,0 +1,105 @@
+{
+  "id": "example-branch-001",
+  "name": "2. 条件分支 - 成绩判断",
+  "nodes": [
+    {
+      "id": "node-score",
+      "node_type": "input.float",
+      "position": [-500.0, 0.0],
+      "widget_values": { "value": 85.0 }
+    },
+    {
+      "id": "node-threshold",
+      "node_type": "input.float",
+      "position": [-500.0, 200.0],
+      "widget_values": { "value": 60.0 }
+    },
+    {
+      "id": "node-compare",
+      "node_type": "math.greater_equal",
+      "position": [-100.0, 80.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-pass-text",
+      "node_type": "input.string",
+      "position": [-300.0, -200.0],
+      "widget_values": { "value": "恭喜通过！成绩优秀。" }
+    },
+    {
+      "id": "node-fail-text",
+      "node_type": "input.string",
+      "position": [-300.0, 450.0],
+      "widget_values": { "value": "抱歉，未通过。请继续努力。" }
+    },
+    {
+      "id": "node-condition",
+      "node_type": "flow.condition",
+      "position": [250.0, 80.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview-pass",
+      "node_type": "preview.text",
+      "position": [650.0, -80.0],
+      "widget_values": {}
+    },
+    {
+      "id": "node-preview-fail",
+      "node_type": "preview.text",
+      "position": [650.0, 380.0],
+      "widget_values": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-score-compare",
+      "source_node": "node-score",
+      "source_port": "output",
+      "target_node": "node-compare",
+      "target_port": "a"
+    },
+    {
+      "id": "conn-threshold-compare",
+      "source_node": "node-threshold",
+      "source_port": "output",
+      "target_node": "node-compare",
+      "target_port": "b"
+    },
+    {
+      "id": "conn-compare-condition",
+      "source_node": "node-compare",
+      "source_port": "result",
+      "target_node": "node-condition",
+      "target_port": "condition"
+    },
+    {
+      "id": "conn-pass-condition",
+      "source_node": "node-pass-text",
+      "source_port": "output",
+      "target_node": "node-condition",
+      "target_port": "true_value"
+    },
+    {
+      "id": "conn-fail-condition",
+      "source_node": "node-fail-text",
+      "source_port": "output",
+      "target_node": "node-condition",
+      "target_port": "false_value"
+    },
+    {
+      "id": "conn-condition-pass",
+      "source_node": "node-condition",
+      "source_port": "true_out",
+      "target_node": "node-preview-pass",
+      "target_port": "text"
+    },
+    {
+      "id": "conn-condition-fail",
+      "source_node": "node-condition",
+      "source_port": "false_out",
+      "target_node": "node-preview-fail",
+      "target_port": "text"
+    }
+  ]
+}

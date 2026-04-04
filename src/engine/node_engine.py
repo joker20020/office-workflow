@@ -5,17 +5,18 @@
 提供工作流执行能力：
 - 节点类型注册管理（NodeRegistry）
 - 单节点执行
-- 整图执行（拓扑排序 + 顺序执行）
+- 支持环的有向图动态步进执行
 - 执行状态回调和事件发布
 
-核心执行流程：
-1. 获取拓扑排序后的执行顺序
-2. 对每个节点：
-   a. 收集输入值（连接 > 控件值 > 默认值）
-   b. 验证输入
-   c. 调用执行函数
-   d. 存储输出
-   e. 更新状态
+核心执行流程（统一步进执行器）：
+1. 发现入口节点（优先 flow.start，否则无入边节点）
+2. 动态步进执行：
+   a. 从队列中取出所有输入就绪的节点并行执行
+   b. 每个节点完成后即时计算下一步
+   c. 回边连接重置目标状态并入队（循环）
+   d. 条件分支只走活跃分支下游
+   e. 最大迭代保护（默认 1000 次）
+3. 标记未执行节点为 SKIPPED
 
 使用方式（推荐使用单例模式）：
     from src.engine.node_engine import get_node_engine, init_node_engine
@@ -37,11 +38,9 @@
 """
 
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-import hashlib
-import json
 import threading
 import time
 
@@ -49,7 +48,6 @@ from src.core.event_bus import EventBus, EventType
 from src.engine.definitions import NodeDefinition, PortDefinition, PortType
 from src.engine.node_graph import (
     Connection,
-    CyclicDependencyError,
     Node,
     NodeGraph,
     NodeState,
@@ -204,49 +202,6 @@ class ExecutionResult:
     duration_ms: float = 0.0
 
 
-class ExecutionCache:
-    """
-    执行结果缓存
-
-    避免重复计算，"""
-
-    def __init__(self, ttl_seconds: int = 3600):
-        self._cache: Dict[str, Tuple[datetime, ExecutionResult]] = {}
-        self._ttl = ttl_seconds
-
-    def set(self, node_type: str, inputs: Dict, result: ExecutionResult) -> None:
-        key = self._make_cache_key(node_type, inputs)
-        self._cache[key] = (datetime.now(), result)
-
-    def get(self, node_type: str, inputs: Dict) -> Optional[ExecutionResult]:
-        key = self._make_cache_key(node_type, inputs)
-        if key not in self._cache:
-            return None
-        timestamp, result = self._cache.get(key)
-        if timestamp and result:
-            if datetime.now() - timestamp < timedelta(seconds=self._ttl):
-                return result
-        return None
-
-    def invalidate(self, node_type: str) -> None:
-        keys_to_remove = [k for k in self._cache if k.startswith(node_type)]
-        for key in keys_to_remove:
-            del self._cache[key]
-
-    def clear(self) -> None:
-        self._cache.clear()
-
-    def _make_cache_key(self, node_type: str, inputs: Dict) -> str:
-        content = json.dumps(
-            {
-                "type": node_type,
-                "inputs": {k: str(v) for k, v in sorted(inputs.items()) if v is not None},
-            },
-            sort_keys=True,
-        )
-        return hashlib.sha256(content.encode()).hexdigest()
-
-
 class NodeEngine:
     """
     节点执行引擎
@@ -254,28 +209,23 @@ class NodeEngine:
     核心职责：
     - 管理节点类型注册表
     - 执行单个节点
-    - 执行整个工作流图
+    - 支持环的有向图动态步进执行（分支 + 循环 + 并行）
     - 发布执行事件
 
-    执行流程：
-    1. 获取拓扑排序后的执行顺序
-    2. 重置所有节点状态
-    3. 按顺序执行每个节点：
-       a. 收集输入值
-       b. 验证输入
-       c. 调用执行函数
-       d. 存储输出
-       e. 更新状态
-    4. 发布工作流完成事件
+    执行流程（统一步进执行器）：
+    1. 发现入口节点（优先 flow.start，否则无入边节点）
+    2. 动态步进执行：
+       a. 从队列中取出所有输入就绪的节点并行执行
+       b. 每个节点完成后即时计算下一步
+       c. 回边连接重置目标状态并入队（循环）
+       d. 条件分支只走活跃分支下游
+       e. 最大迭代保护（默认 1000 次）
+    3. 标记未执行节点为 SKIPPED
 
-    Example:
-        >>> engine = NodeEngine(event_bus=event_bus)
-        >>> engine.register_node_type(text_join_def)
-        >>> results = engine.execute_graph(graph)
-        >>> for node_id, result in results.items():
-        ...     if result.success:
-        ...         print(f"节点 {node_id} 输出: {result.outputs}")
     """
+
+    # 每个节点最大执行次数（防止死循环）
+    MAX_ITERATIONS = 1000
 
     def __init__(self, event_bus: Optional[EventBus] = None):
         """
@@ -498,16 +448,24 @@ class NodeEngine:
         on_node_completed: Optional[Callable[[str, NodeState], None]] = None,
     ) -> Dict[str, ExecutionResult]:
         """
-        执行整个工作流图（含控制流支持）
+        统一步进执行器 — 支持环的有向图动态执行
 
-        执行流程：
-        1. 获取拓扑排序后的执行顺序
-        2. 重置所有节点状态
-        3. 按顺序执行每个节点
-        4. flow.if: 追踪非活跃分支，标记下游节点为 SKIPPED
-        5. flow.for_each: 迭代执行循环体
-        6. 如果某节点失败，停止后续执行
-        7. 发布工作流完成事件
+        执行逻辑：
+        1. 发现入口节点（优先 flow.start，否则无入边节点）
+        2. 初始化队列、迭代计数器
+        3. 主循环：
+           a. 从队列中取出所有输入就绪的节点 -> ready_batch
+           b. 如果 ready_batch 为空但队列不空 -> 死锁报错退出
+           c. 并行执行 ready_batch
+           d. 对每个完成的节点：
+              - 记录到 completed
+              - 更新 iteration_count，超过上限则报错退出
+              - 计算下游节点：
+                * 普通连接 -> 目标入队（等输入就绪）
+                * 回边连接 -> 重置目标状态并入队
+                * 条件分支 -> 只入队活跃分支下游
+        4. 标记未执行节点为 SKIPPED
+        5. 发布完成事件
 
         Args:
             graph: 要执行的图
@@ -517,25 +475,10 @@ class NodeEngine:
 
         Returns:
             节点ID到执行结果的映射
-
-        Raises:
-            CyclicDependencyError: 如果图中存在循环依赖
-
-        Example:
-            >>> results = engine.execute_graph(graph)
-            >>> success_count = sum(1 for r in results.values() if r.success)
-            >>> print(f"执行完成: {success_count}/{len(results)} 成功")
         """
         _logger.info(f"开始执行工作流: {graph.name}")
 
         results: Dict[str, ExecutionResult] = {}
-
-        # 获取执行顺序
-        try:
-            execution_order = graph.get_execution_order(node_registry=self._registry)
-        except CyclicDependencyError as e:
-            _logger.error(f"工作流执行失败: {e}")
-            raise
 
         # 重置所有节点状态
         for node in graph.nodes.values():
@@ -549,57 +492,154 @@ class NodeEngine:
                 EventType.WORKFLOW_STARTED, {"graph_id": graph.id, "name": graph.name}
             )
 
-        # 控制流追踪
-        skipped_nodes: Set[str] = set()
+        # ---- 1. 发现入口节点 ----
+        entry_nodes = graph.get_entry_nodes()
+        if not entry_nodes:
+            _logger.warning(f"工作流没有入口节点: {graph.name}")
+            return results
 
-        # 按顺序执行
-        for node_id in execution_order:
-            node = graph.get_node(node_id)
-            if node is None:
-                continue
+        # ---- 2. 初始化 ----
+        queue: deque = deque(entry_nodes)
+        completed: Set[str] = set()
+        iteration_count: Dict[str, int] = {}  # node_id -> 已执行次数
+        skipped: Set[str] = set()  # 非活跃分支中跳过的节点
 
-            # ---- SKIPPED: 分支未激活 ----
-            if node_id in skipped_nodes:
-                node.state = NodeState.SKIPPED
-                node.outputs.clear()
-                results[node_id] = ExecutionResult(success=True, node_id=node_id)
-                _logger.debug(f"跳过节点: {node.node_type} [{node_id[:8]}...]")
-                self._publish_node_event(EventType.NODE_EXECUTED, node)
-                if on_node_completed:
-                    on_node_completed(node_id, NodeState.SKIPPED)
-                continue
+        _logger.debug(
+            f"入口节点: {', '.join(n[:8] for n in entry_nodes)} "
+            f"(共 {len(entry_nodes)} 个)"
+        )
 
-            # ---- 正常执行 ----
-            result = self.execute_node(node, graph)
-            results[node_id] = result
+        # ---- 3. 主循环 ----
+        while queue:
+            # a. 从队列中取出所有输入就绪的节点
+            ready_batch: List[str] = []
+            remaining: List[str] = []
 
-            # 通知回调
-            if on_node_completed:
-                on_node_completed(node_id, node.state)
+            while queue:
+                node_id = queue.popleft()
+                if self._is_input_ready_v2(node_id, graph, completed, skipped):
+                    ready_batch.append(node_id)
+                else:
+                    remaining.append(node_id)
 
-            if not result.success:
-                _logger.warning(f"工作流执行中断: 节点 {node_id[:8]}... 失败 - {result.error}")
+            # 将未就绪的放回队列
+            for nid in remaining:
+                queue.append(nid)
+
+            # b. 如果 ready_batch 为空但 queue 不空 -> 死锁
+            if not ready_batch:
+                if queue:
+                    _logger.error(
+                        f"工作流死锁: {len(queue)} 个节点等待输入但无法就绪"
+                    )
+                    for nid in list(queue):
+                        node = graph.get_node(nid)
+                        if node:
+                            node.state = NodeState.ERROR
+                            node.error_message = "执行死锁：输入无法就绪"
+                            results[nid] = ExecutionResult(
+                                success=False, node_id=nid,
+                                error=node.error_message,
+                            )
+                    break
+                # 队列也为空，正常退出
                 break
 
-            # ---- 分支追踪（元数据驱动） ----
-            definition = self._registry.get(node.node_type)
-            if definition and definition.flow_type == "branch":
-                for port_def in definition.outputs:
-                    if port_def.role == "branch":
-                        port_value = node.outputs.get(port_def.name)
-                        if port_value is None:
-                            inactive_nodes = graph.trace_downstream(node_id, port_def.name)
-                            skipped_nodes.update(inactive_nodes)
-                            _logger.info(
-                                f"Branch node {node.node_type} [{node_id[:8]}...]: "
-                                f"skipping {len(inactive_nodes)} nodes on inactive port '{port_def.name}'"
+            # c. 并行执行 ready_batch
+            if len(ready_batch) == 1:
+                # 单节点直接执行，避免线程开销
+                node_id = ready_batch[0]
+                result = self._execute_single_node(node_id, graph)
+                results[node_id] = result
+
+                if on_node_completed:
+                    try:
+                        node = graph.get_node(node_id)
+                        if node:
+                            on_node_completed(node_id, node.state)
+                    except _ExecutionCancelled:
+                        _logger.info("执行被回调中断")
+                        break
+
+                if not result.success:
+                    _logger.warning(
+                        f"节点 {node_id[:8]}... 执行失败，中断执行"
+                    )
+                    break
+
+                # 更新追踪集合
+                completed.add(node_id)
+                iteration_count[node_id] = iteration_count.get(node_id, 0) + 1
+
+                # 检查迭代上限
+                if iteration_count[node_id] > self.MAX_ITERATIONS:
+                    node = graph.get_node(node_id)
+                    if node:
+                        node.state = NodeState.ERROR
+                        node.error_message = f"超过最大迭代次数 ({self.MAX_ITERATIONS})"
+                        results[node_id] = ExecutionResult(
+                            success=False, node_id=node_id,
+                            error=node.error_message,
+                        )
+                    _logger.error(f"节点 {node_id[:8]}... 超过最大迭代次数")
+                    break
+
+                # 计算下游并入队
+                self._enqueue_downstream(
+                    node_id, graph, completed, skipped, queue
+                )
+            else:
+                # 多节点并行执行
+                self._execute_and_enqueue(
+                    ready_batch, graph, results, completed,
+                    iteration_count, skipped, queue, on_node_completed,
+                )
+
+                # 检查是否有节点失败
+                failed = [
+                    nid for nid in ready_batch
+                    if nid in results and not results[nid].success
+                ]
+                if failed:
+                    _logger.warning(
+                        f"{len(failed)} 个节点执行失败，中断执行"
+                    )
+                    break
+
+                # 检查迭代上限
+                over_limit = [
+                    nid for nid in ready_batch
+                    if iteration_count.get(nid, 0) > self.MAX_ITERATIONS
+                ]
+                if over_limit:
+                    for nid in over_limit:
+                        node = graph.get_node(nid)
+                        if node:
+                            node.state = NodeState.ERROR
+                            node.error_message = f"超过最大迭代次数 ({self.MAX_ITERATIONS})"
+                            results[nid] = ExecutionResult(
+                                success=False, node_id=nid,
+                                error=node.error_message,
                             )
+                    _logger.error(
+                        f"{len(over_limit)} 个节点超过最大迭代次数"
+                    )
+                    break
 
-            # ---- 循环迭代（元数据驱动） ----
-            if definition and definition.flow_type == "loop_start":
-                self._execute_loop(node, graph, results, on_node_completed)
+        # ---- 4. 标记未执行节点为 SKIPPED ----
+        for node in graph.nodes.values():
+            if node.id not in completed and node.id not in results:
+                node.state = NodeState.SKIPPED
+                node.outputs.clear()
+                results[node.id] = ExecutionResult(success=True, node_id=node.id)
+                _logger.debug(
+                    f"跳过节点（未执行）: {node.node_type} [{node.id[:8]}...]"
+                )
+                self._publish_node_event(EventType.NODE_EXECUTED, node)
+                if on_node_completed:
+                    on_node_completed(node.id, NodeState.SKIPPED)
 
-        # 发布工作流完成事件
+        # ---- 5. 发布工作流完成事件 ----
         success = all(r.success for r in results.values())
         if self._event_bus:
             self._event_bus.publish(
@@ -609,10 +649,7 @@ class NodeEngine:
                     "name": graph.name,
                     "success": success,
                     "results": {
-                        node_id: {
-                            "success": r.success,
-                            "error": r.error,
-                        }
+                        node_id: {"success": r.success, "error": r.error}
                         for node_id, r in results.items()
                     },
                 },
@@ -625,250 +662,240 @@ class NodeEngine:
 
         return results
 
-    def _execute_loop(
-        self,
-        loop_start_node: Node,
-        graph: NodeGraph,
-        results: Dict[str, ExecutionResult],
-        on_node_completed: Optional[Callable[[str, NodeState], None]] = None,
-    ) -> None:
-        """执行循环节点的循环体（元数据驱动）。
-
-        通过节点定义元数据发现端口名称，而非硬编码。
-        """
-        definition = self._registry.get(loop_start_node.node_type)
-        if definition is None:
-            return
-
-        # 发现端口名称：找 LIST 类型的输出作为迭代数据源
-        items_port = "results"
-        for p in definition.outputs:
-            if p.type == PortType.LIST:
-                items_port = p.name
-                break
-
-        items = loop_start_node.outputs.get(items_port) or []
-        if not items:
-            return
-
-        body_node_ids, loop_end_id = graph.get_loop_body(
-            loop_start_node.id, node_registry=self._registry
-        )
-
-        if not body_node_ids or loop_end_id is None:
-            _logger.info("loop: 未检测到循环体，使用降级单次执行")
-            return
-
-        _logger.info(
-            f"loop: 开始循环，{len(items)} 项，"
-            f"循环体 {len(body_node_ids)} 个节点"
-        )
-
-        # 发现反馈端口名（loop_end 上 role="feedback" 的输出端口）
-        loop_end_def = self._registry.get(
-            graph.get_node(loop_end_id).node_type if graph.get_node(loop_end_id) else ""
-        )
-        feedback_port = "output"
-        if loop_end_def:
-            for p in loop_end_def.outputs:
-                if p.role == "feedback":
-                    feedback_port = p.name
-                    break
-
-        # 发现初始值端口名
-        initial_port = "initial"
-        for p in definition.inputs:
-            if not p.required:
-                initial_port = p.name
-                break
-
-        all_results: list = []
-        acc = loop_start_node.widget_values.get(initial_port)
-
-        for i, item in enumerate(items):
-            # 设置当前迭代的输出：按定义的输出端口构建
-            iteration_outputs = {}
-            for p in definition.outputs:
-                iteration_outputs[p.name] = loop_start_node.outputs.get(p.name)
-            # 覆盖已知语义端口
-            if "item" in iteration_outputs:
-                iteration_outputs["item"] = item
-            if "index" in iteration_outputs:
-                iteration_outputs["index"] = i
-            if "accumulator" in iteration_outputs:
-                iteration_outputs["accumulator"] = acc
-            if "results" in iteration_outputs:
-                iteration_outputs["results"] = []
-            if "count" in iteration_outputs:
-                iteration_outputs["count"] = len(items)
-            if "last" in iteration_outputs:
-                iteration_outputs["last"] = None
-            loop_start_node.outputs = iteration_outputs
-
-            # 重置循环体节点状态
-            for body_id in body_node_ids:
-                body_node = graph.get_node(body_id)
-                if body_node:
-                    body_node.state = NodeState.IDLE
-                    body_node.outputs.clear()
-
-            # 执行循环体
-            iteration_failed = False
-            for body_id in body_node_ids:
-                body_node = graph.get_node(body_id)
-                if body_node is None:
-                    continue
-
-                r = self.execute_node(body_node, graph)
-                results[body_id] = r
-
-                if on_node_completed:
-                    on_node_completed(body_id, body_node.state)
-
-                if not r.success:
-                    _logger.warning(f"循环体节点 {body_id[:8]}... 执行失败 (迭代 {i})")
-                    iteration_failed = True
-                    break
-
-            if iteration_failed:
-                break
-
-            # 收集 loop_end 的输出作为迭代结果
-            loop_end_node = graph.get_node(loop_end_id)
-            iteration_result = (
-                loop_end_node.outputs.get(feedback_port) if loop_end_node else item
-            )
-            all_results.append(iteration_result)
-            acc = iteration_result
-
-            _logger.debug(f"loop 迭代 {i}/{len(items) - 1} 完成")
-
-        # 设置最终输出：按定义的输出端口构建
-        final_outputs = {}
-        for p in definition.outputs:
-            final_outputs[p.name] = loop_start_node.outputs.get(p.name)
-        if "item" in final_outputs:
-            final_outputs["item"] = None
-        if "index" in final_outputs:
-            final_outputs["index"] = len(items) - 1
-        if "accumulator" in final_outputs:
-            final_outputs["accumulator"] = acc
-        if "results" in final_outputs:
-            final_outputs["results"] = all_results
-        if "count" in final_outputs:
-            final_outputs["count"] = len(all_results)
-        if "last" in final_outputs:
-            final_outputs["last"] = all_results[-1] if all_results else None
-        loop_start_node.outputs = final_outputs
-
-        if on_node_completed:
-            on_node_completed(loop_start_node.id, loop_start_node.state)
-
-        _logger.info(
-            f"loop: 循环完成，{len(all_results)}/{len(items)} 次迭代成功"
-        )
-
-    def _get_execution_layers(self, graph: NodeGraph) -> List[List[Node]]:
-        """
-        获取执行层级（基于依赖关系的拓扑排序）
-
-        返回执行层级列表， 每层包含可并行执行的节点
-
-        使用Kahn算法进行拓扑排序
-        """
-        if not graph.nodes:
-            return []
-
-        # 构建依赖图
-        dependencies: Dict[str, Set[str]] = {}  # node_id -> 依赖的节点ID集合
-        in_degree: Dict[str, int] = {}  # node_id -> 入度
-
-        for node_id in graph.nodes:
-            in_degree[node_id] = 0
-            dependencies[node_id] = set()
-
-        for conn in graph.connections.values():
-            target = conn.target_node
-            source = conn.source_node
-            if target in dependencies:
-                dependencies[target].add(source)
-                in_degree[target] += 1
-
-        # Kahn算法进行拓扑排序
-        layers: List[List[Node]] = []
-        remaining = set(in_degree.keys())
-
-        while remaining:
-            ready = [nid for nid in remaining if in_degree[nid] == 0]
-
-            if not ready:
-                break  # 存在循环依赖
-
-            layers.append([graph.nodes[nid] for nid in ready])
-            remaining -= set(ready)
-
-            for nid in ready:
-                for dep in dependencies[nid]:
-                    if dep in remaining:
-                        in_degree[dep] -= 1
-
-        return layers
-
-    def execute_graph_parallel(
-        self,
-        graph: NodeGraph,
-        max_workers: int = 4,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> Dict[str, ExecutionResult]:
-        """
-        并行执行工作流图（优化版）
+    def _execute_single_node(
+        self, node_id: str, graph: NodeGraph
+    ) -> ExecutionResult:
+        """执行单个节点（并行执行的辅助方法）。
 
         Args:
-            graph: 工作流图
-            max_workers: 最大并行工作数
-            progress_callback: 进度回调 (current, total)
+            node_id: 要执行的节点 ID
+            graph: 所属的图
 
         Returns:
-            节点执行结果映射
+            执行结果
         """
-        if not graph.nodes:
-            return {}
+        node = graph.get_node(node_id)
+        if node is None:
+            return ExecutionResult(
+                success=False, node_id=node_id,
+                error="节点不存在",
+            )
+        return self.execute_node(node, graph)
 
-        layers = self._get_execution_layers(graph)
-        total_nodes = sum(len(layer) for layer in layers)
-        completed = 0
-        results: Dict[str, ExecutionResult] = {}
+    def _execute_and_enqueue(
+        self,
+        batch: List[str],
+        graph: NodeGraph,
+        results: Dict[str, ExecutionResult],
+        completed: Set[str],
+        iteration_count: Dict[str, int],
+        skipped: Set[str],
+        queue: deque,
+        on_node_completed: Optional[Callable[[str, NodeState], None]],
+    ) -> None:
+        """并行执行一批节点，完成后将下游节点入队。
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for layer_idx, layer in enumerate(layers):
-                _logger.info(f"执行层级 {layer_idx + 1}/{len(layers)}")
+        使用线程池并行执行所有就绪节点，每个节点完成后即时计算
+        下游节点并入队。
 
-                layer_results = []
-                for node in layer:
-                    future = executor.submit(self._execute_node_safe, node, graph)
-                    layer_results.append((node.id, future))
+        Args:
+            batch: 本轮要执行的节点 ID 列表
+            graph: 工作流图
+            results: 执行结果字典（就地更新）
+            completed: 已完成节点集合（就地更新）
+            iteration_count: 迭代计数（就地更新）
+            skipped: 跳过的节点集合（就地更新）
+            queue: 执行队列（就地更新）
+            on_node_completed: 节点完成回调
+        """
+        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+            future_to_node = {
+                executor.submit(self._execute_single_node, nid, graph): nid
+                for nid in batch
+            }
 
-                for node_id, future in layer_results:
+            for future in as_completed(future_to_node):
+                node_id = future_to_node[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    node = graph.get_node(node_id)
+                    error_msg = str(exc)
+                    if node:
+                        node.state = NodeState.ERROR
+                        node.error_message = error_msg
+                    result = ExecutionResult(
+                        success=False, node_id=node_id, error=error_msg,
+                    )
+
+                results[node_id] = result
+
+                # 回调通知
+                if on_node_completed:
                     try:
-                        result = future.result()
-                        results[node_id] = result
-                        completed += 1
-                    except Exception as e:
-                        results[node_id] = ExecutionResult(
-                            success=False, node_id=node_id, error=str(e), duration_ms=0.0
+                        node = graph.get_node(node_id)
+                        if node:
+                            on_node_completed(node_id, node.state)
+                    except _ExecutionCancelled:
+                        _logger.info("执行被回调中断")
+
+                if not result.success:
+                    continue
+
+                # 更新追踪集合
+                completed.add(node_id)
+                iteration_count[node_id] = iteration_count.get(node_id, 0) + 1
+
+                # 计算下游并入队
+                self._enqueue_downstream(
+                    node_id, graph, completed, skipped, queue
+                )
+
+    def _enqueue_downstream(
+        self,
+        node_id: str,
+        graph: NodeGraph,
+        completed: Set[str],
+        skipped: Set[str],
+        queue: deque,
+    ) -> None:
+        """将已完成节点的下游节点加入执行队列。
+
+        处理三种连接类型：
+        - 普通连接：目标入队（等输入就绪）
+        - 回边连接：重置目标状态并入队
+        - 条件分支：只入队活跃分支下游，非活跃分支的下游标记为 skipped
+
+        Args:
+            node_id: 已完成的源节点 ID
+            graph: 工作流图
+            completed: 已完成节点集合
+            skipped: 跳过的节点集合（就地更新）
+            queue: 执行队列（就地更新）
+        """
+        node = graph.get_node(node_id)
+        if node is None:
+            return
+
+        definition = self._registry.get(node.node_type)
+
+        # 检查是否有条件分支端口
+        active_branch_ports: Optional[Set[str]] = None
+        if definition:
+            branch_ports = [
+                p for p in definition.outputs
+                if p.role in ("branch_true", "branch_false")
+            ]
+            if branch_ports:
+                # 通过端口输出值判断活跃分支
+                active_branch_ports = set()
+                for p in branch_ports:
+                    if node.outputs.get(p.name) is not None:
+                        active_branch_ports.add(p.name)
+
+        for conn in graph.get_outgoing_connections(node_id):
+            # 条件分支端口处理
+            if active_branch_ports is not None and definition:
+                port_def = definition.get_output_port(conn.source_port)
+                if port_def and port_def.role in ("branch_true", "branch_false"):
+                    if port_def.name not in active_branch_ports:
+                        # 非活跃分支：标记下游为 skipped
+                        inactive = graph.trace_downstream(
+                            node_id, conn.source_port
                         )
+                        skipped.update(inactive)
+                        _logger.debug(
+                            f"跳过非活跃分支 '{conn.source_port}': "
+                            f"{len(inactive)} 个节点"
+                        )
+                        continue
 
-                if progress_callback:
-                    progress_callback(completed, total_nodes)
+            target_id = conn.target_node
 
-        return results
+            # 回边处理
+            if conn.is_back_edge:
+                target_node = graph.get_node(target_id)
+                if target_node:
+                    target_node.state = NodeState.IDLE
+                    target_node.outputs.clear()
+                    target_node.error_message = None
+                    completed.discard(target_id)
+                queue.append(target_id)
+                _logger.debug(f"回边入队: {target_id[:8]}...")
+            else:
+                # 普通连接：目标入队
+                # 如果目标节点已完成但源节点刚被重新执行（循环迭代），
+                # 需要重置目标节点并重新入队
+                if target_id in completed:
+                    target_node = graph.get_node(target_id)
+                    if target_node:
+                        target_node.state = NodeState.IDLE
+                        target_node.outputs.clear()
+                        target_node.error_message = None
+                    completed.discard(target_id)
+                    skipped.discard(target_id)
+                if target_id not in queue:
+                    queue.append(target_id)
 
-    def _execute_node_safe(self, node: Node, graph: NodeGraph) -> ExecutionResult:
-        """安全执行单个节点（用于并行执行）"""
-        try:
-            return self.execute_node(node, graph)
-        except Exception as e:
-            return ExecutionResult(success=False, node_id=node.id, error=str(e), duration_ms=0.0)
+    def _is_input_ready_v2(
+        self,
+        node_id: str,
+        graph: NodeGraph,
+        completed: Set[str],
+        skipped: Set[str],
+    ) -> bool:
+        """检查节点的所有输入是否就绪（v2 版本）。
+
+        节点输入就绪条件：
+        - 对于每个入边连接：
+          - 普通连接：源节点必须在 completed 中
+          - 回边连接：不阻塞（视为可选）
+          - 来自 skipped 节点的连接：不阻塞（源节点被跳过）
+        - 所有非回边、非跳过的必需输入都就绪时，节点可以执行
+
+        Args:
+            node_id: 要检查的节点 ID
+            graph: 图
+            completed: 已完成节点集合
+            skipped: 被跳过的节点集合
+
+        Returns:
+            所有输入是否就绪
+        """
+        node = graph.get_node(node_id)
+        if node is None:
+            return True
+
+        definition = self._registry.get(node.node_type)
+
+        for conn in graph.get_incoming_connections(node_id):
+            source = conn.source_node
+
+            # 回边不阻塞
+            if conn.is_back_edge:
+                continue
+
+            # 源已完成，输入可用
+            if source in completed:
+                continue
+
+            # 源被跳过（非活跃分支），忽略此输入
+            if source in skipped:
+                continue
+
+            # 源已到达但未完成：检查目标端口是否为可选端口
+            if definition:
+                target_port = definition.get_input_port(conn.target_port)
+                if target_port is None:
+                    # 目标端口不在定义中，不阻塞
+                    continue
+                if not target_port.required:
+                    # 可选端口，不阻塞
+                    continue
+
+            return False
+
+        return True
 
     # ==================== 辅助方法 ====================
 
@@ -899,17 +926,24 @@ class NodeEngine:
         conn_map = {conn.target_port: conn for conn in incoming_conns}
 
         for port in definition.inputs:
+            value_found = False
+
+            # 1. 尝试从连接获取值
             if port.name in conn_map:
                 conn = conn_map[port.name]
                 source_node = graph.get_node(conn.source_node)
                 if source_node and conn.source_port in source_node.outputs:
                     inputs[port.name] = source_node.outputs[conn.source_port]
-            elif port.name in node.widget_values:
-                inputs[port.name] = node.widget_values[port.name]
-            elif port.default is not None:
-                inputs[port.name] = port.default
-            else:
-                inputs[port.name] = None
+                    value_found = True
+
+            # 2. 连接无值时回退到控件值 / 默认值 / None
+            if not value_found:
+                if port.name in node.widget_values:
+                    inputs[port.name] = node.widget_values[port.name]
+                elif port.default is not None:
+                    inputs[port.name] = port.default
+                else:
+                    inputs[port.name] = None
 
         return inputs
 

@@ -81,6 +81,7 @@ def serialize_graph(graph: NodeGraph) -> str:
             "node_type": node.node_type,
             "position": list(node.position),
             "widget_values": node.widget_values,
+            "outputs": node.outputs if node.outputs else {},
         }
         data["nodes"].append(node_data)
 
@@ -92,6 +93,7 @@ def serialize_graph(graph: NodeGraph) -> str:
             "source_port": conn.source_port,
             "target_node": conn.target_node,
             "target_port": conn.target_port,
+            "is_back_edge": conn.is_back_edge,
         }
         data["connections"].append(conn_data)
 
@@ -139,15 +141,20 @@ def deserialize_graph(json_str: str) -> NodeGraph:
         )
         # 恢复widget_values
         node.widget_values = node_data.get("widget_values", {})
+        # 恢复 outputs
+        if "outputs" in node_data:
+            node.outputs = node_data["outputs"]
 
     # 反序列化连接
     for conn_data in data.get("connections", []):
-        graph.add_connection(
+        conn = graph.add_connection(
             source_node=conn_data["source_node"],
             source_port=conn_data["source_port"],
             target_node=conn_data["target_node"],
             target_port=conn_data["target_port"],
         )
+        if conn is not None:
+            conn.is_back_edge = conn_data.get("is_back_edge", False)
 
     _logger.debug(
         f"反序列化图: {graph.name}, {len(graph.nodes)} 节点, {len(graph.connections)} 连接"
@@ -170,6 +177,7 @@ def serialize_node(node: Node) -> Dict[str, Any]:
         "node_type": node.node_type,
         "position": list(node.position),
         "widget_values": node.widget_values,
+        "outputs": node.outputs if node.outputs else {},
         "state": node.state.value,
     }
 
@@ -190,4 +198,5 @@ def serialize_connection(conn: Connection) -> Dict[str, Any]:
         "source_port": conn.source_port,
         "target_node": conn.target_node,
         "target_port": conn.target_port,
+        "is_back_edge": conn.is_back_edge,
     }

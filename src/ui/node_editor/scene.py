@@ -114,29 +114,29 @@ class NodeEditorScene(QGraphicsScene):
             self.clear_scene()
             return
 
-        # 增量更新：只添加新节点，不清空现有节点
         existing_ids = set(self._node_items.keys())
         new_ids = set(graph.nodes.keys())
 
-        # 移除不再存在的节点
+        existing_conn_ids = set(self._connection_items.keys())
+        new_conn_ids = set(graph.connections.keys())
+
+        # 1. 先移除不再存在的连接（此时节点和端口图形项仍然有效）
+        for conn_id in existing_conn_ids - new_conn_ids:
+            self.remove_connection_item(conn_id)
+
+        # 2. 移除不再存在的节点
         for node_id in existing_ids - new_ids:
             self.remove_node_item(node_id)
             _logger.debug(f"移除旧节点: {node_id[:8]}...")
 
-        # 添加新节点
+        # 3. 添加新节点
         added_count = 0
         for node_id, node in graph.nodes.items():
             if node_id not in existing_ids:
                 if self._create_node_item(node):
                     added_count += 1
 
-        # 移除不再存在的连接
-        existing_conn_ids = set(self._connection_items.keys())
-        new_conn_ids = set(graph.connections.keys())
-        for conn_id in existing_conn_ids - new_conn_ids:
-            self.remove_connection_item(conn_id)
-
-        # 添加新连接
+        # 4. 添加新连接
         for conn_id, conn in graph.connections.items():
             if conn_id not in existing_conn_ids:
                 self._create_connection_item(conn)
@@ -181,15 +181,26 @@ class NodeEditorScene(QGraphicsScene):
         if node_id not in self._node_items:
             return
 
-        # 先删除相关连接的图形项
-        if self._graph:
-            related_conns = self._graph.get_connections_for_node(node_id)
-            for conn in related_conns:
-                conn_item = self._connection_items.pop(conn.id, None)
-                if conn_item:
+        # 先删除与该节点相关的所有连接图形项
+        # 遍历 _connection_items 而非 _graph，避免新图替换旧图后找不到旧连接
+        conn_ids_to_remove = []
+        for conn_id, conn_item in self._connection_items.items():
+            conn = conn_item.connection
+            if conn.source_node == node_id or conn.target_node == node_id:
+                conn_ids_to_remove.append(conn_id)
+
+        for conn_id in conn_ids_to_remove:
+            conn_item = self._connection_items.pop(conn_id, None)
+            if conn_item:
+                try:
                     conn_item.cleanup()
+                except RuntimeError:
+                    pass  # C++ object already deleted
+                try:
                     self.removeItem(conn_item)
-                    _logger.debug(f"删除连接图形项: {conn.id[:8]}...")
+                except RuntimeError:
+                    pass
+                _logger.debug(f"删除连接图形项: {conn_id[:8]}...")
 
         # 删除节点图形项
         node_item = self._node_items.pop(node_id)
@@ -268,11 +279,20 @@ class NodeEditorScene(QGraphicsScene):
         target_node_id = conn.target_node
         target_port_name = conn.target_port
 
-        # 从端口移除连接引用
-        source_port = conn_item.source_port
-        target_port = conn_item.target_port
-        source_port.remove_connection(conn_item)
-        target_port.remove_connection(conn_item)
+        # 从端口移除连接引用（端口图形项可能已被 Qt 删除）
+        try:
+            source_port = conn_item.source_port
+            if source_port:
+                source_port.remove_connection(conn_item)
+        except RuntimeError:
+            pass  # C++ object already deleted
+
+        try:
+            target_port = conn_item.target_port
+            if target_port:
+                target_port.remove_connection(conn_item)
+        except RuntimeError:
+            pass  # C++ object already deleted
 
         # 移除图形项
         self.removeItem(conn_item)
@@ -598,6 +618,11 @@ class NodeEditorScene(QGraphicsScene):
         except Exception as e:
             _logger.error(f"创建连接失败: {e}")
             return
+
+        # 自动检测并标记回边
+        if conn is not None and self._graph.detect_back_edge(source_node, target_node):
+            conn.is_back_edge = True
+            _logger.info(f"检测到回边连接: {source_node[:8]}... -> {target_node[:8]}...")
         # 创建UI连接
         try:
             conn_item = self._create_connection_item(conn)
@@ -645,7 +670,7 @@ class NodeEditorScene(QGraphicsScene):
         if not start_port.port_type.is_compatible_with(end_port.port_type):
             return False
 
-        # 不能连接到同一个节点（除非是循环回边）
+        # 不能连接到同一个节点（自连接）
         from src.ui.node_editor.node_item import NodeGraphicsItem
 
         start_node = start_port.parentItem()
@@ -654,15 +679,8 @@ class NodeEditorScene(QGraphicsScene):
         if isinstance(start_node, NodeGraphicsItem) and isinstance(
             end_node, NodeGraphicsItem
         ):
-            # 允许 loop_end 的 feedback 端口连接回 loop_start（回边）
-            if (
-                start_node._definition.flow_type == "loop_end"
-                and end_node._definition.flow_type == "loop_start"
-            ):
-                return True
-
-        if start_node == end_node:
-            return False
+            if start_node == end_node:
+                return False
 
         return True
 
