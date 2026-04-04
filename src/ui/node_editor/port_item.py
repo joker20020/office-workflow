@@ -36,7 +36,6 @@ class PortGraphicsItem(QGraphicsItem):
 
     Attributes:
         PORT_RADIUS: 端口圆点半径
-        PORT_COLORS: 端口类型到颜色的映射
 
     Example:
         >>> port_item = PortGraphicsItem(port_def, is_output=True)
