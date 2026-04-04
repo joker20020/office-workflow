@@ -47,19 +47,6 @@ class PortGraphicsItem(QGraphicsItem):
     # 端口尺寸
     PORT_RADIUS = 6
 
-    # 端口类型颜色映射
-    PORT_COLORS = {
-        PortType.ANY: QColor(158, 158, 158),  # 灰色
-        PortType.STRING: QColor(76, 175, 80),  # 绿色
-        PortType.INTEGER: QColor(33, 150, 243),  # 蓝色
-        PortType.FLOAT: QColor(156, 39, 176),  # 紫色
-        PortType.BOOLEAN: QColor(255, 152, 0),  # 橙色
-        PortType.DATAFRAME: QColor(244, 67, 54),  # 红色
-        PortType.FILE: QColor(255, 235, 59),  # 黄色
-        PortType.LIST: QColor(0, 188, 212),  # 青色
-        PortType.DICT: QColor(233, 30, 99),  # 粉色
-    }
-
     def __init__(
         self,
         port_def: PortDefinition,
@@ -88,8 +75,8 @@ class PortGraphicsItem(QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
 
-        # 端口颜色
-        self._color = self.PORT_COLORS.get(port_def.type, self.PORT_COLORS[PortType.ANY])
+        # 端口颜色（使用 PortType.color 属性，支持预设和自定义类型的哈希颜色）
+        self._color = QColor(port_def.type.color)
 
         _logger.debug(f"创建端口图形项: {port_def.name} ({'输出' if is_output else '输入'})")
 

@@ -483,7 +483,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
     def _on_load(self) -> None:
         """从JSON文件加载工作流"""
         # 默认加载路径
-        workflows_dir = Path("workflows")
+        workflows_dir = Path("examples")
         workflows_dir.mkdir(parents=True, exist_ok=True)
 
         # 打开文件选择对话框

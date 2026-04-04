@@ -332,14 +332,9 @@ class NodeEditorView(QGraphicsView, ThemeAwareMixin):
                     node_related_conn_ids.add(conn.id)
         # 合并所有要删除的连接
         all_conn_ids = set(deleted_connections) | node_related_conn_ids
-        # 先删除连接UI项
+        # 先删除连接UI项（通过 remove_connection_item 以恢复控件状态）
         for conn_id in all_conn_ids:
-            if conn_id in scene._connection_items:
-                conn_item = scene._connection_items.pop(conn_id)
-                if conn_item:
-                    conn_item.cleanup()
-                    scene.removeItem(conn_item)
-                    _logger.info(f"删除连接: {conn_id[:8]}...")
+            scene.remove_connection_item(conn_id)
         # 再删除节点UI项
         for node_id in deleted_nodes:
             if node_id in scene._node_items:
