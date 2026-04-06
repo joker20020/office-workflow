@@ -527,9 +527,14 @@ class FilePickerButton(InlineWidgetBase):
         # 构建过滤器字符串
         filter_str = ";;".join(self._filters) if self._filters else "所有文件 (*)"
 
-        # 使用顶层窗口作为父窗口，避免嵌入 QGraphicsProxyWidget 时
-        # Windows 平台模态对话框因焦点丢失而立即关闭
-        parent_window = self.window()
+        # 在 QGraphicsProxyWidget 中，self.window() 返回的是代理内嵌的顶级 widget，
+        # 不是真实的 QMainWindow。在 Windows 上用其作为 QFileDialog 的父窗口会导致
+        # 模态对话框因焦点丢失而立即关闭，同时破坏 QGraphicsView 的渲染状态。
+        # 必须使用 QApplication.activeWindow() 获取真实的主窗口。
+        from PySide6.QtWidgets import QApplication
+
+        parent_window = QApplication.activeWindow()
+
         file_path, _ = QFileDialog.getOpenFileName(parent_window, "选择文件", "", filter_str)
 
         if file_path:

@@ -73,6 +73,8 @@ class NodeEditorView(QGraphicsView, ThemeAwareMixin):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setRubberBandSelectionMode(Qt.ItemSelectionMode.IntersectsItemShape)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # 视口更新模式：使用完整更新，避免 Windows 上模态对话框关闭后出现黑屏
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         # 场景背景：不设置背景画笔，让场景的 drawBackground 绘制网格
         # self.setBackgroundBrush(self._scene.BACKGROUND_COLOR)
         # 变换锚点
@@ -88,7 +90,9 @@ class NodeEditorView(QGraphicsView, ThemeAwareMixin):
         # 居中视图到场景原点
         self.centerOn(0, 0)
 
-        self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
+        # 注意：不使用 CacheBackground，Windows 上模态对话框（如文件选择）
+        # 会导致缓存失效，显示黑屏
+        # self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
 
     def _center_view(self) -> None:
         """将视图居中到场景原点"""
