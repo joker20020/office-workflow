@@ -328,7 +328,7 @@ class NodeGraphicsItem(QGraphicsObject):
         max_input_widget_width = 0
         for proxy in self._widget_proxies.values():
             try:
-                w = proxy.widget.minimumWidth()
+                w = proxy.widget.width()
                 if w > max_input_widget_width:
                     max_input_widget_width = w
             except Exception:
@@ -340,7 +340,7 @@ class NodeGraphicsItem(QGraphicsObject):
         max_output_widget_width = 0
         for proxy in self._output_widget_proxies.values():
             try:
-                w = proxy.widget.minimumWidth()
+                w = proxy.widget.width()
                 if w > max_output_widget_width:
                     max_output_widget_width = w
             except Exception:

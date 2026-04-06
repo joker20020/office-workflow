@@ -272,8 +272,7 @@ class NumberSpinBox(InlineWidgetBase):
             self._spin_box.setSingleStep(1)
 
         self._spin_box.setStyleSheet(Theme.get_inline_spinbox_stylesheet())
-
-        # 设置默认值
+        self._spin_box.setFixedWidth(self.MIN_WIDTH)
         if port_def.default is not None:
             self._spin_box.setValue(float(port_def.default) if is_float else int(port_def.default))
 
@@ -284,6 +283,7 @@ class NumberSpinBox(InlineWidgetBase):
             self._spin_box.valueChanged.connect(self._on_int_changed)
 
         layout.addWidget(self._spin_box)
+
 
     def get_value(self) -> Any:
         """获取数值"""
