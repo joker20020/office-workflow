@@ -51,7 +51,7 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
     LINE_WIDTH = 2
     LINE_WIDTH_HOVER = 3
     LINE_WIDTH_SELECTED = 4
-    CONTROL_POINT_DISTANCE = 100
+    CONTROL_POINT_DISTANCE = 80
 
     def __init__(
         self,
@@ -128,8 +128,8 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
         p2 = self._target_port.get_connection_point()
         dx = p2.x() - p1.x()
         distance = abs(dx)
-        ctrl_offset = min(self.CONTROL_POINT_DISTANCE, distance / 2)
-        ctrl_offset = max(ctrl_offset, 30)
+        ctrl_offset = min(self.CONTROL_POINT_DISTANCE, distance * 0.4)
+        ctrl_offset = max(ctrl_offset, 25)
         path = QPainterPath()
         path.moveTo(p1)
         ctrl1 = QPointF(p1.x() + ctrl_offset, p1.y())
@@ -253,17 +253,15 @@ class DragConnectionItem(QGraphicsPathItem):
         path = QPainterPath()
         path.moveTo(p1)
 
-        # 简单的 S 形曲线
+        # S 形曲线
         dx = p2.x() - p1.x()
-        ctrl_offset = min(100, abs(dx) / 2)
-        ctrl_offset = max(ctrl_offset, 30)
+        ctrl_offset = min(80, abs(dx) * 0.4)
+        ctrl_offset = max(ctrl_offset, 25)
 
         if self._start_port.is_output:
-            # 从输出端口拖出
             ctrl1 = QPointF(p1.x() + ctrl_offset, p1.y())
             ctrl2 = QPointF(p2.x() - ctrl_offset, p2.y())
         else:
-            # 从输入端口拖出
             ctrl1 = QPointF(p1.x() - ctrl_offset, p1.y())
             ctrl2 = QPointF(p2.x() + ctrl_offset, p2.y())
 

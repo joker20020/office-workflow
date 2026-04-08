@@ -225,7 +225,7 @@ class NodeEngine:
     """
 
     # 每个节点最大执行次数（防止死循环）
-    MAX_ITERATIONS = 1000
+    MAX_ITERATIONS = 100000
 
     def __init__(self, event_bus: Optional[EventBus] = None):
         """

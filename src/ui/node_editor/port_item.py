@@ -171,31 +171,30 @@ class PortGraphicsItem(QGraphicsItem):
         else:
             color = self._color
 
+        # 如果悬停，先绘制外圈光晕
+        if self._is_hovered:
+            from PySide6.QtGui import QColor
+            glow_color = QColor(color)
+            glow_color.setAlpha(60)
+            painter.setBrush(QBrush(glow_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(0, 0), self.PORT_RADIUS + 4, self.PORT_RADIUS + 4)
+
         # 绘制端口圆点
         if self._is_connected:
-            # 已连接：填充
+            # 已连接：填充 + 细边框
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(color.darker(120), 1.5))
+            painter.setPen(QPen(color.darker(140), 1.0))
         else:
-            # 未连接：空心
+            # 未连接：空心 + 较粗边框
             painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-            painter.setPen(QPen(color, 2))
+            painter.setPen(QPen(color, 1.8))
 
         painter.drawEllipse(
             QPointF(0, 0),
             self.PORT_RADIUS,
             self.PORT_RADIUS,
         )
-
-        # 如果悬停，绘制高亮光晕
-        if self._is_hovered:
-            painter.setBrush(QBrush(Qt.GlobalColor.transparent))
-            painter.setPen(QPen(color.lighter(150), 1))
-            painter.drawEllipse(
-                QPointF(0, 0),
-                self.PORT_RADIUS + 3,
-                self.PORT_RADIUS + 3,
-            )
 
     # ==================== 事件处理 ====================
 

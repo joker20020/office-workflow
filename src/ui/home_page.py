@@ -266,7 +266,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         self._title_label.setStyleSheet(Theme.get_home_title_stylesheet())
         layout.addWidget(self._title_label)
 
-        self._subtitle_label = QLabel("基于节点编辑器的智能办公工具 · Phase 3: Agent 集成已完成")
+        self._subtitle_label = QLabel("基于节点编辑器的智能办公工具")
         self._subtitle_label.setObjectName("homeSubtitle")
         self._subtitle_label.setStyleSheet(Theme.get_home_subtitle_stylesheet())
         layout.addWidget(self._subtitle_label)

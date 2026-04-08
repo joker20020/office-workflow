@@ -344,7 +344,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         header_layout.addStretch()
 
         self._new_btn = QPushButton("+ 新建")
-        self._new_btn.setFixedSize(60, 24)
+        self._new_btn.setFixedSize(72, 28)
         self._new_btn.clicked.connect(self.new_session_requested.emit)
         self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
         header_layout.addWidget(self._new_btn)

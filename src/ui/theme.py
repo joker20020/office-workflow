@@ -43,112 +43,112 @@ class Theme:
     # ==================== 颜色常量 ====================
 
     DARK_COLORS = {
-        "background_primary": "#1e1e1e",
-        "background_secondary": "#2d2d2d",
-        "background_tertiary": "#3d3d3d",
-        "background_hover": "#3a3a3a",
-        "background_selected": "#454545",
-        "background_pressed": "#505050",
-        "background_input": "#2d2d30",
-        "border_primary": "#404040",
-        "border_secondary": "#555555",
-        "border_focus": "#0078d4",
-        "border_hover": "#4a4a4a",
-        "text_primary": "#e0e0e0",
-        "text_secondary": "#b0b0b0",
-        "text_disabled": "#666666",
-        "text_hint": "#999999",
-        "text_placeholder": "#808080",
-        "text_link": "#4fc3f7",
-        "accent_primary": "#90CAF9",
-        "accent_secondary": "#64B5F6",
-        "accent_hover": "#BBDEFB",
-        "state_idle": "#616161",
-        "state_running": "#FFC107",
-        "state_success": "#4CAF50",
-        "state_error": "#F44336",
-        "state_warning": "#FFA726",
-        "grid_minor": "#2d2d2d",
-        "grid_major": "#3c3c3c",
-        "grid_background": "#232326",
-        "node_bg_idle": "#2d2d30",
-        "node_bg_running": "#3d3d00",
-        "node_bg_success": "#1b3d1b",
-        "node_bg_error": "#3d1b1b",
-        "node_bg_skipped": "#3a3a3a",
-        "node_border_normal": "#3c3c3c",
-        "node_border_hover": "#4a4a4a",
-        "node_title": "#d4d4d4",
-        "node_port_name": "#b4b4b4",
+        "background_primary": "#18181b",
+        "background_secondary": "#1e1e24",
+        "background_tertiary": "#2a2a35",
+        "background_hover": "#2e2e3a",
+        "background_selected": "#35354a",
+        "background_pressed": "#40405a",
+        "background_input": "#22222c",
+        "border_primary": "#2e2e3a",
+        "border_secondary": "#3d3d50",
+        "border_focus": "#6366f1",
+        "border_hover": "#36364a",
+        "text_primary": "#f0f0f5",
+        "text_secondary": "#a0a0b8",
+        "text_disabled": "#55556a",
+        "text_hint": "#707088",
+        "text_placeholder": "#606078",
+        "text_link": "#818cf8",
+        "accent_primary": "#818cf8",
+        "accent_secondary": "#6366f1",
+        "accent_hover": "#a5b4fc",
+        "state_idle": "#4a4a60",
+        "state_running": "#fbbf24",
+        "state_success": "#34d399",
+        "state_error": "#f87171",
+        "state_warning": "#fbbf24",
+        "grid_minor": "#1e1e26",
+        "grid_major": "#252530",
+        "grid_background": "#131318",
+        "node_bg_idle": "#1e1e28",
+        "node_bg_running": "#2a2800",
+        "node_bg_success": "#0a2a1a",
+        "node_bg_error": "#2a0a0a",
+        "node_bg_skipped": "#252530",
+        "node_border_normal": "#2a2a38",
+        "node_border_hover": "#35354a",
+        "node_title": "#eeeef5",
+        "node_port_name": "#9898b0",
         # Button state colors
-        "accent_hover_bg": "#1976D2",
-        "accent_pressed_bg": "#1565C0",
-        "danger_hover_bg": "#C62828",
-        "danger_pressed_bg": "#B71C1C",
-        "success_hover_bg": "#43A047",
-        "success_pressed_bg": "#388E3C",
+        "accent_hover_bg": "#4f46e5",
+        "accent_pressed_bg": "#4338ca",
+        "danger_hover_bg": "#dc2626",
+        "danger_pressed_bg": "#b91c1c",
+        "success_hover_bg": "#059669",
+        "success_pressed_bg": "#047857",
         # Block card colors
-        "card_background": "#252526",
-        "card_border": "#3c3c3c",
-        "card_header_hover": "#2a2a2b",
-        "thinking_accent": "#FFA726",
-        "tool_accent": "#42A5F5",
-        "success_accent": "#66BB6A",
-        "error_accent": "#EF5350",
+        "card_background": "#1a1a24",
+        "card_border": "#2a2a38",
+        "card_header_hover": "#22222e",
+        "thinking_accent": "#fbbf24",
+        "tool_accent": "#818cf8",
+        "success_accent": "#34d399",
+        "error_accent": "#f87171",
     }
 
     LIGHT_COLORS = {
-        "background_primary": "#f5f5f5",
+        "background_primary": "#fafafa",
         "background_secondary": "#ffffff",
-        "background_tertiary": "#e8e8e8",
-        "background_hover": "#e0e0e0",
-        "background_selected": "#d0d0d0",
-        "background_pressed": "#c0c0c0",
+        "background_tertiary": "#f0f0f5",
+        "background_hover": "#eeeef5",
+        "background_selected": "#e0e0f0",
+        "background_pressed": "#d0d0e0",
         "background_input": "#ffffff",
-        "border_primary": "#d0d0d0",
-        "border_secondary": "#c0c0c0",
-        "border_focus": "#0078d4",
-        "border_hover": "#c0c0c0",
-        "text_primary": "#1a1a1a",
-        "text_secondary": "#666666",
-        "text_disabled": "#999999",
-        "text_hint": "#888888",
-        "text_placeholder": "#a0a0a0",
-        "text_link": "#29B6F2",
-        "accent_primary": "#1976D2",
-        "accent_secondary": "#2196F3",
-        "accent_hover": "#42A5F5",
-        "state_idle": "#9e9e9e",
-        "state_running": "#FFC107",
-        "state_success": "#4CAF50",
-        "state_error": "#F44336",
-        "state_warning": "#FFA726",
-        "grid_minor": "#e0e0e0",
-        "grid_major": "#c0c0c0",
-        "grid_background": "#f5f5f5",
-        "node_bg_idle": "#f5f5f5",
-        "node_bg_running": "#fffde7",
-        "node_bg_success": "#e8f5e8",
-        "node_bg_error": "#ffebee",
-        "node_bg_skipped": "#e8e8e8",
-        "node_border_normal": "#e0e0e0",
-        "node_border_hover": "#d0d0d0",
-        "node_title": "#1a1a1a",
-        "node_port_name": "#666666",
-        "accent_hover_bg": "#1976D2",
-        "accent_pressed_bg": "#1565C0",
-        "danger_hover_bg": "#D32F2F",
-        "danger_pressed_bg": "#C62828",
-        "success_hover_bg": "#4CAF50",
-        "success_pressed_bg": "#388E3C",
+        "border_primary": "#e0e0ea",
+        "border_secondary": "#d0d0da",
+        "border_focus": "#6366f1",
+        "border_hover": "#d0d0da",
+        "text_primary": "#111122",
+        "text_secondary": "#555570",
+        "text_disabled": "#9999aa",
+        "text_hint": "#8888a0",
+        "text_placeholder": "#aaaabc",
+        "text_link": "#6366f1",
+        "accent_primary": "#6366f1",
+        "accent_secondary": "#818cf8",
+        "accent_hover": "#a5b4fc",
+        "state_idle": "#8888a0",
+        "state_running": "#f59e0b",
+        "state_success": "#10b981",
+        "state_error": "#ef4444",
+        "state_warning": "#f59e0b",
+        "grid_minor": "#f0f0f5",
+        "grid_major": "#e0e0ea",
+        "grid_background": "#fafafe",
+        "node_bg_idle": "#ffffff",
+        "node_bg_running": "#fffbeb",
+        "node_bg_success": "#ecfdf5",
+        "node_bg_error": "#fef2f2",
+        "node_bg_skipped": "#f0f0f5",
+        "node_border_normal": "#e0e0ea",
+        "node_border_hover": "#d0d0da",
+        "node_title": "#111122",
+        "node_port_name": "#555570",
+        "accent_hover_bg": "#4f46e5",
+        "accent_pressed_bg": "#4338ca",
+        "danger_hover_bg": "#dc2626",
+        "danger_pressed_bg": "#b91c1c",
+        "success_hover_bg": "#059669",
+        "success_pressed_bg": "#047857",
         # Block card colors
         "card_background": "#ffffff",
-        "card_border": "#e0e0e0",
-        "card_header_hover": "#f0f0f0",
-        "thinking_accent": "#FB8C00",
-        "tool_accent": "#1E88E5",
-        "success_accent": "#43A047",
-        "error_accent": "#E53935",
+        "card_border": "#e0e0ea",
+        "card_header_hover": "#f0f0f5",
+        "thinking_accent": "#f59e0b",
+        "tool_accent": "#6366f1",
+        "success_accent": "#10b981",
+        "error_accent": "#ef4444",
     }
 
     _current_theme: ThemeType = ThemeType.DARK
@@ -336,17 +336,27 @@ class Theme:
         Args:
             selected: 是否选中状态
         """
-        bg_color = cls.hex("background_selected") if selected else "transparent"
-        hover_color = cls.hex("background_pressed") if selected else cls.hex("background_hover")
+        if selected:
+            bg_color = cls.hex("background_selected")
+            hover_color = cls.hex("background_pressed")
+        else:
+            bg_color = "transparent"
+            hover_color = cls.hex("background_hover")
+
         text_color = cls.hex("text_primary") if selected else cls.hex("text_secondary")
-        hover_text_color = cls.hex("text_primary")  # hover时文字变亮
+        hover_text_color = cls.hex("text_primary")
+
+        # 选中时左侧显示强调色指示条
+        indicator = f"2px solid {cls.hex('border_focus')}" if selected else "2px solid transparent"
 
         return f"""
             NavItem {{
                 background-color: {bg_color};
                 border: none;
-                border-radius: 8px;
+                border-left: {indicator};
+                border-radius: 0 6px 6px 0;
                 text-align: left;
+                margin: 1px 8px 1px 0;
             }}
             NavItem:hover {{
                 background-color: {hover_color};
@@ -363,8 +373,8 @@ class Theme:
                 background-color: {cls.hex("background_pressed")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_secondary")};
-                padding: 4px 8px;
-                border-radius: 4px;
+                padding: 6px 10px;
+                border-radius: 6px;
             }}
         """
 
@@ -375,13 +385,13 @@ class Theme:
             QToolBar {{
                 background-color: {cls.hex("background_secondary")};
                 border-bottom: 1px solid {cls.hex("border_primary")};
-                padding: 4px;
-                spacing: 4px;
+                padding: 6px 8px;
+                spacing: 6px;
             }}
             QToolButton {{
-                padding: 6px 12px;
+                padding: 6px 14px;
                 border: none;
-                border-radius: 3px;
+                border-radius: 6px;
                 background-color: transparent;
                 color: {cls.hex("text_primary")};
                 {cls.emoji_font_css()}
@@ -400,8 +410,8 @@ class Theme:
                 background-color: {cls.hex("background_pressed")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_secondary")};
-                padding: 4px 8px;
-                border-radius: 4px;
+                padding: 6px 10px;
+                border-radius: 6px;
             }}
         """
 
@@ -412,8 +422,9 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
-                padding: 8px;
+                padding: 10px 12px;
                 font-weight: bold;
+                font-size: 12px;
                 border-bottom: 1px solid {cls.hex("border_secondary")};
             }}
         """
@@ -430,16 +441,18 @@ class Theme:
                 {cls.emoji_font_css()}
             }}
             QTreeWidget::item {{
-                padding: 4px;
+                padding: 6px 4px;
                 color: {cls.hex("text_primary")};
+                border-radius: 4px;
+                margin: 1px 4px;
             }}
             QTreeWidget::item:hover {{
                 background-color: {cls.hex("background_hover")};
             }}
             QTreeWidget::item:selected {{
-                background-color: transparent;
-                border: 1px solid {cls.hex("border_secondary")};
+                background-color: {cls.hex("background_selected")};
                 color: {cls.hex("text_primary")};
+                border: none;
             }}
             QScrollBar:vertical {{
                 background-color: {cls.hex("background_secondary")};
@@ -487,12 +500,12 @@ class Theme:
     @classmethod
     def get_status_label_stylesheet(cls) -> str:
         """获取状态标签样式表"""
-        return f"color: {cls.hex('text_hint')}; padding-left: 10px;"
+        return f"color: {cls.hex('text_hint')}; padding-left: 12px; font-size: 12px;"
 
     @classmethod
     def get_hint_label_stylesheet(cls) -> str:
         """获取提示标签样式表"""
-        return f"color: {cls.hex('text_hint')}; padding: 8px; font-size: 11px;"
+        return f"color: {cls.hex('text_hint')}; padding: 10px; font-size: 11px;"
 
     @classmethod
     def get_title_label_stylesheet(cls) -> str:
@@ -501,7 +514,8 @@ class Theme:
             font-size: 16px;
             font-weight: bold;
             color: {cls.hex("accent_primary")};
-            padding: 8px;
+            padding: 8px 8px 8px 4px;
+            letter-spacing: 0.5px;
         """
 
     @classmethod
@@ -530,7 +544,8 @@ class Theme:
             QFrame#homeHeader {{
                 background-color: {cls.hex("background_secondary")};
                 border-bottom: 1px solid {cls.hex("border_primary")};
-                padding: 32px 48px;
+                border-radius: 0;
+                padding: 40px 48px;
             }}
         """
 
@@ -540,9 +555,10 @@ class Theme:
         return f"""
             QLabel#homeTitle {{
                 color: {cls.hex("text_primary")};
-                font-size: 32px;
+                font-size: 28px;
                 font-weight: bold;
                 background-color: transparent;
+                letter-spacing: -0.5px;
             }}
         """
 
@@ -554,7 +570,7 @@ class Theme:
                 color: {cls.hex("text_secondary")};
                 font-size: 14px;
                 background-color: transparent;
-                margin-top: 8px;
+                margin-top: 6px;
             }}
         """
 
@@ -564,10 +580,11 @@ class Theme:
         return f"""
             QLabel#sectionTitle {{
                 color: {cls.hex("text_primary")};
-                font-size: 18px;
+                font-size: 15px;
                 font-weight: bold;
                 background-color: transparent;
-                padding: 16px 0 8px 0;
+                padding: 20px 0 8px 0;
+                letter-spacing: 0.3px;
             }}
         """
 
@@ -580,7 +597,7 @@ class Theme:
             QFrame#quickActionCard {{
                 background-color: {bg};
                 border: 1px solid {border};
-                border-radius: 12px;
+                border-radius: 10px;
                 padding: 20px;
             }}
             QFrame#quickActionCard:hover {{
@@ -636,6 +653,7 @@ class Theme:
             }}
             QFrame#recentItem:hover {{
                 background-color: {cls.hex("background_hover")};
+                border-color: {cls.hex("border_hover")};
             }}
         """
 
@@ -747,8 +765,8 @@ class Theme:
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_primary")};
-                border-radius: 4px;
-                padding: 8px;
+                border-radius: 8px;
+                padding: 10px 12px;
                 font-size: 13px;
                 {cls.emoji_font_css()}
             }}
@@ -765,9 +783,10 @@ class Theme:
                 background-color: {cls.hex("border_focus")};
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
+                border-radius: 8px;
+                padding: 8px 20px;
                 font-size: 13px;
+                font-weight: bold;
                 {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
@@ -775,6 +794,7 @@ class Theme:
             }}
             QPushButton:disabled {{
                 background-color: {cls.hex("background_tertiary")};
+                color: {cls.hex("text_disabled")};
             }}
         """
 
@@ -786,9 +806,10 @@ class Theme:
                 background-color: {cls.hex("state_error")};
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
+                border-radius: 8px;
+                padding: 8px 20px;
                 font-size: 13px;
+                font-weight: bold;
                 {cls.emoji_font_css()}
             }}
             QPushButton:hover {{
@@ -808,8 +829,8 @@ class Theme:
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
                 border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
+                border-radius: 6px;
+                padding: 6px 14px;
                 font-size: 12px;
                 {cls.emoji_font_css()}
             }}
@@ -867,8 +888,8 @@ class Theme:
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
                 border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
+                border-radius: 6px;
+                padding: 7px 14px;
                 font-size: 12px;
                 {cls.emoji_font_css()}
             }}
@@ -924,26 +945,28 @@ class Theme:
             QTabWidget::pane {{
                 border: 1px solid {cls.hex("border_primary")};
                 background-color: {cls.hex("background_primary")};
+                border-radius: 6px;
             }}
             QTabBar::tab {{
-                background-color: {cls.hex("background_secondary")};
+                background-color: transparent;
                 color: {cls.hex("text_secondary")};
-                padding: 8px 16px;
-                border: 1px solid {cls.hex("border_primary")};
+                padding: 8px 18px;
+                border: none;
+                border-bottom: 2px solid transparent;
             }}
             QTabBar::tab:selected {{
-                background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
+                border-bottom: 2px solid {cls.hex("border_focus")};
             }}
             QTabBar::tab:hover {{
-                background-color: {cls.hex("background_tertiary")};
+                background-color: {cls.hex("background_hover")};
             }}
             QLineEdit {{
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_primary")};
-                border-radius: 4px;
-                padding: 6px;
+                border-radius: 6px;
+                padding: 8px 10px;
             }}
             QLineEdit:focus {{
                 border: 1px solid {cls.hex("border_focus")};
@@ -952,8 +975,8 @@ class Theme:
                 background-color: {cls.hex("background_tertiary")};
                 color: {cls.hex("text_primary")};
                 border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
+                border-radius: 6px;
+                padding: 8px 18px;
                 min-width: 80px;
             }}
             QDialogButtonBox QPushButton:hover {{
@@ -964,12 +987,12 @@ class Theme:
             }}
             QCheckBox {{
                 color: {cls.hex("text_primary")};
-                spacing: 6px;
+                spacing: 8px;
             }}
             QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                border-radius: 3px;
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
                 border: 1px solid {cls.hex("grid_major")};
                 background-color: {cls.hex("background_input")};
             }}
@@ -984,8 +1007,8 @@ class Theme:
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_primary")};
-                border-radius: 4px;
-                padding: 6px 12px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 min-width: 120px;
             }}
             QComboBox:hover {{
@@ -1000,13 +1023,14 @@ class Theme:
                 color: {cls.hex("text_primary")};
                 selection-background-color: {cls.hex("background_selected")};
                 border: 1px solid {cls.hex("border_primary")};
+                border-radius: 6px;
             }}
             QSpinBox {{
                 background-color: {cls.hex("background_secondary")};
                 color: {cls.hex("text_primary")};
                 border: 1px solid {cls.hex("border_primary")};
-                border-radius: 4px;
-                padding: 6px;
+                border-radius: 6px;
+                padding: 8px;
             }}
             QSpinBox::up-button, QSpinBox::down-button {{
                 background-color: {cls.hex("background_tertiary")};
@@ -1225,9 +1249,10 @@ class Theme:
                 background-color: {cls.hex("border_focus")};
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
+                border-radius: 6px;
+                padding: 8px 14px;
                 font-size: 12px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("accent_hover_bg")};
@@ -1301,8 +1326,8 @@ class Theme:
             QLineEdit {{
                 background-color: {cls.hex("background_input")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_primary")};
                 font-size: 11px;
             }}
@@ -1322,8 +1347,8 @@ class Theme:
             QSpinBox, QDoubleSpinBox {{
                 background-color: {cls.hex("background_input")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_primary")};
                 font-size: 11px;
             }}
@@ -1359,7 +1384,7 @@ class Theme:
             QCheckBox::indicator {{
                 width: 14px;
                 height: 14px;
-                border-radius: 3px;
+                border-radius: 4px;
                 border: 1px solid {cls.hex("grid_major")};
                 background-color: {cls.hex("background_input")};
             }}
@@ -1386,8 +1411,8 @@ class Theme:
             QComboBox {{
                 background-color: {cls.hex("background_input")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_primary")};
                 font-size: 11px;
                 min-width: 80px;
@@ -1424,7 +1449,7 @@ class Theme:
             QPushButton {{
                 background-color: {cls.hex("background_tertiary")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
+                border-radius: 4px;
                 padding: 2px 8px;
                 color: {cls.hex("text_primary")};
                 font-size: 11px;
@@ -1450,8 +1475,8 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_input")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_placeholder")};
                 font-size: 11px;
             }}
@@ -1464,8 +1489,8 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_secondary")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 font-size: 11px;
             }}
         """
@@ -1477,8 +1502,8 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_secondary")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_placeholder")};
                 font-size: 11px;
             }}
@@ -1491,8 +1516,8 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_secondary")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("text_link")};
                 font-size: 11px;
             }}
@@ -1505,8 +1530,8 @@ class Theme:
             QLabel {{
                 background-color: {cls.hex("background_secondary")};
                 border: 1px solid {cls.hex("grid_major")};
-                border-radius: 3px;
-                padding: 2px 6px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 color: {cls.hex("state_error")};
                 font-size: 11px;
             }}
@@ -1580,8 +1605,9 @@ class Theme:
                 background-color: {cls.hex("state_success")};
                 color: white;
                 border: none;
-                border-radius: 3px;
-                padding: 4px 12px;
+                border-radius: 6px;
+                padding: 5px 14px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("success_hover_bg")};
@@ -1599,8 +1625,9 @@ class Theme:
                 background-color: {cls.hex("accent_secondary")};
                 color: white;
                 border: none;
-                border-radius: 3px;
-                padding: 4px 12px;
+                border-radius: 6px;
+                padding: 5px 14px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: {cls.hex("accent_hover")};
@@ -1637,13 +1664,15 @@ class Theme:
             QProgressBar {{
                 background-color: {cls.hex("background_secondary")};
                 border: 1px solid {cls.hex("border_primary")};
-                border-radius: 3px;
+                border-radius: 6px;
                 text-align: center;
                 color: {cls.hex("text_primary")};
+                min-height: 6px;
+                max-height: 6px;
             }}
             QProgressBar::chunk {{
-                background-color: {cls.hex("state_success")};
-                border-radius: 2px;
+                background-color: {cls.hex("border_focus")};
+                border-radius: 3px;
             }}
         """
 

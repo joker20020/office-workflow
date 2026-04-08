@@ -420,39 +420,35 @@ class NodeEditorScene(QGraphicsScene):
         left = int(rect.left()) - (int(rect.left()) % self.GRID_SIZE)
         top = int(rect.top()) - (int(rect.top()) % self.GRID_SIZE)
 
-        # 绘制细网格
-        painter.setPen(Theme.color("grid_minor"))
+        # 绘制点阵网格
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        minor_color = Theme.color("grid_minor")
+        major_color = Theme.color("grid_major")
+
+        # 预设画笔颜色
         x = left
         while x <= rect.right():
-            painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
+            y = top
+            while y <= rect.bottom():
+                is_major = (x % (self.GRID_SIZE * 5) == 0) and (y % (self.GRID_SIZE * 5) == 0)
+                if is_major:
+                    painter.setBrush(major_color)
+                    painter.drawEllipse(QPointF(x, y), 2.0, 2.0)
+                else:
+                    painter.setBrush(minor_color)
+                    painter.drawEllipse(QPointF(x, y), 1.0, 1.0)
+                y += self.GRID_SIZE
             x += self.GRID_SIZE
-
-        y = top
-        while y <= rect.bottom():
-            painter.drawLine(int(rect.left()), y, int(rect.right()), y)
-            y += self.GRID_SIZE
-
-        # 绘制粗网格（每5格）
-        painter.setPen(Theme.color("grid_major"))
-        x = left
-        while x <= rect.right():
-            if x % (self.GRID_SIZE * 5) == 0:
-                painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
-            x += self.GRID_SIZE
-
-        y = top
-        while y <= rect.bottom():
-            if y % (self.GRID_SIZE * 5) == 0:
-                painter.drawLine(int(rect.left()), y, int(rect.right()), y)
-            y += self.GRID_SIZE
 
     def refresh_theme(self) -> None:
         """刷新主题 - 使所有视图重绘背景"""
         for view in self.views():
             view.resetCachedContent()
             view.viewport().update()
-        # 刷新所有节点和连接
+        # 刷新所有节点（包括内联控件）和连接
         for node_item in self._node_items.values():
+            node_item.refresh_widget_themes()
             node_item.update()
         for conn_item in self._connection_items.values():
             conn_item.update()

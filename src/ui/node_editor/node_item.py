@@ -418,6 +418,15 @@ class NodeGraphicsItem(QGraphicsObject):
 
     # ==================== 控件状态管理 ====================
 
+    def refresh_widget_themes(self) -> None:
+        """刷新所有内联控件的主题样式"""
+        for proxy in self._widget_proxies.values():
+            if proxy.widget:
+                proxy.widget.refresh_theme()
+        for proxy in self._output_widget_proxies.values():
+            if proxy.widget:
+                proxy.widget.refresh_theme()
+
     def update_input_widget_state(self, port_name: str, has_connection: bool) -> None:
         """
         更新输入控件的启用状态
@@ -502,13 +511,13 @@ class NodeGraphicsItem(QGraphicsObject):
     # ==================== 几何 ====================
 
     def boundingRect(self) -> QRectF:
-        """返回边界矩形（包含边框笔宽和悬停效果)"""
-        return QRectF(-1, -1, self._width + 2, self._height + 2)
+        """返回边界矩形（包含阴影和边框）"""
+        return QRectF(-2, -2, self._width + 4, self._height + 4)
 
     def shape(self):
         """返回形状（用于碰撞检测和点击测试）"""
         path = QPainterPath()
-        path.addRoundedRect(0, 0, self._width, self._height, 5, 5)
+        path.addRoundedRect(0, 0, self._width, self._height, 8, 8)
         return path
 
     # ==================== 绘制 ====================
@@ -548,22 +557,39 @@ class NodeGraphicsItem(QGraphicsObject):
         else:
             border_color = Theme.color("node_border_normal")
 
+        # 绘制阴影
+        from PySide6.QtGui import QColor
+        shadow_color = QColor(0, 0, 0, 40)
+        painter.setBrush(QBrush(shadow_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(2, 2, self._width, self._height, 8, 8)
+
         # 绘制圆角矩形背景
         painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(border_color, 2.0))
-        painter.drawRoundedRect(0, 0, self._width, self._height, 5, 5)
+        painter.setPen(QPen(border_color, 1.5))
+        painter.drawRoundedRect(0, 0, self._width, self._height, 8, 8)
 
     def _paint_header(self, painter: QPainter) -> None:
         """绘制标题栏"""
-        # 标题栏背景渐变
+        # 标题栏背景 - 使用节点主题色的半透明版本
         gradient = QLinearGradient(0, 0, 0, self.HEADER_HEIGHT)
-        gradient.setColorAt(0, Theme.color("node_border_normal"))
-        gradient.setColorAt(1, Theme.color("node_bg_idle"))
+        header_color = Theme.color("node_border_normal")
+        gradient.setColorAt(0, header_color)
+        gradient.setColorAt(1, QColor(header_color.red(), header_color.green(), header_color.blue(), 0))
 
         painter.setBrush(QBrush(gradient))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(1, 1, self._width - 2, self.HEADER_HEIGHT - 2, 5, 5)
-        painter.drawRect(1, self.HEADER_HEIGHT // 2, self._width - 2, self.HEADER_HEIGHT // 2)
+        # 只绘制顶部圆角
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.moveTo(0, 8)
+        path.arcTo(0, 0, 16, 16, 180, -90)
+        path.lineTo(self._width - 8, 0)
+        path.arcTo(self._width - 16, 0, 16, 16, 90, -90)
+        path.lineTo(self._width, self.HEADER_HEIGHT)
+        path.lineTo(0, self.HEADER_HEIGHT)
+        path.closeSubpath()
+        painter.drawPath(path)
 
         # 绘制图标
         painter.setPen(QPen(Qt.GlobalColor.white))

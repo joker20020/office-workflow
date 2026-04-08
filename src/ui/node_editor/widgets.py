@@ -146,6 +146,10 @@ class InlineWidgetBase(QWidget):
         self._is_enabled = enabled
         self.setEnabled(enabled)
 
+    def refresh_theme(self) -> None:
+        """刷新主题 - 子类重写以更新内部控件样式"""
+        pass
+
     def _apply_style(self) -> None:
         """应用控件样式"""
         # 使用主题颜色
@@ -228,6 +232,10 @@ class TextLineEdit(InlineWidgetBase):
         """文本变化处理"""
         self.value_changed.emit(text.strip())
 
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        self._line_edit.setStyleSheet(Theme.get_inline_input_base_stylesheet())
+
 
 class NumberSpinBox(InlineWidgetBase):
     """
@@ -309,6 +317,10 @@ class NumberSpinBox(InlineWidgetBase):
         """浮点数值变化处理"""
         self.value_changed.emit(value)
 
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        self._spin_box.setStyleSheet(Theme.get_inline_spinbox_stylesheet())
+
 
 class BooleanCheckBox(InlineWidgetBase):
     """
@@ -371,6 +383,10 @@ class BooleanCheckBox(InlineWidgetBase):
     def _on_state_changed(self, state: int) -> None:
         """状态变化处理"""
         self.value_changed.emit(state == Qt.CheckState.Checked.value)
+
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        self._checkbox.setStyleSheet(Theme.get_inline_checkbox_stylesheet())
 
 
 class DropdownComboBox(InlineWidgetBase):
@@ -442,6 +458,10 @@ class DropdownComboBox(InlineWidgetBase):
     def _on_text_changed(self, text: str) -> None:
         """文本变化处理"""
         self.value_changed.emit(text)
+
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        self._combo_box.setStyleSheet(Theme.get_inline_combobox_stylesheet())
 
 
 class FilePickerButton(InlineWidgetBase):
@@ -541,6 +561,14 @@ class FilePickerButton(InlineWidgetBase):
             self.set_value(file_path)
             self.value_changed.emit(file_path)
 
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        self._button.setStyleSheet(Theme.get_inline_file_picker_button_stylesheet())
+        if not self._file_path:
+            self._path_label.setStyleSheet(Theme.get_inline_file_picker_label_stylesheet())
+        else:
+            self._path_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
+
 
 # =============================================================================
 # 输出预览控件
@@ -614,6 +642,10 @@ class OutputLabelBase(QWidget):
         """清除显示"""
         raise NotImplementedError
 
+    def refresh_theme(self) -> None:
+        """刷新主题 - 子类重写以更新内部控件样式"""
+        pass
+
 
 class OutputTextLabel(OutputLabelBase):
     """
@@ -676,6 +708,15 @@ class OutputTextLabel(OutputLabelBase):
         self._label.setToolTip("")
         self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
+
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        if self._is_error:
+            self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
+        elif self._label.text() == "—":
+            self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
+        else:
+            self._label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
 
 class OutputNumberLabel(OutputLabelBase):
@@ -742,6 +783,15 @@ class OutputNumberLabel(OutputLabelBase):
         self._label.setToolTip("")
         self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
+
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        if self._is_error:
+            self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
+        elif self._label.text() == "—":
+            self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
+        else:
+            self._label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
 
 class OutputDataPreview(OutputLabelBase):
@@ -831,6 +881,18 @@ class OutputDataPreview(OutputLabelBase):
         self._type_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._preview_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
         self._is_error = False
+
+    def refresh_theme(self) -> None:
+        """刷新主题"""
+        if self._is_error:
+            self._type_label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
+            self._preview_label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
+        elif self._type_label.text() == "—":
+            self._type_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
+            self._preview_label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
+        else:
+            self._type_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
+            self._preview_label.setStyleSheet(Theme.get_inline_output_label_link_stylesheet())
 
 
 # =============================================================================
