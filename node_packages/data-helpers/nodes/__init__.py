@@ -19,6 +19,7 @@ from .convert_nodes import (
     convert_to_list,
     convert_to_dict,
     convert_string_to_json,
+    convert_extract_json,
 )
 
 from .data_nodes import (
@@ -45,6 +46,7 @@ __all__ = [
     "convert_to_list",
     "convert_to_dict",
     "convert_string_to_json",
+    "convert_extract_json",
     # 数据节点
     "data_list_length",
     "data_list_merge",

@@ -1,0 +1,12 @@
+{
+    "id": "com.office.ragTools",
+    "name": "RAG 检索增强",
+    "version": "1.0.0",
+    "author": "OfficeTools",
+    "description": "RAG检索增强工具包，提供向量嵌入、向量搜索、重排序等节点",
+    "nodes": [
+        "rag.query_embedding",
+        "rag.vector_search",
+        "rag.rerank"
+    ]
+}

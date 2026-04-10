@@ -8,7 +8,7 @@
     "branch": "main",
     "nodes": [
         "input.string", "input.integer", "input.float", "input.boolean", "input.list", "input.dict", "input.file",
-        "convert.to_string", "convert.to_integer", "convert.to_float", "convert.to_boolean", "convert.to_list", "convert.to_dict", "convert.string_to_json",
+        "convert.to_string", "convert.to_integer", "convert.to_float", "convert.to_boolean", "convert.to_list", "convert.to_dict", "convert.string_to_json", "convert.extract_json",
         "data.list_length", "data.list_merge", "data.dict_get", "data.to_string"
     ]
 }

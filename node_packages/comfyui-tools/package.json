@@ -1,0 +1,11 @@
+{
+    "id": "com.office.comfyuiTools",
+    "name": "ComfyUI 图像生成",
+    "version": "1.0.0",
+    "author": "OfficeTools",
+    "description": "ComfyUI图像生成工具包，提供文生图、图生图等节点",
+    "nodes": [
+        "comfyui.text_to_image",
+        "comfyui.image_to_image"
+    ]
+}

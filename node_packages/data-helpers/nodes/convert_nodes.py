@@ -232,3 +232,48 @@ convert_string_to_json = NodeDefinition(
     ],
     execute=_string_to_json,
 )
+
+
+# ==================== 从混合文本提取JSON ====================
+
+
+def _extract_json(text: str) -> dict:
+    """从混合文本中提取所有JSON对象并拼接返回"""
+    group = []
+    result_parts = []
+    bracket_count = 0
+    for ch in text:
+        if ch == "{":
+            bracket_count += 1
+        elif ch == "}":
+            bracket_count -= 1
+        if bracket_count > 0:
+            group.append(ch)
+        elif bracket_count == 0 and ch == "}":
+            group.append(ch)
+            result_parts.append("".join(group))
+            group = []
+    combined = "".join(result_parts)
+    try:
+        parsed = json.loads(combined)
+        return {"result": parsed, "raw": combined, "success": True}
+    except json.JSONDecodeError:
+        return {"result": combined, "raw": combined, "success": False, "error": "提取的内容不是有效JSON"}
+
+
+convert_extract_json = NodeDefinition(
+    node_type="convert.extract_json",
+    display_name="提取JSON",
+    description="从混合文本中提取所有花括号包裹的JSON对象并拼接解析",
+    category="convert",
+    icon="🔧",
+    inputs=[
+        PortDefinition("text", PortType.STRING, "混合文本", widget_type="text_edit"),
+    ],
+    outputs=[
+        PortDefinition("result", PortType.ANY, "解析结果", show_preview=True),
+        PortDefinition("raw", PortType.STRING, "提取的原始JSON文本"),
+        PortDefinition("success", PortType.BOOLEAN, "是否成功解析"),
+    ],
+    execute=_extract_json,
+)

@@ -1,0 +1,8 @@
+{
+    "name": "agent_extensions",
+    "version": "1.0.0",
+    "description": "为AI助手提供多智能体扩展能力（工艺规划、图像生成等）",
+    "author": "OfficeTools",
+    "permissions": ["agent.tool", "network"],
+    "entry": "AgentExtensionsPlugin"
+}
