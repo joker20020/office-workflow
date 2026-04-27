@@ -1,0 +1,14 @@
+{
+    "info": {
+        "stepID": "3",
+        "stepName": "配钻壳体孔"
+    },
+    "stepContent": [
+        {
+            "title": "工步基本内容",
+            "detail": "按反推火箭支座上的孔配钻壳体上4-φ2.5孔（壳体及零件孔均已加工成）"
+        }
+    ],
+    "annex": "",
+    "animation": ""
+}

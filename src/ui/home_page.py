@@ -261,12 +261,12 @@ class HomePage(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 32, 0, 32)
         layout.setSpacing(8)
 
-        self._title_label = QLabel("欢迎使用办公小工具整合平台")
+        self._title_label = QLabel("欢迎使用Agent工艺智能生成系统")
         self._title_label.setObjectName("homeTitle")
         self._title_label.setStyleSheet(Theme.get_home_title_stylesheet())
         layout.addWidget(self._title_label)
 
-        self._subtitle_label = QLabel("基于节点编辑器的智能办公工具")
+        self._subtitle_label = QLabel("基于Agent的工艺智能生成系统，使用节点编辑器扩展使用功能")
         self._subtitle_label.setObjectName("homeSubtitle")
         self._subtitle_label.setStyleSheet(Theme.get_home_subtitle_stylesheet())
         layout.addWidget(self._subtitle_label)

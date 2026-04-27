@@ -389,7 +389,7 @@ class AgentIntegration:
                         if block_type == "text":
                             text_content = block.get("text", "")
                             content_blocks.append(TextBlock(type="text", text=text_content))
-                            text_parts.append(text_content)
+                            # text_parts.append(text_content)
 
                         elif block_type == "image":
                             source = self._create_image_source(block)
@@ -521,7 +521,7 @@ class AgentIntegration:
                         if block_type == "text":
                             text_content = block.get("text", "")
                             content_blocks.append(TextBlock(type="text", text=text_content))
-                            text_parts.append(text_content)
+                            # text_parts.append(text_content)
 
                         elif block_type == "image":
                             source = self._create_image_source(block)

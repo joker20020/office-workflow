@@ -354,11 +354,12 @@ class AgentExtensionTools:
                 stream=True,
                 enable_thinking=False,
                 client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 4096, "max_completion_tokens": 4096},
+                generate_kwargs={"max_tokens": 10240, "max_completion_tokens": 10240},
             ),
             formatter=DeepSeekChatFormatter(),
             toolkit=toolkit,
             memory=InMemoryMemory(),
+            max_iters=60
         )
 
         msg = Msg(
@@ -423,11 +424,12 @@ class AgentExtensionTools:
                 stream=True,
                 enable_thinking=False,
                 client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 4096, "max_completion_tokens": 4096},
+                generate_kwargs={"max_tokens": 10240, "max_completion_tokens": 10240},
             ),
             formatter=DeepSeekChatFormatter(),
             toolkit=toolkit,
             memory=InMemoryMemory(),
+            max_iters=60
         )
 
         msg = Msg(name="user", content=task, role="user")
@@ -644,14 +646,9 @@ class AgentExtensionTools:
             name="process_agent",
             sys_prompt=f"""
         你是一个工艺规划师,你的任务是根据查询到的知识帮助用户进行工艺规划
-        在你进行规划前，请先制定一个工艺规划计划，并使用plan工具创建一个工艺编写任务列表,
-        创建的任务列表中，每个任务项代表一个需要完成的任务
-        你的工作流程如下：
-        1、使用工具将当前任务项标记为进行中
-        2、完成该任务项内容所要求的任务
-        3、使用工具将已完成的任务项标记为已完成
-        4、使用工具检查是否已完成计划列表，若为完成则回到步骤1继续完成，直至计划完成才能结束规划
-        每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入当前文件夹下的文件内进行保存，注意输出文件结构的可读性，同时请确保所有工序工步均保存
+        在你进行规划前，请先制定一个工艺规划计划，并使用plan工具创建一个工艺编写任务列表,并逐步执行直至计划完成才能结束规划
+        每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入当前文件夹下的文件内进行保存，注意输出文件结构的可读性
+        同时你需要编写完成所有规划任务后再结束，请确保所有工序工步均保存，不能提前退出
         """,
             model=OpenAIChatModel(
                 model_name=self._vlm_name,
@@ -659,12 +656,13 @@ class AgentExtensionTools:
                 stream=True,
                 enable_thinking=False,
                 client_kwargs={"base_url": os.environ["VLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 4096, "max_completion_tokens": 4096},
+                generate_kwargs={"max_tokens": 30720, "max_completion_tokens": 30720},
             ),
             formatter=OpenAIMultiAgentFormatter(),
             toolkit=toolkit,
             memory=InMemoryMemory(),
             plan_notebook=plan_notebook,
+            max_iters=60
         )
 
         # ---- 6. 执行 ----

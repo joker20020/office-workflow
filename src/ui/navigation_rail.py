@@ -190,7 +190,7 @@ class NavigationRail(QWidget, ThemeAwareMixin):
         main_layout.setSpacing(4)
 
         # 标题区域 - 存储为实例变量以便主题刷新
-        self._title_label = QLabel("办公小工具")
+        self._title_label = QLabel("工艺智能生成系统")
         self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         main_layout.addWidget(self._title_label)
 

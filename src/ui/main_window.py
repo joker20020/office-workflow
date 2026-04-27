@@ -167,8 +167,8 @@ class MainWindow(QMainWindow):
         app_icon = self._load_app_icon()
         if app_icon and not app_icon.isNull():
             self.setWindowIcon(app_icon)
-        self.setWindowTitle("办公小工具整合平台")
-        self.setMinimumSize(1200, 800)
+        self.setWindowTitle("Agent工艺智能生成系统")
+        self.setMinimumSize(800, 600)
         self.resize(1280, 900)
 
         central_widget = QWidget()
