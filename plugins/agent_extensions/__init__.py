@@ -11,6 +11,8 @@
 
 import asyncio
 import base64
+import builtins
+import io
 import json
 import os
 from typing import Any, Dict, List
@@ -51,9 +53,11 @@ TOOL_GROUP_NAME = "agent_extensions"
 
 
 def _make_response(content: str, success: bool = True) -> Any:
+    if content is None:
+        content = "(无返回结果)"
     if AGENTSCOPE_AVAILABLE and ToolResponse is not None:
-        return ToolResponse(content=[{"type": "text", "text": content}])
-    return content
+        return ToolResponse(content=[{"type": "text", "text": str(content)}])
+    return str(content)
 
 
 def _run_async(coro):
@@ -77,6 +81,8 @@ def _run_async(coro):
         t.join(timeout=310)
         if result[1]:
             raise result[1]
+        if result[0] is None:
+            return "(执行超时或无返回结果)"
         return result[0]
     else:
         return asyncio.run(coro)
@@ -93,7 +99,7 @@ class _APIRequester:
         import aiohttp
 
         if workflow_path and os.path.exists(workflow_path):
-            with open(workflow_path, encoding="utf-8") as f:
+            with builtins.open(workflow_path, encoding="utf-8") as f:
                 self.workflow = json.load(f)
         else:
             self.workflow = None
@@ -102,7 +108,7 @@ class _APIRequester:
         import aiohttp
         url = f"{self.base_url}/embed"
         if embed_image_path:
-            with open(embed_image_path, "rb") as f:
+            with builtins.open(embed_image_path, "rb") as f:
                 image = f.read()
         data = aiohttp.FormData()
         data.add_field("text", text or "")
@@ -124,10 +130,10 @@ class _APIRequester:
         import aiohttp
         url = f"{self.base_url}/rerank"
         if query_image_path:
-            with open(query_image_path, "rb") as f:
+            with builtins.open(query_image_path, "rb") as f:
                 query_image = f.read()
         if doc_image_path:
-            with open(doc_image_path, "rb") as f:
+            with builtins.open(doc_image_path, "rb") as f:
                 doc_image = f.read()
         data = aiohttp.FormData()
         data.add_field("query_type", query_type)
@@ -162,7 +168,7 @@ class _APIRequester:
                     image_data = await response.read()
                     img_dir = os.path.join(self.data_dir, "img")
                     os.makedirs(img_dir, exist_ok=True)
-                    with open(os.path.join(img_dir, filename), "wb") as f:
+                    with builtins.open(os.path.join(img_dir, filename), "wb") as f:
                         f.write(image_data)
                     return image_data
                 else:
@@ -205,7 +211,7 @@ class _APIRequester:
                     image_data = await response.read()
                     img_dir = os.path.join(self.data_dir, "img")
                     os.makedirs(img_dir, exist_ok=True)
-                    with open(os.path.join(img_dir, output_name), "wb") as f:
+                    with builtins.open(os.path.join(img_dir, output_name), "wb") as f:
                         f.write(image_data)
                     return True
                 else:
@@ -366,10 +372,12 @@ class AgentExtensionTools:
         msg_res = await unity_agent(msg)
         await unity_mcp.close()
 
+        if msg_res is None:
+            return "Unity Agent 未返回结果"
         blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        return "".join(
-            b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks
-        ) if blocks else str(msg_res.content)
+        if blocks:
+            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
+        return str(msg_res.content) if msg_res.content else "Unity Agent 未返回内容"
 
     # ==================== 2. Blender 建模 ====================
 
@@ -428,10 +436,12 @@ class AgentExtensionTools:
         msg_res = await blender_agent(msg)
         await blender_mcp.close()
 
+        if msg_res is None:
+            return "Blender Agent 未返回结果"
         blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        return "".join(
-            b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks
-        ) if blocks else str(msg_res.content)
+        if blocks:
+            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
+        return str(msg_res.content) if msg_res.content else "Blender Agent 未返回内容"
 
     # ==================== 3. 工艺规划 ====================
 
@@ -530,7 +540,7 @@ class AgentExtensionTools:
                 if not os.path.exists(img_path):
                     image_data = await requester.get_image(entity['path'])
                 else:
-                    image_data = open(img_path, "rb").read()
+                    image_data = builtins.open(img_path, "rb").read()
                 query_content_list.append(
                     TextBlock(type="text", text=f"{i + 1}.{entity['text']}(来源为{entity['path']})\n")
                 )
@@ -657,10 +667,12 @@ class AgentExtensionTools:
 
         # ---- 6. 执行 ----
         msg_res = await process_agent(msg)
-        content = msg_res.get_content_blocks("text")
+        content = msg_res.get_content_blocks("text") if msg_res is not None and hasattr(msg_res, 'get_content_blocks') else None
         if not content:
-            content = process_agent.memory.content
+            content = process_agent.memory.content if hasattr(process_agent, 'memory') and process_agent.memory else []
 
+        if not content:
+            return "工艺规划 Agent 未返回结果"
         return "".join(
             each["text"] if isinstance(each, dict) else str(each) for each in content
         )
@@ -734,10 +746,12 @@ class AgentExtensionTools:
         msg = Msg(name="user", content=task, role="user")
         msg_res = await comfyui_agent(msg)
 
+        if msg_res is None:
+            return "ComfyUI Agent 未返回结果"
         blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        return "".join(
-            b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks
-        ) if blocks else str(msg_res.content)
+        if blocks:
+            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
+        return str(msg_res.content) if msg_res.content else "ComfyUI Agent 未返回内容"
 
     # ==================== 5. 提取JSON ====================
 
