@@ -246,7 +246,7 @@ class AgentExtensionTools:
     def __init__(self):
         self._requester: _APIRequester = None
         self._llm_name = os.environ.get("LLM_MODEL_NAME", "deepseek-reasoner")
-        self._vlm_name = os.environ.get("VLM_MODEL_NAME", "qwen3-vl-235b-a22b-thinking")
+        self._vlm_name = os.environ.get("VLM_MODEL_NAME", "qwen3-vl-plus")
 
     def _get_requester(self) -> _APIRequester:
         if self._requester is None:

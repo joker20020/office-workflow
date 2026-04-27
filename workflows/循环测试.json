@@ -1,0 +1,170 @@
+{
+  "id": "67e887c1-56f0-45a0-aae8-db9088698e31",
+  "name": "默认工作流",
+  "nodes": [
+    {
+      "id": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "node_type": "flow.condition",
+      "position": [
+        356.0,
+        -68.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "true_out": null,
+        "false_out": 101.0,
+        "result": false
+      }
+    },
+    {
+      "id": "41843526-87e4-497e-a5b7-7b00b0954a0c",
+      "node_type": "input.float",
+      "position": [
+        -579.0,
+        -352.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "output": 100.0
+      }
+    },
+    {
+      "id": "285e360f-6bb1-4df3-a699-de8beddac812",
+      "node_type": "input.float",
+      "position": [
+        -591.0,
+        -108.0
+      ],
+      "widget_values": {
+        "value": 1.0
+      },
+      "outputs": {
+        "output": 1.0
+      }
+    },
+    {
+      "id": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "node_type": "math.add",
+      "position": [
+        -180.0,
+        -148.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "result": 101.0
+      }
+    },
+    {
+      "id": "e79c885b-14e1-4dc9-8202-681404f58f7c",
+      "node_type": "input.float",
+      "position": [
+        -504.0,
+        233.0
+      ],
+      "widget_values": {
+        "value": 100.0
+      },
+      "outputs": {
+        "output": 100.0
+      }
+    },
+    {
+      "id": "1163d1a4-092f-4ee5-9c17-ecdd686fee40",
+      "node_type": "math.less_equal",
+      "position": [
+        -121.0,
+        30.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "result": false
+      }
+    },
+    {
+      "id": "b73ce32f-2927-482a-b880-b9d714b1b98b",
+      "node_type": "preview.number",
+      "position": [
+        789.0,
+        8.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "number_out": 101.0
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "a4e986c4-f2ff-45ed-81ab-e3675c94440f",
+      "source_node": "41843526-87e4-497e-a5b7-7b00b0954a0c",
+      "source_port": "output",
+      "target_node": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "target_port": "a",
+      "is_back_edge": false
+    },
+    {
+      "id": "d4b568a6-4ffc-46f2-9364-3092d101c356",
+      "source_node": "285e360f-6bb1-4df3-a699-de8beddac812",
+      "source_port": "output",
+      "target_node": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "target_port": "b",
+      "is_back_edge": false
+    },
+    {
+      "id": "5132a348-c042-464a-b498-3d2b4d888722",
+      "source_node": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "source_port": "result",
+      "target_node": "1163d1a4-092f-4ee5-9c17-ecdd686fee40",
+      "target_port": "a",
+      "is_back_edge": false
+    },
+    {
+      "id": "0bb2fe32-7e25-47ec-957b-bcc2b415ef5b",
+      "source_node": "e79c885b-14e1-4dc9-8202-681404f58f7c",
+      "source_port": "output",
+      "target_node": "1163d1a4-092f-4ee5-9c17-ecdd686fee40",
+      "target_port": "b",
+      "is_back_edge": false
+    },
+    {
+      "id": "2d859ef4-f9aa-41f7-a105-a0c491130e11",
+      "source_node": "1163d1a4-092f-4ee5-9c17-ecdd686fee40",
+      "source_port": "result",
+      "target_node": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "target_port": "condition",
+      "is_back_edge": false
+    },
+    {
+      "id": "8797cd92-554a-46e4-ae59-b9c6607d8016",
+      "source_node": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "source_port": "result",
+      "target_node": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "target_port": "true_value",
+      "is_back_edge": false
+    },
+    {
+      "id": "b08de4fe-4fb8-4e0a-b8ae-dd600c173594",
+      "source_node": "2450b03f-b9f2-41f9-abb5-95f2d1d3d90e",
+      "source_port": "result",
+      "target_node": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "target_port": "false_value",
+      "is_back_edge": false
+    },
+    {
+      "id": "4731ebc8-e945-4260-9e69-3c6ee26e8d33",
+      "source_node": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "source_port": "true_out",
+      "target_node": "41843526-87e4-497e-a5b7-7b00b0954a0c",
+      "target_port": "value",
+      "is_back_edge": true
+    },
+    {
+      "id": "f0445d8f-a10a-4bef-a419-4cab2e6c14c0",
+      "source_node": "9ebbe3e0-d1f4-4c99-afe2-0aede8066f8a",
+      "source_port": "false_out",
+      "target_node": "b73ce32f-2927-482a-b880-b9d714b1b98b",
+      "target_port": "number",
+      "is_back_edge": false
+    }
+  ]
+}

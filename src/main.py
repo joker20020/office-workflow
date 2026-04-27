@@ -14,7 +14,7 @@
     或
     python -m src.main
 """
-
+import os
 import sys
 from pathlib import Path
 from typing import Set, cast
@@ -28,6 +28,9 @@ from src.ui.main_window import MainWindow
 from src.ui.theme import Theme
 from src.utils.logger import get_logger
 from src.utils.error_handler import install_error_handler
+
+from dotenv import load_dotenv
+load_dotenv("./config/.env")
 
 _logger = get_logger(__name__)
 

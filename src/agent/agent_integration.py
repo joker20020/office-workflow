@@ -217,7 +217,6 @@ class AgentIntegration:
                 return False
 
             _logger.info("模型创建成功")
-
             system_prompt = self.config.get(
                 "system_prompt",
                 """
@@ -427,7 +426,7 @@ class AgentIntegration:
 
                     # 检测中断响应
                     self._last_response_interrupted = bool(
-                        (getattr(response_msg, 'metadata', None) or {}).get("_is_interrupted", False)
+                          (getattr(response_msg, 'metadata', None) or {}).get("_is_interrupted", False)
                     )
                     if self._last_response_interrupted:
                         _logger.info("检测到中断响应")

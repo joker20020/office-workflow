@@ -35,22 +35,22 @@ _logger = get_logger(__name__)
 
 DANGEROUS_IMPORTS: Set[str] = {
     # 系统操作
-    "os",
+    # "os",
     "subprocess",
     "ctypes",
     "signal",
     "multiprocessing",
-    "threading",  # 插件不应自行管理线程
+    # "threading",  # 插件不应自行管理线程
     "shutil",
     # 网络
-    "socket",
-    "http",
+    # "socket",
+    # "http",
     "urllib",
     "ftplib",
     "smtplib",
     "telnetlib",
     "xmlrpc",
-    "asyncio",
+    # "asyncio",
     # 序列化（代码注入风险）
     "pickle",
     "shelve",
@@ -104,6 +104,11 @@ ALLOWED_MODULES: Set[str] = {
     "PySide6",
     # 第三方（常见安全库）
     "agentscope",
+    # 工艺生成，正常条件下不应使用
+    "asyncio",
+    "os",
+    "threading",
+    "aiohttp"
 }
 
 # =============================================================================
