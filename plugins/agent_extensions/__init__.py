@@ -11,8 +11,6 @@
 
 import asyncio
 import base64
-import builtins
-import io
 import json
 import os
 from typing import Any, Dict, List
@@ -99,7 +97,7 @@ class _APIRequester:
         import aiohttp
 
         if workflow_path and os.path.exists(workflow_path):
-            with builtins.open(workflow_path, encoding="utf-8") as f:
+            with open(workflow_path, encoding="utf-8") as f:
                 self.workflow = json.load(f)
         else:
             self.workflow = None
@@ -108,7 +106,7 @@ class _APIRequester:
         import aiohttp
         url = f"{self.base_url}/embed"
         if embed_image_path:
-            with builtins.open(embed_image_path, "rb") as f:
+            with open(embed_image_path, "rb") as f:
                 image = f.read()
         data = aiohttp.FormData()
         data.add_field("text", text or "")
@@ -130,10 +128,10 @@ class _APIRequester:
         import aiohttp
         url = f"{self.base_url}/rerank"
         if query_image_path:
-            with builtins.open(query_image_path, "rb") as f:
+            with open(query_image_path, "rb") as f:
                 query_image = f.read()
         if doc_image_path:
-            with builtins.open(doc_image_path, "rb") as f:
+            with open(doc_image_path, "rb") as f:
                 doc_image = f.read()
         data = aiohttp.FormData()
         data.add_field("query_type", query_type)
@@ -168,7 +166,7 @@ class _APIRequester:
                     image_data = await response.read()
                     img_dir = os.path.join(self.data_dir, "img")
                     os.makedirs(img_dir, exist_ok=True)
-                    with builtins.open(os.path.join(img_dir, filename), "wb") as f:
+                    with open(os.path.join(img_dir, filename), "wb") as f:
                         f.write(image_data)
                     return image_data
                 else:
@@ -203,7 +201,7 @@ class _APIRequester:
             payload["loras"] = loras
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                    f"{self.base_url}/../text-to-image",
+                    f"{self.base_url}/text-to-image",
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=300),
             ) as response:
@@ -211,7 +209,7 @@ class _APIRequester:
                     image_data = await response.read()
                     img_dir = os.path.join(self.data_dir, "img")
                     os.makedirs(img_dir, exist_ok=True)
-                    with builtins.open(os.path.join(img_dir, output_name), "wb") as f:
+                    with open(os.path.join(img_dir, output_name), "wb") as f:
                         f.write(image_data)
                     return True
                 else:
@@ -477,7 +475,7 @@ class AgentExtensionTools:
         task: str,
         image_path: str,
         collection_name: str,
-        limit: int,
+        limit: int = 5,
     ) -> str:
         """
         严格对应 main.py process_agent_tool 的完整流程：
@@ -515,6 +513,10 @@ class AgentExtensionTools:
                 )
                 query_res[0][i]['score'] = res["score"]
             elif entity['type'] == "image":
+                # 获取图片数据
+                img_path = f"./data/img/{entity['path']}"
+                if not os.path.exists(img_path):
+                    image_data = await requester.get_image(entity['path'])
                 res = await requester.query_rerank(
                     query_type="text", query_text=task, query_image_path=None,
                     doc_type="image", doc_text=None,
@@ -540,7 +542,7 @@ class AgentExtensionTools:
                 if not os.path.exists(img_path):
                     image_data = await requester.get_image(entity['path'])
                 else:
-                    image_data = builtins.open(img_path, "rb").read()
+                    image_data = open(img_path, "rb").read()
                 query_content_list.append(
                     TextBlock(type="text", text=f"{i + 1}.{entity['text']}(来源为{entity['path']})\n")
                 )

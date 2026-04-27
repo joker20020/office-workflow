@@ -394,18 +394,19 @@ class AgentIntegration:
                         elif block_type == "image":
                             source = self._create_image_source(block)
                             content_blocks.append(ImageBlock(type="image", source=source))
-                            text_parts.append("[图片]")
+                            text_parts.append(f"[图片]:{source}")
 
                         elif block_type == "audio":
                             source = self._create_audio_source(block)
                             content_blocks.append(AudioBlock(type="audio", source=source))
-                            text_parts.append("[音频]")
+                            text_parts.append(f"[音频]:{source}")
 
                         elif block_type == "video":
                             source = self._create_video_source(block)
                             content_blocks.append(VideoBlock(type="video", source=source))
-                            text_parts.append("[视频]")
+                            text_parts.append(f"[视频]:{source}")
 
+                    content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
                     msg = Msg(name="User", content=content_blocks, role="user")
                     self._history.add_message(msg=msg)
                     _logger.info(f"多模态消息已添加到历史记录: {len(content_blocks)} 个内容块")
@@ -525,18 +526,19 @@ class AgentIntegration:
                         elif block_type == "image":
                             source = self._create_image_source(block)
                             content_blocks.append(ImageBlock(type="image", source=source))
-                            text_parts.append("[图片]")
+                            text_parts.append(f"[图片]:{source}")
 
                         elif block_type == "audio":
                             source = self._create_audio_source(block)
                             content_blocks.append(AudioBlock(type="audio", source=source))
-                            text_parts.append("[音频]")
+                            text_parts.append(f"[音频]:{source}")
 
                         elif block_type == "video":
                             source = self._create_video_source(block)
                             content_blocks.append(VideoBlock(type="video", source=source))
-                            text_parts.append("[视频]")
+                            text_parts.append(f"[视频]:{source}")
 
+                    content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
                     msg = Msg(name="User", content=content_blocks, role="user")
                     self._history.add_message(msg=msg)
 

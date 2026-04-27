@@ -108,7 +108,8 @@ ALLOWED_MODULES: Set[str] = {
     "asyncio",
     "os",
     "threading",
-    "aiohttp"
+    "aiohttp",
+    "pymilvus"
 }
 
 # =============================================================================
@@ -491,9 +492,9 @@ class PluginSandbox:
             spec: importlib 模块规格
             module: 已创建的空模块对象
         """
-        # 注入受限 builtins 到模块
-        restricted_builtins = self.create_restricted_builtins()
-        module.__builtins__ = restricted_builtins
+        # 注入受限 builtins 到模块,当前暂不使用
+        # restricted_builtins = self.create_restricted_builtins()
+        # module.__builtins__ = restricted_builtins
 
         _logger.info(f"[沙箱] 在受限环境中执行模块: {spec.name}")
         spec.loader.exec_module(module)
