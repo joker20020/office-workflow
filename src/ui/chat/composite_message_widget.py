@@ -120,14 +120,21 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
     def add_or_update_block(self, block_data: Dict[str, Any]) -> None:
         block_type = block_data.get("type", "text")
         block_id = block_data.get("id", "")
-        
-        if len(self._block_widgets) > 0 and self._block_widgets[-1].get_block_type() == block_type:
-            if block_type in ("tool_use", "tool_result") and block_id:
+
+        # tool_use / tool_result: 按 id 去重，id 不匹配时始终新增，不覆盖已有块
+        if block_type in ("tool_use", "tool_result"):
+            if block_id:
                 for widget in self._block_widgets:
                     if widget.get_block_type() == block_type and widget.get_block_id() == block_id:
                         widget.update_block_data(block_data)
                         return
+            # 没有 id 或 id 没有匹配 → 新增
+            self._add_block_widget(block_data)
+            self._blocks.append(block_data)
+            return
 
+        # text / thinking: 更新最后一个同类型 widget（流式追加）
+        if len(self._block_widgets) > 0 and self._block_widgets[-1].get_block_type() == block_type:
             for widget in reversed(self._block_widgets):
                 if widget.get_block_type() == block_type:
                     widget.update_block_data(block_data)
@@ -135,7 +142,7 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
                         content_key = "thinking" if block_type == "thinking" else "text"
                         if content_key in block_data:
                             widget.set_content(block_data[content_key])
-                return
+                    return
 
         self._add_block_widget(block_data)
         self._blocks.append(block_data)
