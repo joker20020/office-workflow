@@ -36,6 +36,7 @@ _global_lock = threading.Lock()
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "theme": "dark",
+    "language": "zh_CN",
     "recent_workflows": [],
     "agent": {
         "system_prompt": ""  # Empty string means use default

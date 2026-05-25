@@ -6,6 +6,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout
 
 from src.ui.chat.blocks.base import BaseBlockWidget
+from src.ui.i18n_manager import _
 from src.ui.theme import Theme
 
 import base64
@@ -39,7 +40,7 @@ class ImageBlockWidget(BaseBlockWidget):
 
         layout.addWidget(self._image_label)
 
-    def _show_placeholder(self, text: str = "🖼 图片") -> None:
+    def _show_placeholder(self, text: str = "") -> None:
         """Show a styled placeholder when image cannot be loaded."""
         self._placeholder = True
         self._image_label.setText(text)
@@ -54,16 +55,16 @@ class ImageBlockWidget(BaseBlockWidget):
         elif source_type == "base64":
             self._load_from_base64(source)
         else:
-            self._show_placeholder("🖼 图片 (无来源)")
+            self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.no_source')})")
 
     def _load_from_url(self, source: Dict[str, Any]) -> None:
         url = source.get("url", "")
         if not url:
-            self._show_placeholder("🖼 图片 (路径为空)")
+            self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.empty_path')})")
             return
 
         if url.startswith(("http://", "https://")):
-            self._show_placeholder("🖼 图片 (网络)")
+            self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.network')})")
         else:
             pixmap = QPixmap(url)
             if not pixmap.isNull():
@@ -75,13 +76,13 @@ class ImageBlockWidget(BaseBlockWidget):
                 )
                 self._image_label.setPixmap(scaled_pixmap)
             else:
-                self._show_placeholder("🖼 图片 (无法加载)")
+                self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.cannot_load')})")
 
     def _load_from_base64(self, source: Dict[str, Any]) -> None:
         data = source.get("data", "")
 
         if not data:
-            self._show_placeholder("🖼 图片 (无数据)")
+            self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.no_data')})")
             return
 
         try:
@@ -97,9 +98,9 @@ class ImageBlockWidget(BaseBlockWidget):
                 )
                 self._image_label.setPixmap(scaled_pixmap)
             else:
-                self._show_placeholder("🖼 图片 (数据无效)")
+                self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.invalid_data')})")
         except Exception:
-            self._show_placeholder("🖼 图片 (加载失败)")
+            self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.load_failed')})")
 
     def _apply_styles(self) -> None:
         if self._image_label:
@@ -120,7 +121,7 @@ class ImageBlockWidget(BaseBlockWidget):
             """)
 
     def get_content(self) -> str:
-        return "[图片]"
+        return f"[{_('chat.image')}]"
 
     def set_content(self, content: str) -> None:
         pass

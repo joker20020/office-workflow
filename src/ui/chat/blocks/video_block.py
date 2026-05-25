@@ -7,6 +7,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 from src.ui.chat.blocks.base import BaseBlockWidget
+from src.ui.i18n_manager import _
 from src.ui.theme import Theme
 
 
@@ -37,7 +38,7 @@ class VideoBlockWidget(BaseBlockWidget):
 
         if not url:
             # Show placeholder instead of video widget
-            self._placeholder_label = QLabel("🎬 视频 (无来源)")
+            self._placeholder_label = QLabel(f"🎬 {_('chat.video')} ({_('chat.no_source')})")
             self._placeholder_label.setMinimumSize(200, 150)
             self._placeholder_label.setMaximumSize(400, 300)
             self._placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -49,7 +50,7 @@ class VideoBlockWidget(BaseBlockWidget):
             self._video_widget.setMaximumSize(400, 300)
             layout.addWidget(self._video_widget)
 
-        self._play_btn = QPushButton("▶ 播放")
+        self._play_btn = QPushButton(f"▶ {_('chat.play')}")
         self._play_btn.clicked.connect(self._toggle_play)
         if not self._has_source:
             self._play_btn.setEnabled(False)
@@ -81,9 +82,9 @@ class VideoBlockWidget(BaseBlockWidget):
 
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self._play_btn.setText("⏸ 暂停")
+            self._play_btn.setText(f"⏸ {_('chat.pause')}")
         else:
-            self._play_btn.setText("▶ 播放")
+            self._play_btn.setText(f"▶ {_('chat.play')}")
 
     def _apply_styles(self) -> None:
         bg = Theme.hex("background_secondary")
@@ -114,7 +115,7 @@ class VideoBlockWidget(BaseBlockWidget):
             self._play_btn.setStyleSheet(Theme.get_media_play_button_stylesheet())
 
     def get_content(self) -> str:
-        return "[视频]"
+        return f"[{_('chat.video')}]"
 
     def set_content(self, content: str) -> None:
         pass

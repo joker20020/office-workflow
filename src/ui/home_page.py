@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.config_manager import get_config_manager
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
@@ -38,7 +40,7 @@ from src.utils.logger import get_logger
 _logger = get_logger(__name__)
 
 
-class QuickActionCard(QFrame, ThemeAwareMixin):
+class QuickActionCard(QFrame, ThemeAwareMixin, LanguageAwareMixin):
     """快速操作卡片组件 - 可点击的功能入口卡片"""
 
     clicked = Signal(str)
@@ -53,10 +55,11 @@ class QuickActionCard(QFrame, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._action_id = action_id
-        self._title = title
+        self._title_key = f"home.actions.{action_id}.title"
+        self._desc_key = f"home.actions.{action_id}.desc"
         self._icon = icon
-        self._description = description
 
         self.setObjectName("quickActionCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -76,13 +79,13 @@ class QuickActionCard(QFrame, ThemeAwareMixin):
         layout.addWidget(self._icon_label)
 
         # 标题
-        self._title_label = QLabel(self._title)
+        self._title_label = QLabel(_(self._title_key))
         self._title_label.setObjectName("quickActionTitle")
         self._title_label.setStyleSheet(Theme.get_quick_action_title_stylesheet())
         layout.addWidget(self._title_label)
 
         # 描述
-        self._desc_label = QLabel(self._description)
+        self._desc_label = QLabel(_(self._desc_key))
         self._desc_label.setObjectName("quickActionDesc")
         self._desc_label.setStyleSheet(Theme.get_quick_action_desc_stylesheet())
         self._desc_label.setWordWrap(True)
@@ -97,6 +100,13 @@ class QuickActionCard(QFrame, ThemeAwareMixin):
             self.clicked.emit(self._action_id)
         super().mousePressEvent(event)
 
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(_(self._title_key))
+        if hasattr(self, "_desc_label"):
+            self._desc_label.setText(_(self._desc_key))
+
     def refresh_theme(self) -> None:
         self._apply_style()
         self._icon_label.setStyleSheet(Theme.get_quick_action_icon_stylesheet())
@@ -104,7 +114,7 @@ class QuickActionCard(QFrame, ThemeAwareMixin):
         self._desc_label.setStyleSheet(Theme.get_quick_action_desc_stylesheet())
 
 
-class RecentWorkflowItem(QFrame, ThemeAwareMixin):
+class RecentWorkflowItem(QFrame, ThemeAwareMixin, LanguageAwareMixin):
     """最近工作流项组件"""
 
     clicked = Signal(str, str)  # workflow_id, file_path
@@ -120,6 +130,7 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._workflow_id = workflow_id
         self._title = title
         self._modified_time = modified_time
@@ -148,10 +159,7 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
         self._title_label.setStyleSheet(Theme.get_recent_item_title_stylesheet())
         info_layout.addWidget(self._title_label)
 
-        meta_text = f"{self._modified_time}"
-        if self._node_count > 0:
-            meta_text += f" · {self._node_count} 个节点"
-        self._meta_label = QLabel(meta_text)
+        self._meta_label = QLabel(self._build_meta_text())
         self._meta_label.setObjectName("recentItemMeta")
         self._meta_label.setStyleSheet(Theme.get_recent_item_meta_stylesheet())
         info_layout.addWidget(self._meta_label)
@@ -170,6 +178,17 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
             self.clicked.emit(self._workflow_id, self._file_path)
         super().mousePressEvent(event)
 
+    def _build_meta_text(self) -> str:
+        meta_text = f"{self._modified_time}"
+        if self._node_count > 0:
+            meta_text += f" · {self._node_count}{_('home.nodes_count')}"
+        return meta_text
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_meta_label"):
+            self._meta_label.setText(self._build_meta_text())
+
     def refresh_theme(self) -> None:
         """刷新主题样式"""
         self._apply_style()
@@ -179,7 +198,7 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin):
         self._arrow_label.setStyleSheet(Theme.get_arrow_indicator_stylesheet())
 
 
-class HomePage(QWidget, ThemeAwareMixin):
+class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """
     首页组件
 
@@ -204,6 +223,7 @@ class HomePage(QWidget, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self.setObjectName("HomePage")
         self._recent_items: List[Any] = []
         self._quick_action_cards: List[QuickActionCard] = []
@@ -261,12 +281,12 @@ class HomePage(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(0, 32, 0, 32)
         layout.setSpacing(8)
 
-        self._title_label = QLabel("欢迎使用Agent工艺智能生成系统")
+        self._title_label = QLabel(_("app.welcome_title"))
         self._title_label.setObjectName("homeTitle")
         self._title_label.setStyleSheet(Theme.get_home_title_stylesheet())
         layout.addWidget(self._title_label)
 
-        self._subtitle_label = QLabel("基于Agent的工艺智能生成系统，使用节点编辑器扩展使用功能")
+        self._subtitle_label = QLabel(_("app.welcome_subtitle"))
         self._subtitle_label.setObjectName("homeSubtitle")
         self._subtitle_label.setStyleSheet(Theme.get_home_subtitle_stylesheet())
         layout.addWidget(self._subtitle_label)
@@ -281,7 +301,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         layout.setSpacing(16)
 
         # 区域标题
-        section_title = QLabel("快速开始")
+        section_title = QLabel(_("home.quick_start"))
         section_title.setObjectName("sectionTitle")
         section_title.setStyleSheet(Theme.get_home_section_title_stylesheet())
         layout.addWidget(section_title)
@@ -318,7 +338,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         self._recent_layout.setSpacing(12)
 
         # 区域标题
-        self._recent_title = QLabel("最近工作流")
+        self._recent_title = QLabel(_("home.recent_workflows"))
         self._recent_title.setObjectName("sectionTitle")
         self._recent_title.setStyleSheet(Theme.get_home_section_title_stylesheet())
         self._recent_layout.addWidget(self._recent_title)
@@ -341,7 +361,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(24, 12, 24, 12)
 
-        self._status_label = QLabel("💡 点击左侧导航栏或上方快速操作卡片开始使用")
+        self._status_label = QLabel(f"💡 {_('home.hint')}")
         self._status_label.setObjectName("footerStatus")
         self._status_label.setStyleSheet(Theme.get_footer_status_stylesheet())
         layout.addWidget(self._status_label)
@@ -360,7 +380,7 @@ class HomePage(QWidget, ThemeAwareMixin):
         self._recent_items.clear()
 
         if not recent_workflows:
-            empty_label = QLabel("暂无最近工作流")
+            empty_label = QLabel(_("home.no_recent_workflows"))
             empty_label.setObjectName("emptyState")
             empty_label.setStyleSheet(Theme.get_empty_state_stylesheet())
             empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -371,8 +391,8 @@ class HomePage(QWidget, ThemeAwareMixin):
         for workflow in recent_workflows[:5]:
             item = RecentWorkflowItem(
                 workflow_id=workflow.get("id", ""),
-                title=workflow.get("title", "未命名工作流"),
-                modified_time=workflow.get("modified", "未知时间"),
+                title=workflow.get("title", _("home.unnamed_workflow")),
+                modified_time=workflow.get("modified", _("home.unknown_time")),
                 file_path=workflow.get("file_path", ""),
                 node_count=workflow.get("node_count", 0),
             )
@@ -445,6 +465,20 @@ class HomePage(QWidget, ThemeAwareMixin):
             self._recent_section.setStyleSheet(Theme.get_transparent_background_stylesheet())
         if hasattr(self, "_recent_list_widget"):
             self._recent_list_widget.setStyleSheet(Theme.get_transparent_background_stylesheet())
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        self._title_label.setText(_("app.welcome_title"))
+        self._subtitle_label.setText(_("app.welcome_subtitle"))
+        self._recent_title.setText(_("home.recent_workflows"))
+        self._status_label.setText(f"💡 {_('home.hint')}")
+
+        # 刷新快速操作卡片
+        for card in self._quick_action_cards:
+            card.refresh_language()
+
+        # 重新加载最近工作流以更新文本
+        self._load_recent_workflows()
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""

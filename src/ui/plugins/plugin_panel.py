@@ -29,11 +29,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
+
+def _plugin_status(enabled: bool) -> str:
+    return _("plugin.enabled") if enabled else _("plugin.disabled")
 
 
 class PluginInstallWorker(QThread):
@@ -89,7 +94,7 @@ class PluginInstallDialog(QDialog, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
-        self.setWindowTitle("安装插件")
+        self.setWindowTitle(_("plugin.install"))
         self.setFixedSize(450, 170)
         self._setup_ui()
         self._apply_styles()
@@ -98,7 +103,7 @@ class PluginInstallDialog(QDialog, ThemeAwareMixin):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        self._url_label = QLabel("Git 仓库地址:")
+        self._url_label = QLabel(_("plugin.git_url"))
         layout.addWidget(self._url_label)
 
         self._url_input = QLineEdit()
@@ -107,7 +112,7 @@ class PluginInstallDialog(QDialog, ThemeAwareMixin):
         layout.addWidget(self._url_input)
 
         branch_layout = QHBoxLayout()
-        self._branch_label = QLabel("分支:")
+        self._branch_label = QLabel(_("plugin.branch"))
         self._branch_input = QLineEdit("main")
         self._branch_input.setFixedWidth(100)
         self._branch_input.setMinimumHeight(28)
@@ -119,11 +124,11 @@ class PluginInstallDialog(QDialog, ThemeAwareMixin):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn = QPushButton(_("plugin.cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self._cancel_btn)
 
-        self._install_btn = QPushButton("安装")
+        self._install_btn = QPushButton(_("plugin.install_btn"))
         self._install_btn.clicked.connect(self.accept)
         btn_layout.addWidget(self._install_btn)
 
@@ -152,7 +157,7 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
-        self.setWindowTitle("从本地安装插件")
+        self.setWindowTitle(_("plugin.install_local_title"))
         self.setFixedSize(500, 180)
         self._setup_ui()
         self._apply_styles()
@@ -161,26 +166,24 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        path_label = QLabel("本地插件目录:")
+        path_label = QLabel(_("plugin.local_dir"))
         layout.addWidget(path_label)
 
         path_layout = QHBoxLayout()
         self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("选择包含 __init__.py 的插件目录")
+        self._path_input.setPlaceholderText(_("plugin.local_dir_hint"))
         path_layout.addWidget(self._path_input)
 
-        self._browse_btn = QPushButton("浏览...")
+        self._browse_btn = QPushButton(_("plugin.browse"))
         self._browse_btn.setFixedWidth(70)
         self._browse_btn.clicked.connect(self._on_browse)
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
 
         option_layout = QHBoxLayout()
-        self._copy_radio = QCheckBox("复制到插件目录")
+        self._copy_radio = QCheckBox(_("plugin.copy_to_plugins"))
         self._copy_radio.setChecked(True)
-        self._copy_radio.setToolTip(
-            "勾选：复制文件到 plugins 目录\n不勾选：创建符号链接（开发模式推荐）"
-        )
+        self._copy_radio.setToolTip(_("plugin.copy_tooltip"))
         option_layout.addWidget(self._copy_radio)
         option_layout.addStretch()
         layout.addLayout(option_layout)
@@ -188,11 +191,11 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn = QPushButton(_("plugin.cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self._cancel_btn)
 
-        self._install_btn = QPushButton("安装")
+        self._install_btn = QPushButton(_("plugin.install_btn"))
         self._install_btn.clicked.connect(self._on_install)
         btn_layout.addWidget(self._install_btn)
 
@@ -208,7 +211,7 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
 
     def _on_browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
-            self, "选择插件目录", "", QFileDialog.Option.ShowDirsOnly
+            self, _("plugin.choose_plugin_dir"), "", QFileDialog.Option.ShowDirsOnly
         )
         if folder:
             self._path_input.setText(folder)
@@ -216,13 +219,13 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
     def _on_install(self) -> None:
         path = self._path_input.text().strip()
         if not path:
-            QMessageBox.warning(self, "错误", "请选择本地插件目录")
+            QMessageBox.warning(self, _("plugin.error"), _("plugin.select_local_dir"))
             return
         if not Path(path).exists():
-            QMessageBox.warning(self, "错误", f"目录不存在: {path}")
+            QMessageBox.warning(self, _("plugin.error"), f"{_('plugin.dir_not_exist')}: {path}")
             return
         if not (Path(path) / "__init__.py").exists():
-            QMessageBox.warning(self, "错误", "所选目录不包含 __init__.py 文件")
+            QMessageBox.warning(self, _("plugin.error"), _("plugin.no_init_py"))
             return
         self.accept()
 
@@ -233,7 +236,7 @@ class PluginLocalInstallDialog(QDialog, ThemeAwareMixin):
         return self._copy_radio.isChecked()
 
 
-class PluginItemWidget(QWidget, ThemeAwareMixin):
+class PluginItemWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """插件列表项控件"""
 
     enabled_changed = Signal(str, bool)
@@ -254,6 +257,7 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
 
         self._setup_ui()
         self._setup_theme_awareness()
+        self._setup_language_awareness()
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -280,7 +284,7 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
         name_layout.addWidget(self._version_label)
 
-        self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
+        self._status_label = QLabel(_plugin_status(self._is_enabled))
         status_style = (
             Theme.get_item_status_enabled_stylesheet()
             if self._is_enabled
@@ -292,20 +296,20 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
         name_layout.addStretch()
         info_layout.addLayout(name_layout)
 
-        description = self._plugin_info.get("description", "无描述")
+        description = self._plugin_info.get("description", _("plugin.no_description"))
         self._desc_label = QLabel(description[:60] + ("..." if len(description) > 60 else ""))
         self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
         info_layout.addWidget(self._desc_label)
 
         layout.addLayout(info_layout, 1)
 
-        self._perms_btn = QPushButton("权限")
+        self._perms_btn = QPushButton(_("plugin.permissions"))
         self._perms_btn.setFixedWidth(50)
         self._perms_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
         self._perms_btn.clicked.connect(self._on_perms_button_clicked)
         layout.addWidget(self._perms_btn)
 
-        self._uninstall_btn = QPushButton("卸载")
+        self._uninstall_btn = QPushButton(_("plugin.uninstall"))
         self._uninstall_btn.setFixedWidth(50)
         self._uninstall_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
         self._uninstall_btn.clicked.connect(self._on_uninstall_clicked)
@@ -326,8 +330,7 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
     def set_enabled(self, enabled: bool) -> None:
         self._is_enabled = enabled
         self._enabled_checkbox.setChecked(enabled)
-        status_text = "已启用" if enabled else "已禁用"
-        self._status_label.setText(status_text)
+        self._status_label.setText(_plugin_status(enabled))
         status_style = (
             Theme.get_item_status_enabled_stylesheet()
             if enabled
@@ -338,6 +341,18 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
     @property
     def plugin_name(self) -> str:
         return self._plugin_name
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        description = self._plugin_info.get("description", _("plugin.no_description"))
+        if hasattr(self, "_desc_label"):
+            self._desc_label.setText(description[:60] + ("..." if len(description) > 60 else ""))
+        if hasattr(self, "_status_label"):
+            self._status_label.setText(_plugin_status(self._is_enabled))
+        if hasattr(self, "_perms_btn"):
+            self._perms_btn.setText(_("plugin.permissions"))
+        if hasattr(self, "_uninstall_btn"):
+            self._uninstall_btn.setText(_("plugin.uninstall"))
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
@@ -361,7 +376,7 @@ class PluginItemWidget(QWidget, ThemeAwareMixin):
             self._uninstall_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
 
 
-class PluginPanel(QWidget, ThemeAwareMixin):
+class PluginPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """插件管理面板"""
 
     plugin_enabled_changed = Signal(str, bool)
@@ -377,6 +392,7 @@ class PluginPanel(QWidget, ThemeAwareMixin):
 
         self._setup_ui()
         self._setup_theme_awareness()
+        self._setup_language_awareness()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -424,23 +440,23 @@ class PluginPanel(QWidget, ThemeAwareMixin):
         layout = QHBoxLayout(self._header)
         layout.setContentsMargins(16, 0, 16, 0)
 
-        self._title_label = QLabel("插件管理")
+        self._title_label = QLabel(_("nav.plugins"))
         self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(self._title_label)
 
         layout.addStretch()
 
-        self._install_btn = QPushButton("安装新插件")
+        self._install_btn = QPushButton(_("plugin.install_new"))
         self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
         self._install_btn.clicked.connect(self._on_install_clicked)
         layout.addWidget(self._install_btn)
 
-        self._install_local_btn = QPushButton("本地安装")
+        self._install_local_btn = QPushButton(_("plugin.install_local"))
         self._install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
         self._install_local_btn.clicked.connect(self._on_install_local_clicked)
         layout.addWidget(self._install_local_btn)
 
-        self._refresh_btn = QPushButton("刷新")
+        self._refresh_btn = QPushButton(_("plugin.refresh"))
         self._refresh_btn.setFixedWidth(60)
         self._refresh_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._refresh_btn.clicked.connect(self._on_refresh)
@@ -498,8 +514,8 @@ class PluginPanel(QWidget, ThemeAwareMixin):
     def _on_uninstall_requested(self, plugin_name: str) -> None:
         reply = QMessageBox.question(
             self,
-            "确认卸载",
-            f"确定要卸载插件 {plugin_name} 吗？\n这将同时删除本地文件。",
+            _("plugin.confirm_uninstall"),
+            f"{_('plugin.uninstall_message')} {plugin_name} ?\n{_('plugin.uninstall_warning')}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -515,17 +531,17 @@ class PluginPanel(QWidget, ThemeAwareMixin):
             branch = dialog.get_branch()
 
             if not url:
-                QMessageBox.warning(self, "错误", "请输入 Git 仓库地址")
+                QMessageBox.warning(self, _("plugin.error"), _("plugin.enter_git_url"))
                 return
 
             self._start_install(url, branch)
 
     def _start_install(self, url: str, branch: str) -> None:
         if not self._plugin_manager:
-            QMessageBox.warning(self, "错误", "插件管理器未初始化")
+            QMessageBox.warning(self, _("plugin.error"), _("plugin.manager_not_initialized"))
             return
 
-        self._show_progress("正在安装插件...")
+        self._show_progress(_("plugin.installing"))
 
         self._worker = PluginInstallWorker(
             self._plugin_manager,
@@ -544,17 +560,17 @@ class PluginPanel(QWidget, ThemeAwareMixin):
             copy_mode = dialog.get_copy_mode()
 
             if not local_path:
-                QMessageBox.warning(self, "错误", "请选择本地插件目录")
+                QMessageBox.warning(self, _("plugin.error"), _("plugin.select_local_dir"))
                 return
 
             self._start_install_local(local_path, copy_mode)
 
     def _start_install_local(self, local_path: str, copy_mode: bool) -> None:
         if not self._plugin_manager:
-            QMessageBox.warning(self, "错误", "插件管理器未初始化")
+            QMessageBox.warning(self, _("plugin.error"), _("plugin.manager_not_initialized"))
             return
 
-        self._show_progress("正在从本地安装插件...")
+        self._show_progress(_("plugin.installing_local"))
 
         self._worker = PluginInstallWorker(
             self._plugin_manager,
@@ -584,14 +600,28 @@ class PluginPanel(QWidget, ThemeAwareMixin):
         self._hide_progress()
 
         if success:
-            QMessageBox.information(self, "安装成功", message)
+            QMessageBox.information(self, _("plugin.install_success"), message)
             self.refresh_requested.emit()
         else:
-            QMessageBox.warning(self, "安装失败", message)
+            QMessageBox.warning(self, _("plugin.install_failed"), message)
 
     def set_plugin_enabled(self, plugin_name: str, enabled: bool) -> None:
         if plugin_name in self._plugin_widgets:
             self._plugin_widgets[plugin_name].set_enabled(enabled)
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(_("nav.plugins"))
+        if hasattr(self, "_install_btn"):
+            self._install_btn.setText(_("plugin.install_new"))
+        if hasattr(self, "_install_local_btn"):
+            self._install_local_btn.setText(_("plugin.install_local"))
+        if hasattr(self, "_refresh_btn"):
+            self._refresh_btn.setText(_("plugin.refresh"))
+        for widget in self._plugin_widgets.values():
+            if hasattr(widget, "refresh_language"):
+                widget.refresh_language()
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""

@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.i18n_manager import I18nManager, _
+from src.ui.language_aware import LanguageAwareMixin
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
@@ -38,7 +40,7 @@ from src.ui.theme_aware import ThemeAwareMixin
 _logger = get_logger(__name__)
 
 
-class NavItem(QPushButton, ThemeAwareMixin):
+class NavItem(QPushButton, ThemeAwareMixin, LanguageAwareMixin):
     """
     导航项组件
 
@@ -77,6 +79,7 @@ class NavItem(QPushButton, ThemeAwareMixin):
         self._selected = False
 
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -105,6 +108,11 @@ class NavItem(QPushButton, ThemeAwareMixin):
 
         # 应用样式
         self._apply_style()
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_text_label"):
+            self._text_label.setText(_(f"nav.{self.item_id}"))
 
     def refresh_theme(self) -> None:
         """
@@ -139,7 +147,7 @@ class NavItem(QPushButton, ThemeAwareMixin):
             self._apply_style()
 
 
-class NavigationRail(QWidget, ThemeAwareMixin):
+class NavigationRail(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """
     导航栏组件
 
@@ -175,6 +183,7 @@ class NavigationRail(QWidget, ThemeAwareMixin):
         self._current_id: Optional[str] = None
 
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._setup_ui()
 
         _logger.debug("NavigationRail 初始化完成")
@@ -306,6 +315,13 @@ class NavigationRail(QWidget, ThemeAwareMixin):
     def sizeHint(self) -> QSize:
         """建议尺寸"""
         return QSize(200, 600)
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(_("app.title"))
+        for item in self._items.values():
+            item.refresh_language()
 
     def refresh_theme(self) -> None:
         """刷新主题样式 - 更新所有子组件的样式和字体颜色"""

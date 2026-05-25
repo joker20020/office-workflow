@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPainterPath
 from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsItem, QMenu
 from src.engine.node_graph import Connection
+from src.ui.i18n_manager import _
 from src.utils.logger import get_logger
 from src.ui.theme import Theme
 
@@ -149,7 +150,7 @@ class ConnectionGraphicsItem(QGraphicsPathItem):
 
     def contextMenuEvent(self, event) -> None:
         menu = QMenu()
-        delete_action = menu.addAction("删除连接")
+        delete_action = menu.addAction(_("node_editor.delete_connection"))
         delete_action.triggered.connect(self._delete_connection)
         menu.exec(event.screenPos())
 

@@ -32,12 +32,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
-from src.ui.theme_aware import ThemeAwareMixin
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
+
+def _package_status(enabled: bool) -> str:
+    return _("package.enabled") if enabled else _("package.disabled")
 
 
 class InstallWorker(QThread):
@@ -104,7 +108,7 @@ class InstallDialog(QDialog, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
-        self.setWindowTitle("安装节点包")
+        self.setWindowTitle(_("package.install"))
         self.setFixedSize(450, 170)
         self._setup_ui()
         self._apply_styles()
@@ -113,7 +117,7 @@ class InstallDialog(QDialog, ThemeAwareMixin):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        self._url_label = QLabel("Git 仓库地址:")
+        self._url_label = QLabel(_("package.git_url"))
         layout.addWidget(self._url_label)
 
         self._url_input = QLineEdit()
@@ -122,7 +126,7 @@ class InstallDialog(QDialog, ThemeAwareMixin):
         layout.addWidget(self._url_input)
 
         branch_layout = QHBoxLayout()
-        self._branch_label = QLabel("分支:")
+        self._branch_label = QLabel(_("package.branch"))
         self._branch_input = QLineEdit("main")
         self._branch_input.setFixedWidth(100)
         self._branch_input.setMinimumHeight(28)
@@ -134,11 +138,11 @@ class InstallDialog(QDialog, ThemeAwareMixin):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn = QPushButton(_("package.cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self._cancel_btn)
 
-        self._install_btn = QPushButton("安装")
+        self._install_btn = QPushButton(_("package.install_btn"))
         self._install_btn.clicked.connect(self.accept)
         btn_layout.addWidget(self._install_btn)
 
@@ -167,7 +171,7 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
-        self.setWindowTitle("从本地安装节点包")
+        self.setWindowTitle(_("package.install_local_title"))
         self.setFixedSize(500, 200)
         self._setup_ui()
         self._apply_styles()
@@ -176,26 +180,24 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        path_label = QLabel("本地包目录:")
+        path_label = QLabel(_("package.local_dir"))
         layout.addWidget(path_label)
 
         path_layout = QHBoxLayout()
         self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("选择包含 package.json 的目录")
+        self._path_input.setPlaceholderText(_("package.local_dir_hint"))
         path_layout.addWidget(self._path_input)
 
-        self._browse_btn = QPushButton("浏览...")
+        self._browse_btn = QPushButton(_("package.browse"))
         self._browse_btn.setFixedWidth(70)
         self._browse_btn.clicked.connect(self._on_browse)
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
 
         option_layout = QHBoxLayout()
-        self._copy_radio = QCheckBox("复制到包目录")
+        self._copy_radio = QCheckBox(_("package.copy_to_packages"))
         self._copy_radio.setChecked(True)
-        self._copy_radio.setToolTip(
-            "勾选：复制文件到 node_packages 目录\n不勾选：创建符号链接（开发模式推荐）"
-        )
+        self._copy_radio.setToolTip(_("package.copy_tooltip"))
         option_layout.addWidget(self._copy_radio)
         option_layout.addStretch()
         layout.addLayout(option_layout)
@@ -203,11 +205,11 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn = QPushButton(_("package.cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self._cancel_btn)
 
-        self._install_btn = QPushButton("安装")
+        self._install_btn = QPushButton(_("package.install_btn"))
         self._install_btn.clicked.connect(self._on_install)
         btn_layout.addWidget(self._install_btn)
 
@@ -222,7 +224,7 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
 
     def _on_browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
-            self, "选择节点包目录", "", QFileDialog.Option.ShowDirsOnly
+            self, _("package.choose_package_dir"), "", QFileDialog.Option.ShowDirsOnly
         )
         if folder:
             self._path_input.setText(folder)
@@ -230,15 +232,15 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
     def _on_install(self) -> None:
         path = self._path_input.text().strip()
         if not path:
-            QMessageBox.warning(self, "错误", "请选择本地包目录")
+            QMessageBox.warning(self, _("package.error"), _("package.select_local_dir"))
             return
         from pathlib import Path
 
         if not Path(path).exists():
-            QMessageBox.warning(self, "错误", f"目录不存在: {path}")
+            QMessageBox.warning(self, _("package.error"), f"{_('package.dir_not_exist')}: {path}")
             return
         if not (Path(path) / "package.json").exists():
-            QMessageBox.warning(self, "错误", "所选目录不包含 package.json 文件")
+            QMessageBox.warning(self, _("package.error"), _("package.no_package_json"))
             return
         self.accept()
 
@@ -249,7 +251,7 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
         return self._copy_radio.isChecked()
 
 
-class PackageItemWidget(QWidget, ThemeAwareMixin):
+class PackageItemWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """包列表项控件"""
 
     enabled_changed = Signal(str, bool)
@@ -263,6 +265,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._package_info = package_info
         self._package_id = package_info.get("id", "")
         self._is_enabled = package_info.get("enabled", True)
@@ -294,7 +297,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         self._version_label.setStyleSheet(Theme.get_item_version_label_stylesheet())
         name_layout.addWidget(self._version_label)
 
-        self._status_label = QLabel("已启用" if self._is_enabled else "已禁用")
+        self._status_label = QLabel(_package_status(self._is_enabled))
         self._status_label.setStyleSheet(
             Theme.get_item_status_enabled_stylesheet()
             if self._is_enabled
@@ -305,7 +308,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         nodes_count = len(self._package_info.get("nodes", []))
         self._nodes_label = None
         if nodes_count > 0:
-            self._nodes_label = QLabel(f"{nodes_count} 个节点")
+            self._nodes_label = QLabel(f"{nodes_count}{_('package.nodes')}")
             self._nodes_label.setStyleSheet(
                 f"color: {Theme.hex('accent_primary')}; font-size: 11px;"
             )
@@ -314,7 +317,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         name_layout.addStretch()
         info_layout.addLayout(name_layout)
 
-        desc = self._package_info.get("description", "无描述")
+        desc = self._package_info.get("description", _("package.no_description"))
         if len(desc) > 80:
             desc = desc[:77] + "..."
         self._desc_label = QLabel(desc)
@@ -323,13 +326,13 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
 
         layout.addLayout(info_layout, 1)
 
-        self._update_btn = QPushButton("更新")
+        self._update_btn = QPushButton(_("package.update"))
         self._update_btn.setFixedWidth(50)
         self._update_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
         self._update_btn.clicked.connect(self._on_update_clicked)
         layout.addWidget(self._update_btn)
 
-        self._delete_btn = QPushButton("删除")
+        self._delete_btn = QPushButton(_("package.delete"))
         self._delete_btn.setFixedWidth(50)
         self._delete_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
         self._delete_btn.clicked.connect(self._on_delete_clicked)
@@ -350,8 +353,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
     def set_enabled(self, enabled: bool) -> None:
         self._is_enabled = enabled
         self._enabled_checkbox.setChecked(enabled)
-        status_text = "已启用" if enabled else "已禁用"
-        self._status_label.setText(status_text)
+        self._status_label.setText(_package_status(enabled))
         self._status_label.setStyleSheet(
             Theme.get_item_status_enabled_stylesheet()
             if enabled
@@ -360,7 +362,22 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
 
     def set_updating(self, updating: bool) -> None:
         self._update_btn.setEnabled(not updating)
-        self._update_btn.setText("更新中..." if updating else "更新")
+        self._update_btn.setText(_("package.updating") if updating else _("package.update"))
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        desc = self._package_info.get("description", _("package.no_description"))
+        if hasattr(self, "_desc_label"):
+            self._desc_label.setText(desc[:80] if len(desc) <= 80 else desc[:77] + "...")
+        if hasattr(self, "_status_label"):
+            self._status_label.setText(_package_status(self._is_enabled))
+        if hasattr(self, "_update_btn"):
+            self._update_btn.setText(_("package.update"))
+        if hasattr(self, "_delete_btn"):
+            self._delete_btn.setText(_("package.delete"))
+        nodes_count = len(self._package_info.get("nodes", []))
+        if hasattr(self, "_nodes_label") and self._nodes_label:
+            self._nodes_label.setText(f"{nodes_count}{_('package.nodes')}")
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""
@@ -391,7 +408,7 @@ class PackageItemWidget(QWidget, ThemeAwareMixin):
         return self._package_id
 
 
-class PackagePanel(QWidget, ThemeAwareMixin):
+class PackagePanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """节点包管理面板"""
 
     package_enabled_changed = Signal(str, bool)
@@ -406,6 +423,7 @@ class PackagePanel(QWidget, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._package_manager = package_manager
         self._package_widgets: Dict[str, PackageItemWidget] = {}
         self._worker: Optional[InstallWorker] = None
@@ -458,23 +476,23 @@ class PackagePanel(QWidget, ThemeAwareMixin):
         layout = QHBoxLayout(self._header)
         layout.setContentsMargins(16, 0, 16, 0)
 
-        self._title_label = QLabel("节点包管理")
+        self._title_label = QLabel(_("nav.packages"))
         self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(self._title_label)
 
         layout.addStretch()
 
-        self._install_btn = QPushButton("安装新包")
+        self._install_btn = QPushButton(_("package.install_new"))
         self._install_btn.setStyleSheet(Theme.get_install_button_stylesheet())
         self._install_btn.clicked.connect(self._on_install_clicked)
         layout.addWidget(self._install_btn)
 
-        self._install_local_btn = QPushButton("本地安装")
+        self._install_local_btn = QPushButton(_("package.install_local"))
         self._install_local_btn.setStyleSheet(Theme.get_primary_button_stylesheet())
         self._install_local_btn.clicked.connect(self._on_install_local_clicked)
         layout.addWidget(self._install_local_btn)
 
-        self._refresh_btn = QPushButton("刷新")
+        self._refresh_btn = QPushButton(_("package.refresh"))
         self._refresh_btn.setFixedWidth(60)
         self._refresh_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._refresh_btn.clicked.connect(self._on_refresh)
@@ -511,17 +529,17 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             branch = dialog.get_branch()
 
             if not url:
-                QMessageBox.warning(self, "错误", "请输入 Git 仓库地址")
+                QMessageBox.warning(self, _("package.error"), _("package.enter_git_url"))
                 return
 
             self._start_install(url, branch)
 
     def _start_install(self, url: str, branch: str) -> None:
         if not self._package_manager:
-            QMessageBox.warning(self, "错误", "包管理器未初始化")
+            QMessageBox.warning(self, _("package.error"), _("package.manager_not_initialized"))
             return
 
-        self._show_progress("正在安装...")
+        self._show_progress(_("package.installing"))
 
         self._worker = InstallWorker(
             self._package_manager,
@@ -540,17 +558,17 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             copy_mode = dialog.get_copy_mode()
 
             if not local_path:
-                QMessageBox.warning(self, "错误", "请选择本地包目录")
+                QMessageBox.warning(self, _("package.error"), _("package.select_local_dir"))
                 return
 
             self._start_install_local(local_path, copy_mode)
 
     def _start_install_local(self, local_path: str, copy_mode: bool) -> None:
         if not self._package_manager:
-            QMessageBox.warning(self, "错误", "包管理器未初始化")
+            QMessageBox.warning(self, _("package.error"), _("package.manager_not_initialized"))
             return
 
-        self._show_progress("正在从本地安装...")
+        self._show_progress(_("package.installing_local"))
 
         self._worker = InstallWorker(
             self._package_manager,
@@ -564,13 +582,13 @@ class PackagePanel(QWidget, ThemeAwareMixin):
 
     def _on_update_requested(self, package_id: str) -> None:
         if not self._package_manager:
-            QMessageBox.warning(self, "错误", "包管理器未初始化")
+            QMessageBox.warning(self, _("package.error"), _("package.manager_not_initialized"))
             return
 
         if package_id in self._package_widgets:
             self._package_widgets[package_id].set_updating(True)
 
-        self._show_progress("正在更新...")
+        self._show_progress(_("package.updating"))
 
         self._worker = InstallWorker(
             self._package_manager,
@@ -584,8 +602,8 @@ class PackagePanel(QWidget, ThemeAwareMixin):
     def _on_delete_requested(self, package_id: str) -> None:
         reply = QMessageBox.question(
             self,
-            "确认删除",
-            f"确定要删除包 {package_id} 吗？\n这将同时删除本地文件。",
+            _("package.confirm_delete"),
+            f"{_('package.delete_message')} {package_id} ?\n{_('package.delete_warning')}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
@@ -594,7 +612,7 @@ class PackagePanel(QWidget, ThemeAwareMixin):
 
     def _do_delete(self, package_id: str) -> None:
         if not self._package_manager:
-            QMessageBox.warning(self, "错误", "包管理器未初始化")
+            QMessageBox.warning(self, _("package.error"), _("package.manager_not_initialized"))
             return
 
         try:
@@ -604,11 +622,11 @@ class PackagePanel(QWidget, ThemeAwareMixin):
                     self._package_widgets[package_id].deleteLater()
                     del self._package_widgets[package_id]
                 self.package_deleted.emit(package_id)
-                QMessageBox.information(self, "成功", f"包 {package_id} 已删除")
+                QMessageBox.information(self, _("package.success"), f"{_('package.deleted')}: {package_id}")
             else:
-                QMessageBox.warning(self, "失败", f"删除包 {package_id} 失败")
+                QMessageBox.warning(self, _("package.fail"), f"{_('package.delete_failed')}: {package_id}")
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"删除失败: {e}")
+            QMessageBox.critical(self, _("package.error"), f"{_('package.delete_error')}: {e}")
 
     def _on_enabled_changed(self, package_id: str, enabled: bool) -> None:
         if not self._package_manager:
@@ -627,9 +645,9 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             else:
                 if package_id in self._package_widgets:
                     self._package_widgets[package_id].set_enabled(not enabled)
-                QMessageBox.warning(self, "失败", f"无法{'启用' if enabled else '禁用'}包")
+                QMessageBox.warning(self, _("package.fail"), _("package.enable_failed") if enabled else _("package.disable_failed"))
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"操作失败: {e}")
+            QMessageBox.critical(self, _("package.error"), f"{_('package.operation_failed')}: {e}")
 
     def _show_progress(self, status: str) -> None:
         self._progress_bar.setVisible(True)
@@ -649,10 +667,10 @@ class PackagePanel(QWidget, ThemeAwareMixin):
         self._hide_progress()
 
         if success:
-            QMessageBox.information(self, "安装成功", message)
+            QMessageBox.information(self, _("package.install_success"), message)
             self._on_refresh()
         else:
-            QMessageBox.warning(self, "安装失败", message)
+            QMessageBox.warning(self, _("package.install_failed"), message)
 
     def _on_update_finished(self, package_id: str, success: bool, message: str) -> None:
         self._hide_progress()
@@ -661,10 +679,10 @@ class PackagePanel(QWidget, ThemeAwareMixin):
             self._package_widgets[package_id].set_updating(False)
 
         if success:
-            QMessageBox.information(self, "更新成功", message)
+            QMessageBox.information(self, _("package.update_success"), message)
             self.package_updated.emit(package_id)
         else:
-            QMessageBox.warning(self, "更新失败", message)
+            QMessageBox.warning(self, _("package.update_failed"), message)
 
     def _on_refresh(self) -> None:
         if self._package_manager:
@@ -675,6 +693,20 @@ class PackagePanel(QWidget, ThemeAwareMixin):
     def set_package_enabled(self, package_id: str, enabled: bool) -> None:
         if package_id in self._package_widgets:
             self._package_widgets[package_id].set_enabled(enabled)
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(_("nav.packages"))
+        if hasattr(self, "_install_btn"):
+            self._install_btn.setText(_("package.install_new"))
+        if hasattr(self, "_install_local_btn"):
+            self._install_local_btn.setText(_("package.install_local"))
+        if hasattr(self, "_refresh_btn"):
+            self._refresh_btn.setText(_("package.refresh"))
+        for widget in self._package_widgets.values():
+            if hasattr(widget, "refresh_language"):
+                widget.refresh_language()
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""

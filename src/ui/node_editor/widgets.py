@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.engine.definitions import PortDefinition, PortType
+from src.ui.i18n_manager import _
 from src.ui.theme import Theme
 from src.utils.logger import get_logger
 
@@ -198,7 +199,7 @@ class TextLineEdit(InlineWidgetBase):
         layout.setSpacing(0)
 
         self._line_edit = QLineEdit()
-        self._line_edit.setPlaceholderText(port_def.description or "输入文本...")
+        self._line_edit.setPlaceholderText(port_def.description or _("node_editor.input_text_placeholder"))
         self._line_edit.setStyleSheet(Theme.get_inline_input_base_stylesheet())
         self._line_edit.setFixedWidth(self.MIN_WIDTH)
 
@@ -424,7 +425,7 @@ class DropdownComboBox(InlineWidgetBase):
         self._combo_box.setStyleSheet(Theme.get_inline_combobox_stylesheet())
 
         # 添加选项（从 widget_options 或使用默认选项）
-        options = getattr(port_def, "widget_options", None) or ["是", "否"]
+        options = getattr(port_def, "widget_options", None) or [_("node_editor.yes"), _("node_editor.no")]
         self._combo_box.addItems(options)
 
         # 设置默认值
@@ -499,7 +500,7 @@ class FilePickerButton(InlineWidgetBase):
         # 文件路径显示
         self._path_label = QLabel()
         self._path_label.setStyleSheet(Theme.get_inline_file_picker_label_stylesheet())
-        self._path_label.setText("选择文件...")
+        self._path_label.setText(_("node_editor.choose_file"))
         self._path_label.setFixedWidth(80)
 
         # 选择按钮
@@ -517,7 +518,7 @@ class FilePickerButton(InlineWidgetBase):
         self._file_path: str = ""
 
         # 文件过滤
-        self._filters = getattr(port_def, "widget_options", None) or ["所有文件 (*)"]
+        self._filters = getattr(port_def, "widget_options", None) or [_("node_editor.all_files")]
 
     def get_value(self) -> str:
         """获取文件路径"""
@@ -545,7 +546,7 @@ class FilePickerButton(InlineWidgetBase):
     def _on_button_clicked(self) -> None:
         """按钮点击处理"""
         # 构建过滤器字符串
-        filter_str = ";;".join(self._filters) if self._filters else "所有文件 (*)"
+        filter_str = ";;".join(self._filters) if self._filters else _("node_editor.all_files")
 
         # 在 QGraphicsProxyWidget 中，self.window() 返回的是代理内嵌的顶级 widget，
         # 不是真实的 QMainWindow。在 Windows 上用其作为 QFileDialog 的父窗口会导致
@@ -555,7 +556,7 @@ class FilePickerButton(InlineWidgetBase):
 
         parent_window = QApplication.activeWindow()
 
-        file_path, _ = QFileDialog.getOpenFileName(parent_window, "选择文件", "", filter_str)
+        file_path, _ = QFileDialog.getOpenFileName(parent_window, _("node_editor.choose_file"), "", filter_str)
 
         if file_path:
             self.set_value(file_path)
@@ -676,7 +677,7 @@ class OutputTextLabel(OutputLabelBase):
         # 输出标签
         self._label = QLabel()
         self._label.setStyleSheet(Theme.get_inline_output_label_idle_stylesheet())
-        self._label.setText("—")  # 占位符
+        self._label.setText("—")  # placeholder
         self._label.setToolTip("")
 
         layout.addWidget(self._label)
@@ -697,7 +698,7 @@ class OutputTextLabel(OutputLabelBase):
 
     def set_error(self, error_msg: str) -> None:
         """设置错误状态"""
-        self._label.setText(f"错误: {error_msg[:20]}...")
+        self._label.setText(f"{_(\"node_editor.error\")}: {error_msg[:20]}...")
         self._label.setToolTip(error_msg)
         self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
@@ -772,7 +773,7 @@ class OutputNumberLabel(OutputLabelBase):
 
     def set_error(self, error_msg: str) -> None:
         """设置错误状态"""
-        self._label.setText(f"错误")
+        self._label.setText(_("node_editor.error"))
         self._label.setToolTip(error_msg)
         self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
@@ -847,18 +848,18 @@ class OutputDataPreview(OutputLabelBase):
 
         if isinstance(value, list):
             type_name = "list"
-            preview = f"[{len(value)} 项]"
+            preview = f"[{len(value)} {_(\"node_editor.items\")}]"
             if value:
                 preview += f" {repr(value[0])[:20]}..."
         elif isinstance(value, dict):
             type_name = "dict"
-            preview = f"{{{len(value)} 键}}"
+            preview = f"{{{len(value)} {_(\"node_editor.keys\")}}}"
         elif hasattr(value, "shape"):
             # DataFrame 或类似结构
             try:
                 shape = value.shape
                 type_name = "DataFrame"
-                preview = f"{shape[0]}行 × {shape[1]}列"
+                preview = f"{shape[0]}{_(\"node_editor.rows\")} x {shape[1]}{_(\"node_editor.cols\")}"
             except Exception:
                 pass
 

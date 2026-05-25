@@ -27,6 +27,8 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.ui.chat.settings_panel import AgentSettingsDialog
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
@@ -230,12 +232,14 @@ from src.ui.chat.message_widget import MarkdownMessageWidget
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
-class SessionItemWidget(QWidget):
+class SessionItemWidget(QWidget, LanguageAwareMixin):
     """单个会话项组件 — 悬停时显示删除按钮"""
 
     def __init__(self, session: Dict, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._setup_language_awareness()
         self.session_id = session.get("id", "")
+        self._session = session
         self._setup_ui(session)
 
     def _setup_ui(self, session: Dict) -> None:
@@ -246,13 +250,13 @@ class SessionItemWidget(QWidget):
         info_layout = QVBoxLayout()
         info_layout.setSpacing(3)
 
-        title = session.get("title", "未命名会话")
+        title = session.get("title", _("chat.unnamed_session"))
         self._title_label = QLabel(title)
         info_layout.addWidget(self._title_label)
 
         msg_count = session.get("message_count", 0)
         updated = session.get("updated_at", "")[:10]
-        self._meta_label = QLabel(f"{msg_count}条消息 · {updated}")
+        self._meta_label = QLabel(f"{msg_count}{_('chat.messages_count')} · {updated}")
         info_layout.addWidget(self._meta_label)
 
         layout.addLayout(info_layout, 1)
@@ -260,7 +264,7 @@ class SessionItemWidget(QWidget):
         self._delete_btn = QPushButton("✕")
         self._delete_btn.setFixedSize(22, 22)
         self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._delete_btn.setToolTip("删除此会话")
+        self._delete_btn.setToolTip(_("chat.delete_session_tooltip"))
         self._delete_btn.hide()
         layout.addWidget(self._delete_btn)
 
@@ -300,6 +304,18 @@ class SessionItemWidget(QWidget):
             }}
         """)
 
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        title = self._session.get("title", _("chat.unnamed_session"))
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(title)
+        if hasattr(self, "_meta_label"):
+            msg_count = self._session.get("message_count", 0)
+            updated = self._session.get("updated_at", "")[:10]
+            self._meta_label.setText(f"{msg_count}{_('chat.messages_count')} · {updated}")
+        if hasattr(self, "_delete_btn"):
+            self._delete_btn.setToolTip(_("chat.delete_session_tooltip"))
+
     def set_delete_handler(self, handler) -> None:
         self._delete_btn.clicked.connect(handler)
 
@@ -315,7 +331,7 @@ class SessionItemWidget(QWidget):
         super().leaveEvent(event)
 
 
-class SessionListWidget(QWidget, ThemeAwareMixin):
+class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """会话列表组件 - 显示历史会话，支持切换、新建和删除"""
 
     session_selected = Signal(str)  # session_id
@@ -325,6 +341,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -337,13 +354,13 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(12, 8, 12, 8)
 
-        self._title_label = QLabel("会话历史")
+        self._title_label = QLabel(_("chat.session_history"))
         self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
         header_layout.addWidget(self._title_label)
 
         header_layout.addStretch()
 
-        self._new_btn = QPushButton("+ 新建")
+        self._new_btn = QPushButton(_("chat.new_session"))
         self._new_btn.setFixedSize(72, 28)
         self._new_btn.clicked.connect(self.new_session_requested.emit)
         self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
@@ -391,6 +408,20 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
         finally:
             self._list_widget.blockSignals(False)
 
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText(_("chat.session_history"))
+        if hasattr(self, "_new_btn"):
+            self._new_btn.setText(_("chat.new_session"))
+        # 刷新列表项
+        if hasattr(self, "_list_widget"):
+            for i in range(self._list_widget.count()):
+                item = self._list_widget.item(i)
+                widget = self._list_widget.itemWidget(item)
+                if widget and hasattr(widget, "refresh_language"):
+                    widget.refresh_language()
+
     def refresh_theme(self) -> None:
         """刷新主题样式"""
         if hasattr(self, "_header"):
@@ -409,7 +440,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin):
                     widget.refresh_theme()
 
 
-class ChatPanel(QWidget, ThemeAwareMixin):
+class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     message_sent = Signal(str)
 
     def __init__(
@@ -423,6 +454,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._agent = agent
         self._api_key_manager = api_key_manager
         self._mcp_manager = mcp_manager
@@ -504,17 +536,17 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         layout.setContentsMargins(16, 0, 16, 0)
 
         title_layout = QVBoxLayout()
-        self._title_label = QLabel("🤖 AI 助手")
+        self._title_label = QLabel("🤖 " + _("nav.agent"))
         self._title_label.setStyleSheet(Theme.get_chat_title_label_stylesheet())
         title_layout.addWidget(self._title_label)
 
-        self._status_label = QLabel("请选择API密钥")
+        self._status_label = QLabel(_("chat.please_select_api_key"))
         self._status_label.setStyleSheet(Theme.get_chat_status_label_stylesheet())
         title_layout.addWidget(self._status_label)
         layout.addLayout(title_layout)
 
         self._api_key_combo = QComboBox()
-        self._api_key_combo.setPlaceholderText("选择API密钥")
+        self._api_key_combo.setPlaceholderText(_("chat.select_api_key"))
         self._api_key_combo.setMinimumWidth(200)
         self._api_key_combo.setStyleSheet(Theme.get_combobox_stylesheet())
         self._api_key_combo.currentIndexChanged.connect(self._on_api_key_changed)
@@ -522,12 +554,12 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         layout.addStretch()
 
-        self._settings_btn = QPushButton("⚙ 设置")
+        self._settings_btn = QPushButton("⚙ " + _("nav.settings"))
         self._settings_btn.setFixedHeight(28)
         self._settings_btn.clicked.connect(self._open_settings)
         self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        self._clear_btn = QPushButton("清空")
+        self._clear_btn = QPushButton(_("chat.clear"))
         self._clear_btn.setFixedHeight(28)
         self._clear_btn.clicked.connect(self._clear_chat)
         self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
@@ -570,7 +602,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self._preview_scroll.hide()
 
         self._input_text = QTextEdit()
-        self._input_text.setPlaceholderText("输入消息，与AI助手对话...")
+        self._input_text.setPlaceholderText(_("chat.input_placeholder"))
         self._input_text.setStyleSheet(Theme.get_chat_input_stylesheet())
 
         # 底部按钮行：附件按钮居左 + 发送按钮居右
@@ -578,28 +610,28 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         button_layout.setSpacing(8)
 
         # 多模态附件按钮（默认隐藏，根据 API Key 支持类型显示）
-        self._image_btn = QPushButton("📷 图片")
-        self._image_btn.setToolTip("添加图片")
+        self._image_btn = QPushButton("📷 " + _("chat.image"))
+        self._image_btn.setToolTip(_("chat.add_image"))
         self._image_btn.setFixedSize(70, 32)
         self._image_btn.clicked.connect(self._select_image)
         self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._image_btn.hide()
 
-        self._audio_btn = QPushButton("🎤 音频")
-        self._audio_btn.setToolTip("添加音频")
+        self._audio_btn = QPushButton("🎤 " + _("chat.audio"))
+        self._audio_btn.setToolTip(_("chat.add_audio"))
         self._audio_btn.setFixedSize(70, 32)
         self._audio_btn.clicked.connect(self._select_audio)
         self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._audio_btn.hide()
 
-        self._video_btn = QPushButton("🎬 视频")
-        self._video_btn.setToolTip("添加视频")
+        self._video_btn = QPushButton("🎬 " + _("chat.video"))
+        self._video_btn.setToolTip(_("chat.add_video"))
         self._video_btn.setFixedSize(70, 32)
         self._video_btn.clicked.connect(self._select_video)
         self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._video_btn.hide()
 
-        self._send_btn = QPushButton("发送")
+        self._send_btn = QPushButton(_("chat.send"))
         self._send_btn.setFixedHeight(32)
         self._send_btn.clicked.connect(self._on_action_button_clicked)
         self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
@@ -624,7 +656,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         from PySide6.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片", "", "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)"
+            self, _("chat.choose_image"), "", "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)"
         )
         if file_path:
             self._add_multimodal_attachment("image", file_path)
@@ -633,7 +665,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         from PySide6.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择音频", "", "Audio (*.mp3 *.wav *.aac *.ogg *.flac)"
+            self, _("chat.choose_audio"), "", "Audio (*.mp3 *.wav *.aac *.ogg *.flac)"
         )
         if file_path:
             self._add_multimodal_attachment("audio", file_path)
@@ -642,7 +674,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         from PySide6.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择视频", "", "Video (*.mp4 *.avi *.mov *.mkv *.webm)"
+            self, _("chat.choose_video"), "", "Video (*.mp4 *.avi *.mov *.mkv *.webm)"
         )
         if file_path:
             self._add_multimodal_attachment("video", file_path)
@@ -730,7 +762,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         elif media_type == "video":
             return self._create_video_preview(file_path)
         else:
-            label = QLabel("未知类型")
+            label = QLabel(_("chat.unknown_type"))
             label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; background: transparent;")
             return label
 
@@ -749,7 +781,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             )
             label.setPixmap(scaled)
         else:
-            label.setText("[无法加载]")
+            label.setText(_("chat.cannot_load"))
             label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; background: transparent; border: none;")
 
         return label
@@ -938,8 +970,8 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
         reply = QMessageBox.question(
             self,
-            "确认删除",
-            "确定要删除这个会话吗？此操作不可撤销。",
+            _("chat.confirm_delete"),
+            _("chat.delete_confirm_message"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1072,7 +1104,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                         self._on_session_selected(sessions[0]["id"])
             else:
                 _logger.error(f"Agent初始化失败: {provider}")
-                self._set_status("Agent初始化失败")
+                self._set_status(_("chat.agent_init_failed"))
 
     def _on_text_changed(self) -> None:
         if not self._is_send_mode:
@@ -1111,7 +1143,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
     def _send_message(self) -> None:
         if not self._current_provider:
-            self._set_status("请先选择API密钥")
+            self._set_status(_("chat.please_select_api_key"))
             return
 
         text = self._input_text.toPlainText().strip()
@@ -1156,10 +1188,10 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         self.message_sent.emit(text)
 
         if not self._agent or not self._agent.is_initialized:
-            self.add_message("system", "请先选择API密钥")
+            self.add_message("system", _("chat.please_select_api_key"))
             return
 
-        self._set_status("思考中...")
+        self._set_status(_("chat.thinking"))
         self._set_stop_mode(True)
 
         self._worker = AgentWorker(self._agent, message_content, self._create_streaming_callback())
@@ -1211,7 +1243,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
     def _on_agent_response(self, response: str) -> None:
         _logger.info(f"Agent response received, length: {len(response)}")
-        self._set_status("就绪" if self._current_provider else "请选择API密钥")
+        self._set_status(_("chat.ready") if self._current_provider else _("chat.please_select_api_key"))
 
         if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
             if self._streaming_blocks:
@@ -1224,7 +1256,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
 
     def _on_agent_error(self, error: str) -> None:
         _logger.error(f"Agent error: {error}")
-        self._set_status(f"错误: {error}")
+        self._set_status(f"{_('chat.error')}: {error}")
         self._streaming_message = None
         self._streaming_blocks = []
         self._streaming_text = ""
@@ -1244,11 +1276,11 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         """切换发送按钮为停止模式或恢复发送模式"""
         self._is_send_mode = not stop
         if stop:
-            self._send_btn.setText("停止")
+            self._send_btn.setText(_("chat.stop"))
             self._send_btn.setEnabled(True)
             self._send_btn.setStyleSheet(Theme.get_chat_stop_button_stylesheet())
         else:
-            self._send_btn.setText("发送")
+            self._send_btn.setText(_("chat.send"))
             self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
             has_text = bool(self._input_text.toPlainText().strip())
             self._send_btn.setEnabled(has_text and self._current_provider is not None)
@@ -1257,22 +1289,22 @@ class ChatPanel(QWidget, ThemeAwareMixin):
         """处理停止按钮点击 — 中断 Agent 执行"""
         if self._worker:
             self._send_btn.setEnabled(False)
-            self._set_status("正在停止...")
+            self._set_status(_("chat.stopping"))
             success = self._worker.cancel()
             if not success:
                 _logger.warning("停止失败: Agent 可能已完成")
-                self._set_status("停止失败")
+                self._set_status(_("chat.stop_failed"))
 
     def _on_agent_interrupted(self, response: str) -> None:
         """处理被中断的 Agent 响应 — 保留已流式输出的部分内容"""
         _logger.info(f"Agent 响应被中断, 已输出内容: {len(response)} 字符")
-        self._set_status("已停止")
+        self._set_status(_("chat.stopped"))
 
         if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
             if self._streaming_blocks:
                 self._streaming_message.add_or_update_block({
                     "type": "text",
-                    "text": "\n\n--- *回复已被中断* ---",
+                    "text": "\n\n--- *" + _("chat.response_interrupted") + "* ---",
                 })
                 self._streaming_message._blocks = self._streaming_blocks.copy()
             self._streaming_message = None
@@ -1318,7 +1350,7 @@ class ChatPanel(QWidget, ThemeAwareMixin):
                     _logger.warning(f"清空数据库会话记录失败: {e}")
             self._agent.reset()
 
-        self._set_status("就绪" if self._current_provider else "请选择API密钥")
+        self._set_status(_("chat.ready") if self._current_provider else _("chat.please_select_api_key"))
         _logger.info("对话已清空")
 
     def set_agent(self, agent: AgentIntegration) -> None:
@@ -1354,6 +1386,36 @@ class ChatPanel(QWidget, ThemeAwareMixin):
             dialog.exec()
         else:
             _logger.warning("API密钥管理器未初始化")
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        if hasattr(self, "_title_label"):
+            self._title_label.setText("🤖 " + _("nav.agent"))
+        if hasattr(self, "_status_label"):
+            self._status_label.setText(_("chat.please_select_api_key"))
+        if hasattr(self, "_api_key_combo"):
+            self._api_key_combo.setPlaceholderText(_("chat.select_api_key"))
+        if hasattr(self, "_settings_btn"):
+            self._settings_btn.setText("⚙ " + _("nav.settings"))
+        if hasattr(self, "_clear_btn"):
+            self._clear_btn.setText(_("chat.clear"))
+        if hasattr(self, "_input_text"):
+            self._input_text.setPlaceholderText(_("chat.input_placeholder"))
+        if hasattr(self, "_image_btn"):
+            self._image_btn.setText("📷 " + _("chat.image"))
+            self._image_btn.setToolTip(_("chat.add_image"))
+        if hasattr(self, "_audio_btn"):
+            self._audio_btn.setText("🎤 " + _("chat.audio"))
+            self._audio_btn.setToolTip(_("chat.add_audio"))
+        if hasattr(self, "_video_btn"):
+            self._video_btn.setText("🎬 " + _("chat.video"))
+            self._video_btn.setToolTip(_("chat.add_video"))
+        if hasattr(self, "_send_btn") and self._is_send_mode:
+            self._send_btn.setText(_("chat.send"))
+
+        # 刷新会话列表
+        if hasattr(self, "_session_list"):
+            self._session_list.refresh_language()
 
     def refresh_theme(self) -> None:
         """刷新主题样式"""

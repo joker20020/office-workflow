@@ -6,6 +6,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 from src.ui.chat.blocks.base import BaseBlockWidget
+from src.ui.i18n_manager import _
 from src.ui.theme import Theme
 
 
@@ -29,10 +30,10 @@ class AudioBlockWidget(BaseBlockWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        self._info_label = QLabel("🎵 音频")
+        self._info_label = QLabel(f"🎵 {_('chat.audio')}")
         layout.addWidget(self._info_label)
 
-        self._play_btn = QPushButton("▶ 播放")
+        self._play_btn = QPushButton(f"▶ {_('chat.play')}")
         self._play_btn.clicked.connect(self._toggle_play)
         layout.addWidget(self._play_btn)
 
@@ -44,7 +45,7 @@ class AudioBlockWidget(BaseBlockWidget):
         url = source.get("url", "") if source_type == "url" else ""
 
         if not url:
-            self._info_label.setText("🎵 音频 (无来源)")
+            self._info_label.setText(f"🎵 {_('chat.audio')} ({_('chat.no_source')})")
             self._play_btn.setEnabled(False)
             return
 
@@ -56,10 +57,10 @@ class AudioBlockWidget(BaseBlockWidget):
 
         if url.startswith(("http://", "https://")):
             self._player.setSource(QUrl(url))
-            self._info_label.setText(f"🎵 音频")
+            self._info_label.setText(f"🎵 {_('chat.audio')}")
         else:
             self._player.setSource(QUrl.fromLocalFile(url))
-            self._info_label.setText("🎵 音频")
+            self._info_label.setText(f"🎵 {_('chat.audio')}")
 
     def _toggle_play(self) -> None:
         if not self._player:
@@ -72,9 +73,9 @@ class AudioBlockWidget(BaseBlockWidget):
 
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self._play_btn.setText("⏸ 暂停")
+            self._play_btn.setText(f"⏸ {_('chat.pause')}")
         else:
-            self._play_btn.setText("▶ 播放")
+            self._play_btn.setText(f"▶ {_('chat.play')}")
 
     def _apply_styles(self) -> None:
         bg = Theme.hex("background_secondary")
@@ -98,7 +99,7 @@ class AudioBlockWidget(BaseBlockWidget):
             self._play_btn.setStyleSheet(Theme.get_media_play_button_stylesheet())
 
     def get_content(self) -> str:
-        return "[音频]"
+        return f"[{_('chat.audio')}]"
 
     def set_content(self, content: str) -> None:
         pass

@@ -34,6 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.permission_manager import Permission, PermissionSet
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
 from src.utils.logger import get_logger
@@ -41,21 +43,21 @@ from src.utils.logger import get_logger
 _logger = get_logger(__name__)
 
 
-# 权限描述映射
+# 权限描述映射（翻译键）
 PERMISSION_DESCRIPTIONS = {
-    Permission.FILE_READ: "读取本地文件",
-    Permission.FILE_WRITE: "写入本地文件（高风险）",
-    Permission.NETWORK: "访问网络",
-    Permission.AGENT_TOOL: "注册Agent工具",
-    Permission.AGENT_MCP: "配置MCP服务",
-    Permission.AGENT_SKILL: "加载Skill包",
-    Permission.AGENT_CHAT: "调用Agent对话",
-    Permission.EVENT_SUBSCRIBE: "订阅事件",
-    Permission.EVENT_PUBLISH: "发布事件",
-    Permission.NODE_READ: "读取节点信息",
-    Permission.NODE_REGISTER: "注册节点",
-    Permission.STORAGE_READ: "读取持久化数据",
-    Permission.STORAGE_WRITE: "写入持久化数据",
+    Permission.FILE_READ: "permission.file_read",
+    Permission.FILE_WRITE: "permission.file_write",
+    Permission.NETWORK: "permission.network",
+    Permission.AGENT_TOOL: "permission.agent_tool",
+    Permission.AGENT_MCP: "permission.agent_mcp",
+    Permission.AGENT_SKILL: "permission.agent_skill",
+    Permission.AGENT_CHAT: "permission.agent_chat",
+    Permission.EVENT_SUBSCRIBE: "permission.event_subscribe",
+    Permission.EVENT_PUBLISH: "permission.event_publish",
+    Permission.NODE_READ: "permission.node_read",
+    Permission.NODE_REGISTER: "permission.node_register",
+    Permission.STORAGE_READ: "permission.storage_read",
+    Permission.STORAGE_WRITE: "permission.storage_write",
 }
 
 # 高风险权限列表
@@ -65,7 +67,7 @@ HIGH_RISK_PERMISSIONS = {
 }
 
 
-class PermissionItem(QWidget, ThemeAwareMixin):
+class PermissionItem(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     """单个权限项控件（复选框 + 描述）"""
 
     def __init__(
@@ -77,6 +79,7 @@ class PermissionItem(QWidget, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._permission = permission
         self._is_high_risk = is_high_risk
         self._checked = checked
@@ -91,7 +94,7 @@ class PermissionItem(QWidget, ThemeAwareMixin):
         self._checkbox.setChecked(self._checked)
         layout.addWidget(self._checkbox)
 
-        desc_text = PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value)
+        desc_text = _(PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value))
         if self._is_high_risk:
             desc_text = f"⚠️ {desc_text}"
 
@@ -103,7 +106,7 @@ class PermissionItem(QWidget, ThemeAwareMixin):
             self._checkbox.setStyleSheet(f"color: {Theme.hex('state_warning')};")
 
     def refresh_theme(self):
-        desc_text = PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value)
+        desc_text = _(PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value))
         if self._is_high_risk:
             desc_text = f"⚠️ {desc_text}"
         self._desc_label.setText(f"    {desc_text}")
@@ -113,9 +116,16 @@ class PermissionItem(QWidget, ThemeAwareMixin):
         else:
             self._checkbox.setStyleSheet(f"color: {Theme.hex('text_primary')};")
 
+    def refresh_language(self) -> None:
+        self._checkbox.setText(self._get_permission_text())
+        desc_text = _(PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value))
+        if self._is_high_risk:
+            desc_text = f"⚠️ {desc_text}"
+        self._desc_label.setText(f"    {desc_text}")
+
     def _get_permission_text(self) -> str:
         """获取权限显示文本"""
-        text = self._permission.value
+        text = _(PERMISSION_DESCRIPTIONS.get(self._permission, self._permission.value))
         if self._is_high_risk:
             text = f"⚠️ {text}"
         return text
@@ -134,7 +144,7 @@ class PermissionItem(QWidget, ThemeAwareMixin):
         return self._permission
 
 
-class PermissionRequestDialog(QDialog, ThemeAwareMixin):
+class PermissionRequestDialog(QDialog, ThemeAwareMixin, LanguageAwareMixin):
     """
     权限请求对话框
 
@@ -162,13 +172,14 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
     ):
         super().__init__(parent)
         self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._plugin_name = plugin_name
         self._plugin_info = plugin_info
         self._requested_permissions = permissions
         self._granted_permissions = granted_permissions or set()
         self._permission_items: list[PermissionItem] = []
 
-        self.setWindowTitle(f"插件权限请求")
+        self.setWindowTitle(_("permission.dialog_title"))
         self.setModal(True)
         self.setMinimumWidth(450)
         self._setup_ui()
@@ -184,7 +195,7 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
         layout.setSpacing(16)
 
         # 标题
-        title_label = QLabel(f'插件 "{self._plugin_name}" 请求以下权限')
+        title_label = QLabel(f'"{self._plugin_name}" {_("permission.request_title")}')
         title_label.setStyleSheet(
             f"font-size: 14px; font-weight: bold; color: {Theme.hex('text_primary')};"
         )
@@ -198,22 +209,22 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
         info_layout = QVBoxLayout(self._info_frame)
         info_layout.setSpacing(4)
 
-        version = self._plugin_info.get("version", "未知")
-        author = self._plugin_info.get("author", "未知")
-        description = self._plugin_info.get("description", "无描述")
+        version = self._plugin_info.get("version", _("permission.unknown"))
+        author = self._plugin_info.get("author", _("permission.unknown"))
+        description = self._plugin_info.get("description", _("permission.no_description"))
 
         # 版本
-        self._version_label = QLabel(f"版本: {version}")
+        self._version_label = QLabel(f"{_('permission.version')}: {version}")
         self._version_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         info_layout.addWidget(self._version_label)
 
         # 作者
-        self._author_label = QLabel(f"作者: {author}")
+        self._author_label = QLabel(f"{_('permission.author')}: {author}")
         self._author_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         info_layout.addWidget(self._author_label)
 
         # 描述
-        self._desc_label = QLabel(f"描述: {description}")
+        self._desc_label = QLabel(f"{_('permission.description')}: {description}")
         self._desc_label.setStyleSheet(f"color: {Theme.hex('text_secondary')}; font-size: 12px;")
         self._desc_label.setWordWrap(True)
         info_layout.addWidget(self._desc_label)
@@ -245,7 +256,7 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
         if high_risk_perms:
             # 添加分隔标签
             if normal_perms:
-                separator = QLabel("以下权限具有较高风险，请谨慎授权：")
+                separator = QLabel(_("permission.high_risk_warning"))
                 separator.setStyleSheet(
                     f"color: {Theme.hex('state_warning')}; font-size: 12px; margin-top: 8px;"
                 )
@@ -264,14 +275,10 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
         layout.addWidget(scroll, 1)
 
         # 按钮区域
-        # 按钮说明：
-        # - "允许全部"：选中所有权限并接受，返回所有权限
-        # - "拒绝全部"：清空所有权限选择并接受，返回空权限集（清空数据库中的权限）
-        # - "确定"：接受当前选中的权限
         button_box = QDialogButtonBox()
-        button_box.addButton("允许全部", QDialogButtonBox.ButtonRole.AcceptRole)
-        button_box.addButton("拒绝全部", QDialogButtonBox.ButtonRole.AcceptRole)
-        button_box.addButton("确定", QDialogButtonBox.ButtonRole.AcceptRole)
+        self._allow_all_btn = button_box.addButton(_("permission.allow_all"), QDialogButtonBox.ButtonRole.AcceptRole)
+        self._deny_all_btn = button_box.addButton(_("permission.deny_all"), QDialogButtonBox.ButtonRole.AcceptRole)
+        self._confirm_btn = button_box.addButton(_("permission.confirm"), QDialogButtonBox.ButtonRole.AcceptRole)
 
         button_box.clicked.connect(self._on_button_clicked)
 
@@ -287,14 +294,29 @@ class PermissionRequestDialog(QDialog, ThemeAwareMixin):
         for item in self._permission_items:
             item.refresh_theme()
 
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        self.setWindowTitle(_("permission.dialog_title"))
+        # 刷新权限项
+        for item in self._permission_items:
+            if hasattr(item, "refresh_language"):
+                item.refresh_language()
+        # 刷新按钮
+        if hasattr(self, "_allow_all_btn"):
+            self._allow_all_btn.setText(_("permission.allow_all"))
+        if hasattr(self, "_deny_all_btn"):
+            self._deny_all_btn.setText(_("permission.deny_all"))
+        if hasattr(self, "_confirm_btn"):
+            self._confirm_btn.setText(_("permission.confirm"))
+
     def _on_button_clicked(self, button) -> None:
         button_text = button.text()
 
-        if button_text == "允许全部":
+        if button_text == _("permission.allow_all"):
             for item in self._permission_items:
                 item.set_checked(True)
             self.accept()
-        elif button_text == "拒绝全部":
+        elif button_text == _("permission.deny_all"):
             for item in self._permission_items:
                 item.set_checked(False)
             self.accept()

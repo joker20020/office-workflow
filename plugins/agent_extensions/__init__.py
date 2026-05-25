@@ -416,7 +416,7 @@ class AgentExtensionTools:
 
         blender_agent = ReActAgent(
             name="blender_agent",
-            sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模
+            sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查
         """,
             model=OpenAIChatModel(
                 model_name=self._llm_name,

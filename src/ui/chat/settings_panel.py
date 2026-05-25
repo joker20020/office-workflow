@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
 )
 from src.ui.theme import Theme
+from src.ui.i18n_manager import _
 from src.agent.api_key_manager import ApiKeyManager
 from src.utils.logger import get_logger
 
@@ -39,7 +40,7 @@ class EditApiKeyDialog(QDialog):
         self._model_name = model_name
         self._manager = api_key_manager
         display_name = f"{provider}/{model_name}" if model_name else provider
-        self.setWindowTitle(f"编辑API密钥: {display_name}")
+        self.setWindowTitle(f'{_("chat_settings.edit_api_key")}: {display_name}')
         self.setModal(True)
         self.resize(450, 250)
         self._setup_ui()
@@ -49,20 +50,20 @@ class EditApiKeyDialog(QDialog):
         layout = QFormLayout(self)
 
         self._provider_label = QLabel(self._provider)
-        layout.addRow("服务商:", self._provider_label)
+        layout.addRow(_("chat_settings.provider") + ":", self._provider_label)
 
         self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("输入新的API密钥 (留空则不修改)")
+        self._key_input.setPlaceholderText(_("chat_settings.enter_new_api_key_optional"))
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addRow("API密钥:", self._key_input)
+        layout.addRow(_("chat_settings.api_key") + ":", self._key_input)
 
         self._base_url_input = QLineEdit()
-        self._base_url_input.setPlaceholderText("如: https://api.openai.com/v1 (可选)")
-        layout.addRow("Base URL:", self._base_url_input)
+        self._base_url_input.setPlaceholderText(_("chat_settings.enter_base_url_optional"))
+        layout.addRow(_("chat_settings.base_url") + ":", self._base_url_input)
 
         self._model_input = QLineEdit()
-        self._model_input.setPlaceholderText("如: gpt-4, qwen-max (可选)")
-        layout.addRow("模型名称:", self._model_input)
+        self._model_input.setPlaceholderText(_("chat_settings.enter_model_optional"))
+        layout.addRow(_("chat_settings.model_name") + ":", self._model_input)
 
         # Modal types selection
         self._modal_group = QWidget()
@@ -70,13 +71,13 @@ class EditApiKeyDialog(QDialog):
         modal_layout.setContentsMargins(0, 0, 0, 0)
         modal_layout.setSpacing(12)
 
-        self._text_cb = QCheckBox("文本")
+        self._text_cb = QCheckBox(_("chat_settings.text"))
         self._text_cb.setChecked(True)
         self._text_cb.setEnabled(False)
 
-        self._image_cb = QCheckBox("图片")
-        self._audio_cb = QCheckBox("音频")
-        self._video_cb = QCheckBox("视频")
+        self._image_cb = QCheckBox(_("chat_settings.image"))
+        self._audio_cb = QCheckBox(_("chat_settings.audio"))
+        self._video_cb = QCheckBox(_("chat_settings.video"))
 
         modal_layout.addWidget(self._text_cb)
         modal_layout.addWidget(self._image_cb)
@@ -84,7 +85,7 @@ class EditApiKeyDialog(QDialog):
         modal_layout.addWidget(self._video_cb)
         modal_layout.addStretch()
 
-        layout.addRow("支持类型:", self._modal_group)
+        layout.addRow(_("chat_settings.supported_types") + ":", self._modal_group)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -149,7 +150,7 @@ class AddApiKeyDialog(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("添加API密钥")
+        self.setWindowTitle(_("chat_settings.add_api_key"))
         self.setModal(True)
         self.resize(450, 280)
         self._setup_ui()
@@ -161,12 +162,12 @@ class AddApiKeyDialog(QDialog):
         self._provider_combo = QComboBox()
         self._provider_combo.addItems([p[1] for p in SUPPORTED_PROVIDERS])
         self._provider_combo.setCurrentIndex(0)
-        layout.addRow("服务商:", self._provider_combo)
+        layout.addRow(_("chat_settings.provider") + ":", self._provider_combo)
 
         # API密钥输入（带显示/隐藏切换）
         key_layout = QHBoxLayout()
         self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("输入API密钥")
+        self._key_input.setPlaceholderText(_("chat_settings.enter_api_key"))
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self._toggle_key_btn = QPushButton()
@@ -176,15 +177,15 @@ class AddApiKeyDialog(QDialog):
         self._toggle_key_btn.clicked.connect(self._toggle_password_visibility)
         key_layout.addWidget(self._key_input)
         key_layout.addWidget(self._toggle_key_btn)
-        layout.addRow("API密钥:", key_layout)
+        layout.addRow(_("chat_settings.api_key") + ":", key_layout)
 
         self._base_url_input = QLineEdit()
-        self._base_url_input.setPlaceholderText("如: https://api.openai.com/v1 (可选)")
-        layout.addRow("Base URL:", self._base_url_input)
+        self._base_url_input.setPlaceholderText(_("chat_settings.enter_base_url_optional"))
+        layout.addRow(_("chat_settings.base_url") + ":", self._base_url_input)
 
         self._model_input = QLineEdit()
-        self._model_input.setPlaceholderText("如: gpt-4, qwen-max (可选)")
-        layout.addRow("模型名称:", self._model_input)
+        self._model_input.setPlaceholderText(_("chat_settings.enter_model_optional"))
+        layout.addRow(_("chat_settings.model_name") + ":", self._model_input)
 
         # Modal types selection
         self._modal_group = QWidget()
@@ -192,19 +193,19 @@ class AddApiKeyDialog(QDialog):
         modal_layout.setContentsMargins(0, 0, 0, 0)
         modal_layout.setSpacing(12)
 
-        self._text_cb = QCheckBox("文本")
+        self._text_cb = QCheckBox(_("chat_settings.text"))
         self._text_cb.setChecked(True)
         self._text_cb.setEnabled(False)  # Text always required
-        self._text_cb.setToolTip("文本支持（必选）")
+        self._text_cb.setToolTip(_("chat_settings.text_required"))
 
-        self._image_cb = QCheckBox("图片")
-        self._image_cb.setToolTip("支持图片输入")
+        self._image_cb = QCheckBox(_("chat_settings.image"))
+        self._image_cb.setToolTip(_("chat_settings.image_support"))
 
-        self._audio_cb = QCheckBox("音频")
-        self._audio_cb.setToolTip("支持音频输入")
+        self._audio_cb = QCheckBox(_("chat_settings.audio"))
+        self._audio_cb.setToolTip(_("chat_settings.audio_support"))
 
-        self._video_cb = QCheckBox("视频")
-        self._video_cb.setToolTip("支持视频输入")
+        self._video_cb = QCheckBox(_("chat_settings.video"))
+        self._video_cb.setToolTip(_("chat_settings.video_support"))
 
         modal_layout.addWidget(self._text_cb)
         modal_layout.addWidget(self._image_cb)
@@ -212,7 +213,7 @@ class AddApiKeyDialog(QDialog):
         modal_layout.addWidget(self._video_cb)
         modal_layout.addStretch()
 
-        layout.addRow("支持类型:", self._modal_group)
+        layout.addRow(_("chat_settings.supported_types") + ":", self._modal_group)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -277,7 +278,7 @@ class ApiKeyPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("API密钥管理")
+        title = QLabel(_("chat_settings.api_key_management"))
         title.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(title)
 
@@ -287,19 +288,19 @@ class ApiKeyPanel(QWidget):
 
         button_layout = QHBoxLayout()
 
-        add_btn = QPushButton("添加")
+        add_btn = QPushButton(_("chat_settings.add"))
         add_btn.clicked.connect(self._add_key)
         add_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        edit_btn = QPushButton("编辑")
+        edit_btn = QPushButton(_("chat_settings.edit"))
         edit_btn.clicked.connect(self._edit_key)
         edit_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        delete_btn = QPushButton("删除")
+        delete_btn = QPushButton(_("chat_settings.delete"))
         delete_btn.clicked.connect(self._delete_key)
         delete_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        toggle_btn = QPushButton("启用/禁用")
+        toggle_btn = QPushButton(_("chat_settings.enable_disable"))
         toggle_btn.clicked.connect(self._toggle_key)
         toggle_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
@@ -328,7 +329,7 @@ class ApiKeyPanel(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             provider, key, base_url, model_name, supported_types = dialog.get_values()
             if not provider or not key:
-                QMessageBox.warning(self, "输入错误", "请填写服务商和API密钥")
+                QMessageBox.warning(self, _("chat_settings.input_error"), _("chat_settings.please_enter_provider_and_key"))
                 return
 
             try:
@@ -345,14 +346,14 @@ class ApiKeyPanel(QWidget):
                     f"添加API密钥: {provider}/{model_name or 'default'}, "
                     f"支持类型: {supported_types}"
                 )
-                QMessageBox.information(self, "成功", f"已添加 {provider} API密钥")
+                QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.api_key_added").format(provider=provider))
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"添加失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.add_failed") + f": {e}")
 
     def _edit_key(self):
         current_item = self._key_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "提示", "请先选择要编辑的API密钥")
+            QMessageBox.warning(self, _("chat_settings.input_error"), _("chat_settings.please_select_item"))
             return
 
         config = current_item.data(Qt.ItemDataRole.UserRole)
@@ -396,9 +397,9 @@ class ApiKeyPanel(QWidget):
                     f"支持类型: {supported_types}"
                 )
                 display_name = f"{provider}/{model_name_new or model_name or 'default'}"
-                QMessageBox.information(self, "成功", f"已更新 {display_name} 配置")
+                QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.api_key_updated").format(display_name=display_name))
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"更新失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.update_failed") + f": {e}")
 
     def _delete_key(self):
         current_item = self._key_list.currentItem()
@@ -409,8 +410,8 @@ class ApiKeyPanel(QWidget):
             display_name = f"{provider}/{model_name}" if model_name else provider
             reply = QMessageBox.question(
                 self,
-                "确认删除",
-                f"确定要删除 {display_name} 的API密钥吗?",
+                _("chat_settings.confirm_delete"),
+                _("chat_settings.confirm_delete_api_key").format(display_name=display_name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -419,7 +420,7 @@ class ApiKeyPanel(QWidget):
                     self._load_keys()
                     self.key_deleted.emit(provider)
                 except Exception as e:
-                    QMessageBox.warning(self, "错误", f"删除失败: {e}")
+                    QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.delete_failed") + f": {e}")
 
     def _toggle_key(self):
         current_item = self._key_list.currentItem()
@@ -433,10 +434,10 @@ class ApiKeyPanel(QWidget):
                 self._load_keys()
                 display_name = f"{provider}/{model_name}" if model_name else provider
                 self.key_toggled.emit(provider, new_enabled)
-                status = "已启用" if new_enabled else "已禁用"
-                QMessageBox.information(self, "成功", f"{status} {display_name}")
+                status = _("chat_settings.enabled") if new_enabled else _("chat_settings.disabled")
+                QMessageBox.information(self, _("chat_settings.success"), f"{status} {display_name}")
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"操作失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.operation_failed") + f": {e}")
 
 
 class AddSkillDialog(QDialog):
@@ -444,7 +445,7 @@ class AddSkillDialog(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("添加Skill")
+        self.setWindowTitle(_("chat_settings.add_skill"))
         self.setModal(True)
         self.resize(450, 200)
         self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
@@ -454,21 +455,21 @@ class AddSkillDialog(QDialog):
         layout = QFormLayout(self)
 
         self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("Skill名称")
-        layout.addRow("名称:", self._name_input)
+        self._name_input.setPlaceholderText(_("chat_settings.skill_name"))
+        layout.addRow(_("chat_settings.skill_name") + ":", self._name_input)
 
         path_layout = QHBoxLayout()
         self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("Skill目录路径")
-        browse_btn = QPushButton("浏览...")
+        self._path_input.setPlaceholderText(_("chat_settings.skill_path"))
+        browse_btn = QPushButton(_("chat_settings.browse"))
         browse_btn.clicked.connect(self._browse_directory)
         path_layout.addWidget(self._path_input)
         path_layout.addWidget(browse_btn)
-        layout.addRow("路径:", path_layout)
+        layout.addRow(_("chat_settings.skill_path") + ":", path_layout)
 
         self._desc_input = QLineEdit()
-        self._desc_input.setPlaceholderText("描述 (可选)")
-        layout.addRow("描述:", self._desc_input)
+        self._desc_input.setPlaceholderText(_("chat_settings.description") + " (" + _("chat_settings.optional") + ")")
+        layout.addRow(_("chat_settings.description") + ":", self._desc_input)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -485,7 +486,7 @@ class AddSkillDialog(QDialog):
         )
 
     def _browse_directory(self):
-        directory = QFileDialog.getExistingDirectory(self, "选择Skill目录")
+        directory = QFileDialog.getExistingDirectory(self, _("chat_settings.choose_skill_dir"))
         if directory:
             self._path_input.setText(directory)
 
@@ -497,7 +498,7 @@ class EditSkillDialog(QDialog):
         super().__init__(parent)
         self._name = name
         self._manager = skill_manager
-        self.setWindowTitle(f"编辑Skill: {name}")
+        self.setWindowTitle(f'{_("chat_settings.edit_skill")}: {name}')
         self.setModal(True)
         self.resize(450, 200)
         self._setup_ui()
@@ -509,20 +510,20 @@ class EditSkillDialog(QDialog):
         layout = QFormLayout(self)
 
         self._name_label = QLabel(self._name)
-        layout.addRow("名称:", self._name_label)
+        layout.addRow(_("chat_settings.skill_name") + ":", self._name_label)
 
         path_layout = QHBoxLayout()
         self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("Skill目录路径")
-        browse_btn = QPushButton("浏览...")
+        self._path_input.setPlaceholderText(_("chat_settings.skill_path"))
+        browse_btn = QPushButton(_("chat_settings.browse"))
         browse_btn.clicked.connect(self._browse_directory)
         path_layout.addWidget(self._path_input)
         path_layout.addWidget(browse_btn)
-        layout.addRow("路径:", path_layout)
+        layout.addRow(_("chat_settings.skill_path") + ":", path_layout)
 
         self._desc_input = QLineEdit()
-        self._desc_input.setPlaceholderText("描述 (可选)")
-        layout.addRow("描述:", self._desc_input)
+        self._desc_input.setPlaceholderText(_("chat_settings.description") + " (" + _("chat_settings.optional") + ")")
+        layout.addRow(_("chat_settings.description") + ":", self._desc_input)
 
         self._password_visible = False
 
@@ -536,7 +537,7 @@ class EditSkillDialog(QDialog):
         self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
 
     def _browse_directory(self):
-        directory = QFileDialog.getExistingDirectory(self, "选择Skill目录")
+        directory = QFileDialog.getExistingDirectory(self, _("chat_settings.choose_skill_dir"))
         if directory:
             self._path_input.setText(directory)
 
@@ -575,7 +576,7 @@ class SkillPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("Skill管理")
+        title = QLabel(_("chat_settings.skill_management"))
         title.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(title)
 
@@ -585,19 +586,19 @@ class SkillPanel(QWidget):
 
         button_layout = QHBoxLayout()
 
-        add_btn = QPushButton("添加")
+        add_btn = QPushButton(_("chat_settings.add"))
         add_btn.clicked.connect(self._add_skill)
         add_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        edit_btn = QPushButton("编辑")
+        edit_btn = QPushButton(_("chat_settings.edit"))
         edit_btn.clicked.connect(self._edit_skill)
         edit_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        delete_btn = QPushButton("删除")
+        delete_btn = QPushButton(_("chat_settings.delete"))
         delete_btn.clicked.connect(self._delete_skill)
         delete_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        toggle_btn = QPushButton("启用/禁用")
+        toggle_btn = QPushButton(_("chat_settings.enable_disable"))
         toggle_btn.clicked.connect(self._toggle_skill)
         toggle_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
@@ -630,14 +631,14 @@ class SkillPanel(QWidget):
                     self._manager.add_skill(name, path, description)
                     self._load_skills()
                     self.skill_added.emit(name)
-                    QMessageBox.information(self, "成功", f"已添加Skill: {name}")
+                    QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.skill_added").format(name=name))
                 except Exception as e:
-                    QMessageBox.warning(self, "错误", f"添加失败: {e}")
+                    QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.add_failed") + f": {e}")
 
     def _edit_skill(self):
         current_item = self._skill_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "提示", "请先选择要编辑的Skill")
+            QMessageBox.warning(self, _("chat_settings.input_error"), _("chat_settings.please_select_item"))
             return
 
         skill = current_item.data(Qt.ItemDataRole.UserRole)
@@ -649,9 +650,9 @@ class SkillPanel(QWidget):
             try:
                 self._manager.update_skill(name, path=new_path, description=new_description)
                 self._load_skills()
-                QMessageBox.information(self, "成功", f"已更新Skill: {name}")
+                QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.skill_updated").format(name=name))
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"更新失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.update_failed") + f": {e}")
 
     def _delete_skill(self):
         current_item = self._skill_list.currentItem()
@@ -660,8 +661,8 @@ class SkillPanel(QWidget):
             name = skill["name"]
             reply = QMessageBox.question(
                 self,
-                "确认删除",
-                f"确定要删除Skill {name} 吗?",
+                _("chat_settings.confirm_delete"),
+                _("chat_settings.confirm_delete_skill").format(name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -670,7 +671,7 @@ class SkillPanel(QWidget):
                     self._load_skills()
                     self.skill_deleted.emit(name)
                 except Exception as e:
-                    QMessageBox.warning(self, "错误", f"删除失败: {e}")
+                    QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.delete_failed") + f": {e}")
 
     def _toggle_skill(self):
         current_item = self._skill_list.currentItem()
@@ -682,10 +683,10 @@ class SkillPanel(QWidget):
                 self._manager.set_enabled(name, new_enabled)
                 self._load_skills()
                 self.skill_toggled.emit(name, new_enabled)
-                status = "已启用" if new_enabled else "已禁用"
-                QMessageBox.information(self, "成功", f"{status} Skill: {name}")
+                status = _("chat_settings.enabled") if new_enabled else _("chat_settings.disabled")
+                QMessageBox.information(self, _("chat_settings.success"), f"{status} Skill: {name}")
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"操作失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.operation_failed") + f": {e}")
 
 
 class AddMcpServerDialog(QDialog):
@@ -693,7 +694,7 @@ class AddMcpServerDialog(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("添加MCP服务器")
+        self.setWindowTitle(_("chat_settings.add_mcp_server"))
         self.setModal(True)
         self.resize(500, 350)
         self.setStyleSheet(Theme.get_settings_dialog_stylesheet())
@@ -705,13 +706,13 @@ class AddMcpServerDialog(QDialog):
         form_layout = QFormLayout()
 
         self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("服务器名称")
-        form_layout.addRow("名称:", self._name_input)
+        self._name_input.setPlaceholderText(_("chat_settings.server_name"))
+        form_layout.addRow(_("chat_settings.server_name") + ":", self._name_input)
 
         self._type_combo = QComboBox()
-        self._type_combo.addItems(["stdio (本地)", "http (远程)"])
+        self._type_combo.addItems([_("chat_settings.stdio_local"), _("chat_settings.http_remote")])
         self._type_combo.currentIndexChanged.connect(self._on_type_changed)
-        form_layout.addRow("类型:", self._type_combo)
+        form_layout.addRow(_("chat_settings.server_type") + ":", self._type_combo)
 
         layout.addLayout(form_layout)
 
@@ -719,21 +720,21 @@ class AddMcpServerDialog(QDialog):
         stdio_layout = QFormLayout(self._stdio_widget)
 
         self._command_input = QLineEdit()
-        self._command_input.setPlaceholderText("如: python")
-        stdio_layout.addRow("命令:", self._command_input)
+        self._command_input.setPlaceholderText(_("chat_settings.command") + ": python")
+        stdio_layout.addRow(_("chat_settings.command") + ":", self._command_input)
 
         self._args_input = QLineEdit()
-        self._args_input.setPlaceholderText('如: ["-m", "server"] (JSON数组)')
-        stdio_layout.addRow("参数:", self._args_input)
+        self._args_input.setPlaceholderText(f"{_('chat_settings.example')}: [\"-m\", \"server\"] {_('chat_settings.json_array')}")
+        stdio_layout.addRow(_("chat_settings.args") + ":", self._args_input)
 
         self._env_input = QLineEdit()
-        self._env_input.setPlaceholderText('如: {"DEBUG": "1"} (JSON对象)')
-        stdio_layout.addRow("环境变量:", self._env_input)
+        self._env_input.setPlaceholderText(f"{_('chat_settings.example')}: {{\"DEBUG\": \"1\"}} {_('chat_settings.json_object')}")
+        stdio_layout.addRow(_("chat_settings.env_vars") + ":", self._env_input)
 
         self._timeout_spin = QSpinBox()
         self._timeout_spin.setRange(5, 300)
         self._timeout_spin.setValue(30)
-        stdio_layout.addRow("超时(秒):", self._timeout_spin)
+        stdio_layout.addRow(_("chat_settings.timeout_seconds") + ":", self._timeout_spin)
 
         layout.addWidget(self._stdio_widget)
 
@@ -741,12 +742,12 @@ class AddMcpServerDialog(QDialog):
         http_layout = QFormLayout(self._http_widget)
 
         self._url_input = QLineEdit()
-        self._url_input.setPlaceholderText("如: https://api.example.com/mcp")
-        http_layout.addRow("URL:", self._url_input)
+        self._url_input.setPlaceholderText(f"{_('chat_settings.example')}: https://api.example.com/mcp")
+        http_layout.addRow(_("chat_settings.url") + ":", self._url_input)
 
         self._transport_combo = QComboBox()
         self._transport_combo.addItems(["streamable_http", "sse"])
-        http_layout.addRow("传输方式:", self._transport_combo)
+        http_layout.addRow(_("chat_settings.transport") + ":", self._transport_combo)
 
         self._http_widget.hide()
         layout.addWidget(self._http_widget)
@@ -795,7 +796,7 @@ class EditMcpServerDialog(QDialog):
         super().__init__(parent)
         self._name = name
         self._manager = mcp_manager
-        self.setWindowTitle(f"编辑MCP服务器: {name}")
+        self.setWindowTitle(f'{_("chat_settings.edit_mcp_server")}: {name}')
         self.setModal(True)
         self.resize(500, 350)
         self._setup_ui()
@@ -807,10 +808,10 @@ class EditMcpServerDialog(QDialog):
         form_layout = QFormLayout()
 
         self._name_label = QLabel(self._name)
-        form_layout.addRow("名称:", self._name_label)
+        form_layout.addRow(_("chat_settings.server_name") + ":", self._name_label)
 
         self._type_label = QLabel()
-        form_layout.addRow("类型:", self._type_label)
+        form_layout.addRow(_("chat_settings.server_type") + ":", self._type_label)
 
         layout.addLayout(form_layout)
 
@@ -818,21 +819,21 @@ class EditMcpServerDialog(QDialog):
         stdio_layout = QFormLayout(self._stdio_widget)
 
         self._command_input = QLineEdit()
-        self._command_input.setPlaceholderText("如: python")
-        stdio_layout.addRow("命令:", self._command_input)
+        self._command_input.setPlaceholderText(_("chat_settings.command") + ": python")
+        stdio_layout.addRow(_("chat_settings.command") + ":", self._command_input)
 
         self._args_input = QLineEdit()
-        self._args_input.setPlaceholderText('如: ["-m", "server"] (JSON数组)')
-        stdio_layout.addRow("参数:", self._args_input)
+        self._args_input.setPlaceholderText(f"{_('chat_settings.example')}: [\"-m\", \"server\"] {_('chat_settings.json_array')}")
+        stdio_layout.addRow(_("chat_settings.args") + ":", self._args_input)
 
         self._env_input = QLineEdit()
-        self._env_input.setPlaceholderText('如: {"DEBUG": "1"} (JSON对象)')
-        stdio_layout.addRow("环境变量:", self._env_input)
+        self._env_input.setPlaceholderText(f"{_('chat_settings.example')}: {{\"DEBUG\": \"1\"}} {_('chat_settings.json_object')}")
+        stdio_layout.addRow(_("chat_settings.env_vars") + ":", self._env_input)
 
         self._timeout_spin = QSpinBox()
         self._timeout_spin.setRange(5, 300)
         self._timeout_spin.setValue(30)
-        stdio_layout.addRow("超时(秒):", self._timeout_spin)
+        stdio_layout.addRow(_("chat_settings.timeout_seconds") + ":", self._timeout_spin)
 
         layout.addWidget(self._stdio_widget)
 
@@ -840,12 +841,12 @@ class EditMcpServerDialog(QDialog):
         http_layout = QFormLayout(self._http_widget)
 
         self._url_input = QLineEdit()
-        self._url_input.setPlaceholderText("如: https://api.example.com/mcp")
-        http_layout.addRow("URL:", self._url_input)
+        self._url_input.setPlaceholderText(f"{_('chat_settings.example')}: https://api.example.com/mcp")
+        http_layout.addRow(_("chat_settings.url") + ":", self._url_input)
 
         self._transport_combo = QComboBox()
         self._transport_combo.addItems(["streamable_http", "sse"])
-        http_layout.addRow("传输方式:", self._transport_combo)
+        http_layout.addRow(_("chat_settings.transport") + ":", self._transport_combo)
 
         self._http_widget.hide()
         layout.addWidget(self._http_widget)
@@ -865,7 +866,7 @@ class EditMcpServerDialog(QDialog):
             return
 
         server_type = server.get("server_type", "stdio")
-        self._type_label.setText(f"{server_type} ({'本地' if server_type == 'stdio' else '远程'})")
+        self._type_label.setText(f"{server_type} ({_('chat_settings.local') if server_type == 'stdio' else _('chat_settings.remote')})")
 
         if server_type == "stdio":
             self._stdio_widget.show()
@@ -929,7 +930,7 @@ class McpPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("MCP服务管理")
+        title = QLabel(_("chat_settings.mcp_management"))
         title.setStyleSheet(Theme.get_title_label_stylesheet())
         layout.addWidget(title)
 
@@ -939,19 +940,19 @@ class McpPanel(QWidget):
 
         button_layout = QHBoxLayout()
 
-        add_btn = QPushButton("添加")
+        add_btn = QPushButton(_("chat_settings.add"))
         add_btn.clicked.connect(self._add_server)
         add_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        edit_btn = QPushButton("编辑")
+        edit_btn = QPushButton(_("chat_settings.edit"))
         edit_btn.clicked.connect(self._edit_server)
         edit_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        delete_btn = QPushButton("删除")
+        delete_btn = QPushButton(_("chat_settings.delete"))
         delete_btn.clicked.connect(self._delete_server)
         delete_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
-        toggle_btn = QPushButton("启用/禁用")
+        toggle_btn = QPushButton(_("chat_settings.enable_disable"))
         toggle_btn.clicked.connect(self._toggle_server)
         toggle_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
@@ -980,7 +981,7 @@ class McpPanel(QWidget):
             values = dialog.get_values()
             name = values.get("name")
             if not name:
-                QMessageBox.warning(self, "错误", "请输入服务器名称")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.enter_server_name"))
                 return
 
             try:
@@ -1004,14 +1005,14 @@ class McpPanel(QWidget):
                     )
                 self._load_servers()
                 self.server_added.emit(name)
-                QMessageBox.information(self, "成功", f"已添加MCP服务器: {name}")
+                QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.mcp_server_added").format(name=name))
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"添加失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.add_failed") + f": {e}")
 
     def _edit_server(self):
         current_item = self._server_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "提示", "请先选择要编辑的MCP服务器")
+            QMessageBox.warning(self, _("chat_settings.input_error"), _("chat_settings.please_select_item"))
             return
 
         server = current_item.data(Qt.ItemDataRole.UserRole)
@@ -1040,9 +1041,9 @@ class McpPanel(QWidget):
                         transport=values["transport"],
                     )
                 self._load_servers()
-                QMessageBox.information(self, "成功", f"已更新MCP服务器: {name}")
+                QMessageBox.information(self, _("chat_settings.success"), _("chat_settings.mcp_server_updated").format(name=name))
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"更新失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.update_failed") + f": {e}")
 
     def _delete_server(self):
         current_item = self._server_list.currentItem()
@@ -1051,8 +1052,8 @@ class McpPanel(QWidget):
             name = server["name"]
             reply = QMessageBox.question(
                 self,
-                "确认删除",
-                f"确定要删除MCP服务器 {name} 吗?",
+                _("chat_settings.confirm_delete"),
+                _("chat_settings.confirm_delete_mcp_server").format(name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -1061,7 +1062,7 @@ class McpPanel(QWidget):
                     self._load_servers()
                     self.server_deleted.emit(name)
                 except Exception as e:
-                    QMessageBox.warning(self, "错误", f"删除失败: {e}")
+                    QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.delete_failed") + f": {e}")
 
     def _toggle_server(self):
         current_item = self._server_list.currentItem()
@@ -1073,10 +1074,10 @@ class McpPanel(QWidget):
                 self._manager.set_enabled(name, new_enabled)
                 self._load_servers()
                 self.server_toggled.emit(name, new_enabled)
-                status = "已启用" if new_enabled else "已禁用"
-                QMessageBox.information(self, "成功", f"{status} MCP服务器: {name}")
+                status = _("chat_settings.enabled") if new_enabled else _("chat_settings.disabled")
+                QMessageBox.information(self, _("chat_settings.success"), f"{status} {_('chat_settings.mcp_tab')}: {name}")
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"操作失败: {e}")
+                QMessageBox.warning(self, _("chat_settings.error"), _("chat_settings.operation_failed") + f": {e}")
 
 
 class AgentSettingsDialog(QDialog):
@@ -1091,7 +1092,7 @@ class AgentSettingsDialog(QDialog):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("AI助手设置")
+        self.setWindowTitle(_("chat_settings.agent_settings"))
         self.setModal(True)
         self.resize(650, 550)
         self._api_key_manager = api_key_manager
@@ -1107,7 +1108,7 @@ class AgentSettingsDialog(QDialog):
         self._tabs.setStyleSheet(Theme.get_node_tree_stylesheet())
 
         self._api_key_panel = ApiKeyPanel(self._api_key_manager)
-        self._tabs.addTab(self._api_key_panel, "API密钥")
+        self._tabs.addTab(self._api_key_panel, _("chat_settings.api_key_tab"))
 
         if self._on_api_key_changed:
             self._api_key_panel.key_added.connect(lambda p, k: self._on_api_key_changed())
@@ -1117,11 +1118,11 @@ class AgentSettingsDialog(QDialog):
 
         if self._skill_manager:
             self._skill_panel = SkillPanel(self._skill_manager)
-            self._tabs.addTab(self._skill_panel, "Skills")
+            self._tabs.addTab(self._skill_panel, _("chat_settings.skills_tab"))
 
         if self._mcp_manager:
             self._mcp_panel = McpPanel(self._mcp_manager)
-            self._tabs.addTab(self._mcp_panel, "MCP服务")
+            self._tabs.addTab(self._mcp_panel, _("chat_settings.mcp_tab"))
 
         layout.addWidget(self._tabs)
 

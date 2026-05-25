@@ -23,6 +23,7 @@ dependencies = [
     # 配置管理
     "PyYAML>=6.0",
     "pymilvus>=2.6.12",
+    "pillow>=12.2.0",
 ]
 
 [project.optional-dependencies]

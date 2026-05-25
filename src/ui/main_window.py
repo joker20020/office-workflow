@@ -65,13 +65,15 @@ from src.storage.repositories import (
     PluginRepository,
 )
 from src.utils.logger import get_logger
+from src.ui.i18n_manager import I18nManager, _
+from src.ui.language_aware import LanguageAwareMixin
 from src.ui.theme import Theme
 from src.ui.theme_manager import ThemeManager
 
 _logger = get_logger(__name__)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, LanguageAwareMixin):
     """主窗口 - 应用程序的核心界面"""
 
     def __init__(
@@ -150,6 +152,9 @@ class MainWindow(QMainWindow):
         self._theme_manager = ThemeManager.instance()
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
 
+        self._setup_language_awareness()
+        self._i18n_manager = I18nManager.instance()
+
         # 订阅 EventBus 事件以响应节点值变更
         if self._app_context is not None:
             from src.core.event_bus import EventType
@@ -167,7 +172,7 @@ class MainWindow(QMainWindow):
         app_icon = self._load_app_icon()
         if app_icon and not app_icon.isNull():
             self.setWindowIcon(app_icon)
-        self.setWindowTitle("Agent工艺智能生成系统")
+        self.setWindowTitle(_("app.title"))
         self.setMinimumSize(800, 600)
         self.resize(1280, 900)
 
@@ -188,7 +193,7 @@ class MainWindow(QMainWindow):
 
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("就绪")
+        self._status_bar.showMessage(_("status.ready"))
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
 
         self._setup_default_nav_items()
@@ -208,12 +213,12 @@ class MainWindow(QMainWindow):
         self.add_page("packages", self._create_packages_page())
         self.add_page("settings", self._create_settings_page())
 
-        self._nav_rail.add_item("home", "首页", "🏠")
-        self._nav_rail.add_item("nodes", "节点编辑器", "🔧")
-        self._nav_rail.add_item("agent", "AI 助手", "🤖")
-        self._nav_rail.add_item("plugins", "插件管理", "🧩")
-        self._nav_rail.add_item("packages", "节点包", "📦")
-        self._nav_rail.add_item("settings", "设置", "⚙️")
+        self._nav_rail.add_item("home", _("nav.home"), "🏠")
+        self._nav_rail.add_item("nodes", _("nav.nodes"), "🔧")
+        self._nav_rail.add_item("agent", _("nav.agent"), "🤖")
+        self._nav_rail.add_item("plugins", _("nav.plugins"), "🧩")
+        self._nav_rail.add_item("packages", _("nav.packages"), "📦")
+        self._nav_rail.add_item("settings", _("nav.settings"), "⚙️")
 
     @staticmethod
     def _load_app_icon() -> QIcon:
@@ -333,7 +338,7 @@ class MainWindow(QMainWindow):
     def _on_nav_changed(self, item_id: str) -> None:
         """导航项改变处理"""
         self.show_page(item_id)
-        self._status_bar.showMessage(f"当前: {item_id}")
+        self._status_bar.showMessage(f"{_('status.current')}: {item_id}")
 
         if item_id == "nodes" and hasattr(self, "_node_editor_panel") and self._node_editor_panel:
             self._node_editor_panel.set_graph(self._node_graph)
@@ -342,7 +347,7 @@ class MainWindow(QMainWindow):
         """处理首页导航请求"""
         self._nav_rail.set_current(item_id)
         self.show_page(item_id)
-        self._status_bar.showMessage(f"当前: {item_id}")
+        self._status_bar.showMessage(f"{_('status.current')}: {item_id}")
 
     def _on_load_workflow_requested(self, page_id: str, file_path: str) -> None:
         """处理加载工作流请求"""
@@ -352,13 +357,13 @@ class MainWindow(QMainWindow):
 
         self._nav_rail.set_current("nodes")
         self._node_editor_panel.load_workflow(file_path)
-        self._status_bar.showMessage(f"已加载: {Path(file_path).name}")
+        self._status_bar.showMessage(f"{_('status.loaded')}: {Path(file_path).name}")
 
         if hasattr(self, "_home_page") and self._node_graph:
             node_count = len(self._node_graph.nodes)
             self._home_page.add_recent_workflow(
                 self._node_graph.id,
-                title=self._node_graph.name or "未命名工作流",
+                title=self._node_graph.name or _("home.unnamed_workflow"),
                 node_count=node_count,
                 file_path=file_path,
             )
@@ -369,14 +374,14 @@ class MainWindow(QMainWindow):
             node_count = len(self._node_graph.nodes) if self._node_graph else 0
             self._home_page.add_recent_workflow(
                 workflow_id,
-                title=self._node_graph.name or "未命名工作流",
+                title=self._node_graph.name or _("home.unnamed_workflow"),
                 node_count=node_count,
                 file_path=file_path,
             )
         else:
-            _logger.info(f"工作流已保存: {self._node_graph.name or '未命名工作流'}")
+            _logger.info(f"工作流已保存: {self._node_graph.name or _('home.unnamed_workflow')}")
 
-        self._status_bar.showMessage(f"工作流已保存: {self._node_graph.name or '未命名工作流'}")
+        self._status_bar.showMessage(f"{_('status.saved')}: {self._node_graph.name or _('home.unnamed_workflow')}")
 
     def set_status(self, message: str) -> None:
         """
@@ -479,7 +484,7 @@ class MainWindow(QMainWindow):
         self.refresh_plugin_panel()
         success_count = sum(1 for v in results.values() if v)
         total_count = len(results)
-        self._status_bar.showMessage(f"插件刷新完成: {success_count}/{total_count} 成功")
+        self._status_bar.showMessage(_("plugin.refresh_complete").format(success_count=success_count, total_count=total_count))
         _logger.info(f"插件刷新完成: {success_count}/{total_count} 成功")
 
     def _on_plugin_uninstall_requested(self, plugin_name: str) -> None:
@@ -491,10 +496,10 @@ class MainWindow(QMainWindow):
         plugin_manager = self._app_context.plugin_manager
         success = plugin_manager.uninstall_plugin(plugin_name)
         if success:
-            self._status_bar.showMessage(f"插件已卸载: {plugin_name}")
+            self._status_bar.showMessage(_("plugin.uninstall_success").format(plugin_name=plugin_name))
             self.refresh_plugin_panel()
         else:
-            QMessageBox.warning(self, "失败", f"卸载插件 {plugin_name} 失败")
+            QMessageBox.warning(self, _("plugin.fail"), _("plugin.uninstall_failed").format(plugin_name=plugin_name))
 
     def _show_permission_dialog(self, plugin_name: str) -> None:
         if self._app_context is None:
@@ -574,17 +579,17 @@ class MainWindow(QMainWindow):
     def _on_package_installed(self, package_id: str) -> None:
         """处理包安装完成事件"""
         _logger.info(f"包安装完成: {package_id}")
-        self._status_bar.showMessage(f"包已安装: {package_id}")
+        self._status_bar.showMessage(_("package.installed").format(package_id=package_id))
 
     def _on_package_updated(self, package_id: str) -> None:
         """处理包更新完成事件"""
         _logger.info(f"包更新完成: {package_id}")
-        self._status_bar.showMessage(f"包已更新: {package_id}")
+        self._status_bar.showMessage(_("package.updated").format(package_id=package_id))
 
     def _on_package_deleted(self, package_id: str) -> None:
         """处理包删除完成事件"""
         _logger.info(f"包已删除: {package_id}")
-        self._status_bar.showMessage(f"包已删除: {package_id}")
+        self._status_bar.showMessage(_("package.deleted_status").format(package_id=package_id))
 
     def closeEvent(self, event) -> None:
         _logger.info("主窗口关闭")
@@ -594,5 +599,28 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(Theme.get_main_window_stylesheet())
         self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
-        theme_display = "深色" if theme_name == "dark" else "浅色"
-        self._status_bar.showMessage(f"主题已切换为: {theme_display}")
+        theme_display = _("theme.dark") if theme_name == "dark" else _("theme.light")
+        self._status_bar.showMessage(f"{_('status.theme_changed')}: {theme_display}")
+
+    def refresh_language(self) -> None:
+        """刷新语言文本"""
+        self.setWindowTitle(_("app.title"))
+        self._status_bar.showMessage(_("status.ready"))
+
+        # 刷新导航栏文本
+        if hasattr(self, "_nav_rail"):
+            self._nav_rail.refresh_language()
+
+        # 通知子页面刷新语言
+        if hasattr(self, "_home_page"):
+            self._home_page.refresh_language()
+        if hasattr(self, "_settings_panel"):
+            self._settings_panel.refresh_language()
+        if hasattr(self, "_node_editor_panel") and hasattr(self._node_editor_panel, "refresh_language"):
+            self._node_editor_panel.refresh_language()
+        if hasattr(self, "_chat_panel") and hasattr(self._chat_panel, "refresh_language"):
+            self._chat_panel.refresh_language()
+        if hasattr(self, "_plugin_panel") and hasattr(self._plugin_panel, "refresh_language"):
+            self._plugin_panel.refresh_language()
+        if hasattr(self, "_package_panel") and hasattr(self._package_panel, "refresh_language"):
+            self._package_panel.refresh_language()
