@@ -172,13 +172,13 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         toolbar.setStyleSheet(Theme.get_toolbar_stylesheet())
 
         self._execute_btn = QToolButton()
-        self._execute_btn.setText(f"▶ {_(\"node_editor.run\")}")
+        self._execute_btn.setText("▶ " + _("node_editor.run"))
         self._execute_btn.setToolTip(_("node_editor.run_tooltip"))
         self._execute_btn.clicked.connect(self._on_execute)
         toolbar.addWidget(self._execute_btn)
 
         self._stop_btn = QToolButton()
-        self._stop_btn.setText(f"⏹ {_(\"node_editor.stop\")}")
+        self._stop_btn.setText("⏹ " + _("node_editor.stop"))
         self._stop_btn.setToolTip(_("node_editor.stop_tooltip"))
         self._stop_btn.clicked.connect(self._on_stop_execution)
         self._stop_btn.setVisible(False)
@@ -187,13 +187,13 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         toolbar.addSeparator()
 
         self._save_btn = QToolButton()
-        self._save_btn.setText(f"💾 {_(\"node_editor.save\")}")
+        self._save_btn.setText("💾 " + _("node_editor.save"))
         self._save_btn.setToolTip(_("node_editor.save_tooltip"))
         self._save_btn.clicked.connect(self._on_save)
         toolbar.addWidget(self._save_btn)
 
         self._load_btn = QToolButton()
-        self._load_btn.setText(f"📂 {_(\"node_editor.load\")}")
+        self._load_btn.setText("📂 " + _("node_editor.load"))
         self._load_btn.setToolTip(_("node_editor.load_tooltip"))
         self._load_btn.clicked.connect(self._on_load)
         toolbar.addWidget(self._load_btn)
@@ -201,7 +201,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         toolbar.addSeparator()
 
         self._clear_btn = QToolButton()
-        self._clear_btn.setText(f"🗑️ {_(\"node_editor.clear\")}")
+        self._clear_btn.setText("🗑️ " + _("node_editor.clear"))
         self._clear_btn.setToolTip(_("node_editor.clear_tooltip"))
         self._clear_btn.clicked.connect(self._on_clear)
         toolbar.addWidget(self._clear_btn)
@@ -209,7 +209,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         toolbar.addSeparator()
 
         self._fit_btn = QToolButton()
-        self._fit_btn.setText(f"⊞ {_(\"node_editor.fit\")}")
+        self._fit_btn.setText("⊞ " + _("node_editor.fit"))
         self._fit_btn.setToolTip(_("node_editor.fit_tooltip"))
         self._fit_btn.clicked.connect(self._view.fit_to_view)
         toolbar.addWidget(self._fit_btn)
@@ -333,7 +333,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         )
         self._graph = graph
         self._scene.set_graph(graph)
-        self._status_label.setText(f"{_(\"status.loaded\")}: {graph.name}")
+        self._status_label.setText(_("status.loaded") + ": {graph.name}")
         # 强制刷新视图以确保节点正确显示
         self._view.viewport().update()
         _logger.info(f"[Thread: {threading.current_thread().name}] NodeEditorPanel.set_graph完成")
@@ -349,7 +349,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
             name = _("home.unnamed_workflow")
         self._graph = NodeGraph(name=name)
         self._scene.set_graph(self._graph)
-        self._status_label.setText(f"{_(\"node_editor.new_graph\")}: {name}")
+        self._status_label.setText(_("node_editor.new_graph") + ": {name}")
         return self._graph
 
     def _on_execute(self) -> None:
@@ -383,10 +383,10 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         total_count = len(results)
 
         if success_count == total_count:
-            self._status_label.setText(f"✅ {_(\"node_editor.exec_success\")}: {success_count}/{total_count}")
+            self._status_label.setText("✅ " + _("node_editor.exec_success") + ": {success_count}/{total_count}")
             self.workflow_executed.emit(True)
         else:
-            self._status_label.setText(f"❌ {_(\"node_editor.exec_failed\")}: {success_count}/{total_count}")
+            self._status_label.setText("❌ " + _("node_editor.exec_failed") + ": {success_count}/{total_count}")
             self.workflow_executed.emit(False)
 
         self._update_all_output_widgets()
@@ -394,7 +394,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
     def _on_execution_error(self, error_msg: str) -> None:
         """工作流执行错误回调"""
-        self._status_label.setText(f"❌ {_(\"node_editor.exec_error\")}: {error_msg}")
+        self._status_label.setText("❌ " + _("node_editor.exec_error") + ": {error_msg}")
         self.workflow_executed.emit(False)
         self._cleanup_execution()
 
@@ -459,7 +459,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         default_name = self._graph.name or _("home.unnamed_workflow")
         default_file = workflows_dir / f"{default_name}.json"
 
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
             self,
             _("node_editor.save_dialog_title"),
             str(default_file),
@@ -477,11 +477,11 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
             json_str = serialize_graph(self._graph)
             Path(file_path).write_text(json_str, encoding="utf-8")
 
-            self._status_label.setText(f"{_(\"status.saved\")}: {Path(file_path).name}")
+            self._status_label.setText(_("status.saved") + ": {Path(file_path).name}")
             self.workflow_saved.emit(self._graph.id, file_path)
             _logger.info(f"工作流已保存: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self, _("node_editor.error"), f"{_(\"node_editor.save_failed\")}: {str(e)}")
+            QMessageBox.critical(self, _("node_editor.error"), _("node_editor.save_failed") + ": {str(e)}")
             _logger.error(f"保存工作流失败: {e}", exc_info=True)
 
     def _on_load(self) -> None:
@@ -491,7 +491,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
         workflows_dir.mkdir(parents=True, exist_ok=True)
 
         # 打开文件选择对话框
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
             self,
             _("node_editor.load_dialog_title"),
             str(workflows_dir),
@@ -519,13 +519,13 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
                     for port_name, value in node.outputs.items():
                         node_item.set_output_value(port_name, value)
 
-            self._status_label.setText(f"{_(\"status.loaded\")}: {Path(file_path).name}")
+            self._status_label.setText(_("status.loaded") + ": {Path(file_path).name}")
             _logger.info(f"工作流已加载: {file_path}")
         except json.JSONDecodeError as e:
-            QMessageBox.critical(self, _("node_editor.error"), f"{_(\"node_editor.invalid_json\")}: {str(e)}")
+            QMessageBox.critical(self, _("node_editor.error"), _("node_editor.invalid_json") + ": {str(e)}")
             _logger.error(f"加载工作流失败: {e}", exc_info=True)
         except Exception as e:
-            QMessageBox.critical(self, _("node_editor.error"), f"{_(\"node_editor.load_failed\")}: {str(e)}")
+            QMessageBox.critical(self, _("node_editor.error"), _("node_editor.load_failed") + ": {str(e)}")
             _logger.error(f"加载工作流失败: {e}", exc_info=True)
 
     def _on_clear(self) -> None:
@@ -551,7 +551,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
         node = self._graph.add_node(node_type, position=(x, y))
         self._scene._create_node_item(node)
-        self._status_label.setText(f"{_(\"node_editor.added_node\")}: {node_type}")
+        self._status_label.setText(_("node_editor.added_node") + ": {node_type}")
         _logger.info(f"拖放添加节点: {node_type} at ({x:.0f}, {y:.0f})")
 
     def _on_node_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
@@ -568,7 +568,7 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
 
         node = self._graph.add_node(node_type, position=(center.x(), center.y()))
         self._scene._create_node_item(node)
-        self._status_label.setText(f"{_(\"node_editor.added_node\")}: {node_type}")
+        self._status_label.setText(_("node_editor.added_node") + ": {node_type}")
         _logger.info(f"双击添加节点: {node_type}")
 
     @property
@@ -601,17 +601,17 @@ class NodeEditorPanel(QWidget, ThemeAwareMixin):
                     for port_name, value in node.outputs.items():
                         node_item.set_output_value(port_name, value)
 
-            self._status_label.setText(f"{_(\"status.loaded\")}: {Path(file_path).name}")
+            self._status_label.setText(_("status.loaded") + ": {Path(file_path).name}")
             _logger.info(f"工作流已加载: {file_path}")
         except json.JSONDecodeError as e:
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.critical(self, _("node_editor.error"), f"{_(\"node_editor.invalid_json\")}: {str(e)}")
+            QMessageBox.critical(self, _("node_editor.error"), _("node_editor.invalid_json") + ": {str(e)}")
             _logger.error(f"加载工作流失败: {e}", exc_info=True)
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.critical(self, _("node_editor.error"), f"{_(\"node_editor.load_failed\")}: {str(e)}")
+            QMessageBox.critical(self, _("node_editor.error"), _("node_editor.load_failed") + ": {str(e)}")
             _logger.error(f"加载工作流失败: {e}", exc_info=True)
 
     def refresh_theme(self) -> None:

@@ -1,0 +1,13 @@
+{
+    "id": "com.office.textTools",
+    "name": "文本处理工具",
+    "version": "1.0.0",
+    "author": "OfficeTools",
+    "description": "文本处理工具包，提供文本清洗、问题生成、文本增强、文件保存等节点",
+    "nodes": [
+        "text.clean",
+        "text.generate_questions",
+        "text.augment",
+        "text.save_jsonl"
+    ]
+}

@@ -1,0 +1,287 @@
+{
+  "id": "capp-rag-augmentation-001",
+  "name": "CAPP工艺卡片RAG数据增强工作流",
+  "nodes": [
+    {
+      "id": "file-input-001",
+      "node_type": "input.file",
+      "position": [
+        -900.0,
+        0.0
+      ],
+      "widget_values": {
+        "file_path": ""
+      },
+      "outputs": {
+        "output": ""
+      }
+    },
+    {
+      "id": "api-config-001",
+      "node_type": "input.string",
+      "position": [
+        -900.0,
+        200.0
+      ],
+      "widget_values": {
+        "value": ""
+      },
+      "outputs": {
+        "output": ""
+      }
+    },
+    {
+      "id": "url-config-001",
+      "node_type": "input.string",
+      "position": [
+        -900.0,
+        350.0
+      ],
+      "widget_values": {
+        "value": "https://api.openai.com/v1"
+      },
+      "outputs": {
+        "output": "https://api.openai.com/v1"
+      }
+    },
+    {
+      "id": "model-config-001",
+      "node_type": "input.string",
+      "position": [
+        -900.0,
+        500.0
+      ],
+      "widget_values": {
+        "value": "gpt-4"
+      },
+      "outputs": {
+        "output": "gpt-4"
+      }
+    },
+    {
+      "id": "text-clean-001",
+      "node_type": "text.clean",
+      "position": [
+        -540.0,
+        -392.0
+      ],
+      "widget_values": {
+        "preserve_linebreaks": true,
+        "normalize_whitespace": true
+      },
+      "outputs": {
+        "cleaned_text": "",
+        "removed_count": 0
+      }
+    },
+    {
+      "id": "llm-structure-001",
+      "node_type": "llm.markdown_structure",
+      "position": [
+        -508.0,
+        -93.0
+      ],
+      "widget_values": {
+        "temperature": 0.3
+      },
+      "outputs": {
+        "markdown": "",
+        "success": false,
+        "usage": "",
+        "error": ""
+      }
+    },
+    {
+      "id": "generate-questions-001",
+      "node_type": "text.generate_questions",
+      "position": [
+        -137.0,
+        -37.0
+      ],
+      "widget_values": {
+        "question_type": "全部",
+        "count_per_type": 5
+      },
+      "outputs": {
+        "questions": [],
+        "question_json": "[]"
+      }
+    },
+    {
+      "id": "text-augment-001",
+      "node_type": "text.augment",
+      "position": [
+        -130.0,
+        197.0
+      ],
+      "widget_values": {
+        "methods": "全部",
+        "augment_count": 3
+      },
+      "outputs": {
+        "augmented_texts": [],
+        "augmented_json": "[]"
+      }
+    },
+    {
+      "id": "output-path-001",
+      "node_type": "input.string",
+      "position": [
+        -480.0,
+        537.0
+      ],
+      "widget_values": {
+        "value": "datasets/capp_training_samples.jsonl"
+      },
+      "outputs": {
+        "output": "datasets/capp_training_samples.jsonl"
+      }
+    },
+    {
+      "id": "save-jsonl-001",
+      "node_type": "text.save_jsonl",
+      "position": [
+        -130.0,
+        485.0
+      ],
+      "widget_values": {
+        "append": false
+      },
+      "outputs": {
+        "success": false,
+        "saved_path": "",
+        "count": 0
+      }
+    },
+    {
+      "id": "preview-markdown-001",
+      "node_type": "preview.text",
+      "position": [
+        -503.0,
+        260.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "text_out": ""
+      }
+    },
+    {
+      "id": "preview-questions-001",
+      "node_type": "preview.text",
+      "position": [
+        -497.0,
+        402.0
+      ],
+      "widget_values": {},
+      "outputs": {
+        "text_out": ""
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "bb5f042f-f018-4572-9f43-072bf3019b49",
+      "source_node": "file-input-001",
+      "source_port": "output",
+      "target_node": "text-clean-001",
+      "target_port": "text",
+      "is_back_edge": false
+    },
+    {
+      "id": "99542a2a-27a2-4ca7-b1c0-0619172eb0bd",
+      "source_node": "text-clean-001",
+      "source_port": "cleaned_text",
+      "target_node": "llm-structure-001",
+      "target_port": "raw_text",
+      "is_back_edge": false
+    },
+    {
+      "id": "3758eea1-0b0c-4a11-9048-160921752440",
+      "source_node": "api-config-001",
+      "source_port": "output",
+      "target_node": "llm-structure-001",
+      "target_port": "api_key",
+      "is_back_edge": false
+    },
+    {
+      "id": "4184d786-7c45-4238-bc4b-3e31f8d4b696",
+      "source_node": "url-config-001",
+      "source_port": "output",
+      "target_node": "llm-structure-001",
+      "target_port": "base_url",
+      "is_back_edge": false
+    },
+    {
+      "id": "5e2daf2f-106c-4420-8a89-6c4b6524ab66",
+      "source_node": "model-config-001",
+      "source_port": "output",
+      "target_node": "llm-structure-001",
+      "target_port": "model",
+      "is_back_edge": false
+    },
+    {
+      "id": "3ea751d2-aa96-45b2-9e67-b101ba103da4",
+      "source_node": "llm-structure-001",
+      "source_port": "markdown",
+      "target_node": "generate-questions-001",
+      "target_port": "markdown_text",
+      "is_back_edge": false
+    },
+    {
+      "id": "33cb5e0e-f863-474b-a984-e6868fcfd1cc",
+      "source_node": "generate-questions-001",
+      "source_port": "questions",
+      "target_node": "text-augment-001",
+      "target_port": "text",
+      "is_back_edge": false
+    },
+    {
+      "id": "97b2d104-0c9a-4ac1-a0a3-9e1cbdc024cd",
+      "source_node": "api-config-001",
+      "source_port": "output",
+      "target_node": "text-augment-001",
+      "target_port": "api_key",
+      "is_back_edge": false
+    },
+    {
+      "id": "0740406f-b4d6-4b9a-960b-6a1eaf4b1043",
+      "source_node": "url-config-001",
+      "source_port": "output",
+      "target_node": "text-augment-001",
+      "target_port": "base_url",
+      "is_back_edge": false
+    },
+    {
+      "id": "17d66ce5-705a-4c8a-9549-bebcabe5549e",
+      "source_node": "text-augment-001",
+      "source_port": "augmented_texts",
+      "target_node": "save-jsonl-001",
+      "target_port": "data",
+      "is_back_edge": false
+    },
+    {
+      "id": "a336cca4-9fe3-40c5-aa92-1593ca7ac5db",
+      "source_node": "output-path-001",
+      "source_port": "output",
+      "target_node": "save-jsonl-001",
+      "target_port": "file_path",
+      "is_back_edge": false
+    },
+    {
+      "id": "c31ec6b9-1949-45e9-ad61-ac4326d6f147",
+      "source_node": "llm-structure-001",
+      "source_port": "markdown",
+      "target_node": "preview-markdown-001",
+      "target_port": "text",
+      "is_back_edge": false
+    },
+    {
+      "id": "d7d0db6a-a6c4-443a-aaa6-488b8c55e7be",
+      "source_node": "generate-questions-001",
+      "source_port": "question_json",
+      "target_node": "preview-questions-001",
+      "target_port": "text",
+      "is_back_edge": false
+    }
+  ]
+}

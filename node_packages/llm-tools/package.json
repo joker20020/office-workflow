@@ -1,0 +1,11 @@
+{
+    "id": "com.office.llmTools",
+    "name": "大语言模型工具",
+    "version": "1.0.0",
+    "author": "OfficeTools",
+    "description": "大语言模型调用工具包，提供LLM对话、结构化整理等节点，支持OpenAI兼容格式API",
+    "nodes": [
+        "llm.chat",
+        "llm.markdown_structure"
+    ]
+}

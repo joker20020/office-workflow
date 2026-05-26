@@ -655,7 +655,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _select_image(self):
         from PySide6.QtWidgets import QFileDialog
 
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
             self, _("chat.choose_image"), "", "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)"
         )
         if file_path:
@@ -664,7 +664,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _select_audio(self):
         from PySide6.QtWidgets import QFileDialog
 
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
             self, _("chat.choose_audio"), "", "Audio (*.mp3 *.wav *.aac *.ogg *.flac)"
         )
         if file_path:
@@ -673,7 +673,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _select_video(self):
         from PySide6.QtWidgets import QFileDialog
 
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
             self, _("chat.choose_video"), "", "Video (*.mp4 *.avi *.mov *.mkv *.webm)"
         )
         if file_path:

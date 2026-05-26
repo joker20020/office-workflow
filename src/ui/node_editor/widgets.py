@@ -556,7 +556,7 @@ class FilePickerButton(InlineWidgetBase):
 
         parent_window = QApplication.activeWindow()
 
-        file_path, _ = QFileDialog.getOpenFileName(parent_window, _("node_editor.choose_file"), "", filter_str)
+        file_path, _selected_filter = QFileDialog.getOpenFileName(parent_window, _("node_editor.choose_file"), "", filter_str)
 
         if file_path:
             self.set_value(file_path)
@@ -698,7 +698,7 @@ class OutputTextLabel(OutputLabelBase):
 
     def set_error(self, error_msg: str) -> None:
         """设置错误状态"""
-        self._label.setText(f"{_(\"node_editor.error\")}: {error_msg[:20]}...")
+        self._label.setText(_("node_editor.error") + ": {error_msg[:20]}...")
         self._label.setToolTip(error_msg)
         self._label.setStyleSheet(Theme.get_inline_output_label_error_stylesheet())
         self._is_error = True
@@ -848,18 +848,18 @@ class OutputDataPreview(OutputLabelBase):
 
         if isinstance(value, list):
             type_name = "list"
-            preview = f"[{len(value)} {_(\"node_editor.items\")}]"
+            preview = "[{len(value)} " + _("node_editor.items") + "]"
             if value:
                 preview += f" {repr(value[0])[:20]}..."
         elif isinstance(value, dict):
             type_name = "dict"
-            preview = f"{{{len(value)} {_(\"node_editor.keys\")}}}"
+            preview = "{{{len(value)} " + _("node_editor.keys") + "}}"
         elif hasattr(value, "shape"):
             # DataFrame 或类似结构
             try:
                 shape = value.shape
                 type_name = "DataFrame"
-                preview = f"{shape[0]}{_(\"node_editor.rows\")} x {shape[1]}{_(\"node_editor.cols\")}"
+                preview = "{shape[0]}" + _("node_editor.rows") + " x {shape[1]}{_(\"node_editor.cols\")}"
             except Exception:
                 pass
 
