@@ -219,15 +219,109 @@ class _APIRequester:
 
 
 class _MoyuClient:
-    """与 database.py 中 MoyuClient 功能一致：Milvus 向量数据库 + APIRequester"""
+    """MoyuClient - Milvus 向量数据库客户端，支持完整的 CRUD 操作。
 
-    def __init__(self, requester: _APIRequester, uri="http://localhost:19530"):
-        from pymilvus import MilvusClient
+    嵌入全部通过远程 requester 完成，向量维度根据嵌入结果动态确定。
+    """
+
+    def __init__(self, requester: _APIRequester, uri="http://localhost:19530", dim=None):
+        from pymilvus import MilvusClient, DataType
         self._client = MilvusClient(uri=uri)
         self.requester = requester
+        self._DataType = DataType
+        self._dim = dim
+
+    # ==================== Collection 管理 ====================
+
+    def init_collection(self, collection_name: str = "rag_embeddings"):
+        """初始化集合。如果集合已存在则返回加载状态，否则创建新集合。"""
+        if self._client.has_collection(collection_name=collection_name):
+            return self._client.get_load_state(collection_name=collection_name)
+
+        dim = self._get_embedding_dim()
+
+        schema = self._client.create_schema(
+            auto_id=True,
+            enable_dynamic_field=True,
+        )
+
+        schema.add_field(field_name="id", datatype=self._DataType.INT64, is_primary=True)
+        schema.add_field(field_name="embedding", datatype=self._DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(field_name="type", datatype=self._DataType.VARCHAR, max_length=16)
+        schema.add_field(field_name="path", datatype=self._DataType.VARCHAR, max_length=1024)
+        schema.add_field(field_name="text", datatype=self._DataType.VARCHAR, max_length=65535)
+        schema.add_field(field_name="subject", datatype=self._DataType.VARCHAR, max_length=64)
+
+        index_params = self._client.prepare_index_params()
+        index_params.add_index(field_name="id", index_type="")
+        index_params.add_index(field_name="embedding", index_type="", metric_type="COSINE")
+
+        self._client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
+        return self._client.get_load_state(collection_name=collection_name)
+
+    def drop_collection(self, collection_name: str):
+        """删除指定集合。"""
+        if self._client.has_collection(collection_name=collection_name):
+            self._client.drop_collection(collection_name=collection_name)
+
+    def list_collections(self):
+        """列出所有集合名称。"""
+        return self._client.list_collections()
+
+    def count(self, collection_name: str, **kwargs):
+        """统计集合中的实体数量。"""
+        stats = self._client.get_collection_stats(collection_name=collection_name, **kwargs)
+        return stats.get("row_count", 0)
+
+    # ==================== Create (插入) ====================
+
+    def insert(self, data, collection_name="rag_embeddings", timeout=None,
+               partition_name="", **kwargs):
+        """插入数据到集合。"""
+        return self._client.insert(
+            collection_name=collection_name,
+            data=data,
+            timeout=timeout,
+            partition_name=partition_name,
+            **kwargs,
+        )
+
+    async def insert_image(self, image_paths: List[str], texts: List[str],
+                           collection_name="rag_embeddings", timeout=None,
+                           partition_name="", **kwargs):
+        """插入图像数据，自动计算融合嵌入向量。"""
+        assert len(image_paths) == len(texts), "image_paths 和 texts 长度必须相同"
+        vectors = []
+        for i in range(len(texts)):
+            vec = await self.get_fused_embeddings(text=texts[i], image_path=image_paths[i])
+            vectors.append(vec)
+        data = [
+            {
+                "embedding": vectors[i],
+                "type": "image",
+                "text": texts[i],
+                "path": os.path.abspath(image_paths[i]),
+                "subject": "capp",
+            }
+            for i in range(len(vectors))
+        ]
+        return self._client.insert(
+            collection_name=collection_name,
+            data=data,
+            timeout=timeout,
+            partition_name=partition_name,
+            **kwargs,
+        )
+
+    # ==================== Read (查询) ====================
 
     def search(self, data, collection_name="rag_embeddings", limit=10,
                output_fields=None, **kwargs):
+        """向量相似度搜索。"""
         return self._client.search(
             collection_name=collection_name,
             data=data,
@@ -236,8 +330,149 @@ class _MoyuClient:
             **kwargs,
         )
 
+    async def search_by_text(self, texts: List[str], collection_name="rag_embeddings",
+                              limit=10, output_fields=None, **kwargs):
+        """通过文本进行向量搜索，自动计算查询向量。"""
+        vectors = []
+        for text in texts:
+            vec = await self.get_text_embeddings(text=text)
+            vectors.append(vec)
+        return self._client.search(
+            collection_name=collection_name,
+            data=vectors,
+            limit=limit,
+            output_fields=output_fields,
+            **kwargs,
+        )
+
+    def get(self, ids, collection_name="rag_embeddings", output_fields=None,
+            timeout=None, **kwargs):
+        """根据主键 ID 获取实体。"""
+        return self._client.get(
+            collection_name=collection_name,
+            ids=ids,
+            output_fields=output_fields,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    def query(self, collection_name="rag_embeddings", filter_expr="",
+              output_fields=None, limit=None, offset=None, timeout=None, **kwargs):
+        """根据标量过滤表达式查询实体。"""
+        return self._client.query(
+            collection_name=collection_name,
+            filter=filter_expr,
+            output_fields=output_fields,
+            limit=limit,
+            offset=offset,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    # ==================== Update (更新) ====================
+
+    def upsert(self, data, collection_name="rag_embeddings", timeout=None,
+               partition_name="", **kwargs):
+        """更新或插入数据。如果 ID 已存在则更新，否则插入。"""
+        return self._client.upsert(
+            collection_name=collection_name,
+            data=data,
+            timeout=timeout,
+            partition_name=partition_name,
+            **kwargs,
+        )
+
+    def update(self, ids, data: Dict[str, Any], collection_name="rag_embeddings",
+               timeout=None, **kwargs):
+        """根据 ID 更新实体字段。"""
+        if not isinstance(ids, list):
+            ids = [ids]
+        existing = self._client.get(
+            collection_name=collection_name,
+            ids=ids,
+            output_fields=["*"],
+            timeout=timeout,
+        )
+        if not existing:
+            return {"upsert_count": 0}
+        upsert_data = []
+        for entity in existing:
+            updated = {**entity, **data}
+            updated.pop("_distance", None)
+            updated.pop("_score", None)
+            upsert_data.append(updated)
+        return self._client.upsert(
+            collection_name=collection_name,
+            data=upsert_data,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    # ==================== Delete (删除) ====================
+
+    def delete(self, ids=None, collection_name="rag_embeddings", filter_expr="",
+               timeout=None, partition_name="", **kwargs):
+        """删除实体。可以通过 ID 或过滤条件删除。"""
+        if ids and filter_expr:
+            raise ValueError("不能同时指定 ids 和 filter，请选择一种删除方式")
+        return self._client.delete(
+            collection_name=collection_name,
+            ids=ids,
+            filter=filter_expr,
+            timeout=timeout,
+            partition_name=partition_name,
+            **kwargs,
+        )
+
+    def delete_by_filter(self, filter_expr: str, collection_name="rag_embeddings",
+                         timeout=None, **kwargs):
+        """根据过滤条件删除实体。"""
+        return self._client.delete(
+            collection_name=collection_name,
+            filter=filter_expr,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    # ==================== Embedding (嵌入向量) ====================
+
+    async def get_text_embeddings(self, text: str):
+        """获取文本嵌入向量。"""
+        return (await self.requester.query_embedding(text, None))["vector"]
+
+    async def get_image_embeddings(self, image_path: str):
+        """获取图像嵌入向量。"""
+        return (await self.requester.query_embedding(None, image_path))["vector"]
+
     async def get_fused_embeddings(self, text, image_path=None):
-        return (await self.requester.query_embedding(text, image_path))['vector']
+        """获取文本和图像的融合嵌入向量。"""
+        return (await self.requester.query_embedding(text, image_path))["vector"]
+
+    def _get_embedding_dim(self) -> int:
+        """获取嵌入向量维度。
+
+        优先使用已缓存的 _dim，否则通过 requester 获取测试向量来动态检测。
+
+        Returns:
+            嵌入向量维度
+        """
+        if self._dim is not None:
+            return self._dim
+
+        import asyncio
+        coro = self.requester.query_embedding("dimension detection", None)
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                result = future.result()
+        except RuntimeError:
+            result = asyncio.run(coro)
+
+        vector = result["vector"]
+        self._dim = len(vector) if isinstance(vector, list) else vector.shape[-1]
+        return self._dim
 
 
 # ============================================================

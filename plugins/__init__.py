@@ -7,10 +7,16 @@
 - test_widgets: 内联控件测试插件
 """
 
-from plugins.text_processing import TextProcessingPlugin
-from plugins.test_widgets import TestWidgetsPlugin
+__all__ = []
 
-__all__ = [
-    "TextProcessingPlugin",
-    "TestWidgetsPlugin",
-]
+try:
+    from plugins.text_processing import TextProcessingPlugin
+    __all__.append("TextProcessingPlugin")
+except ImportError:
+    pass
+
+try:
+    from plugins.test_widgets import TestWidgetsPlugin
+    __all__.append("TestWidgetsPlugin")
+except ImportError:
+    pass

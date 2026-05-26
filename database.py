@@ -4,16 +4,39 @@ import os
 from typing import List
 from util.requester import APIRequester
 import asyncio
+import concurrent.futures
 
 
 class MoyuClient(MilvusClient):
-    def __init__(self, requester: APIRequester, uri="http://localhost:19530", user="", password="", db_name="", token="", timeout=None, **kwargs):
+    """Milvus 向量数据库客户端，嵌入全部通过远程 requester 完成，维度动态检测。"""
+
+    def __init__(self, requester: APIRequester, uri="http://localhost:19530", user="", password="", db_name="", token="", timeout=None, dim=None, **kwargs):
         super().__init__(uri, user, password, db_name, token, timeout, **kwargs)
         self.requester = requester
+        self._dim = dim
+
+    def _get_embedding_dim(self) -> int:
+        """获取嵌入向量维度。优先使用已缓存的 _dim，否则通过 requester 动态检测。"""
+        if self._dim is not None:
+            return self._dim
+        # 通过 requester 获取一个测试嵌入向量来检测维度
+        coro = self.requester.query_embedding("dimension detection", None)
+        try:
+            loop = asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                result = future.result()
+        except RuntimeError:
+            result = asyncio.run(coro)
+        vector = result["vector"]
+        self._dim = len(vector) if isinstance(vector, list) else vector.shape[-1]
+        return self._dim
 
     def init_collection(self, collection_name: str = "rag_embeddings"):
         if self.has_collection(collection_name=collection_name):
             return self.get_load_state(collection_name=collection_name)
+
+        dim = self._get_embedding_dim()
 
         schema = self.create_schema(
             auto_id=True,
@@ -21,8 +44,7 @@ class MoyuClient(MilvusClient):
         )
 
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR,
-                         dim=1536)
+        schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field(field_name="type", datatype=DataType.VARCHAR, max_length=16)
         schema.add_field(field_name="path", datatype=DataType.VARCHAR, max_length=1024)
         schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
@@ -105,7 +127,7 @@ if __name__ == "__main__":
             vector = await client.get_text_embeddings(text=chunk)
             vectors.append(vector)
         # The output vector has 768 dimensions, matching the collection that we just created.
-        print("Dim:", 1536)  # Dim: 768 (768,)
+        print("Dim:", client._get_embedding_dim())  # 动态检测的维度
 
         # Each entity has id, vector representation, raw text, and a subject label that we use
         # to demo metadata filtering later.
@@ -127,7 +149,7 @@ if __name__ == "__main__":
 
         # serach
 
-        query_vectors = client.get_text_embeddings(text="加工内表面螺纹孔")
+        query_vectors = await client.get_text_embeddings(text="加工内表面螺纹孔")
 
         # If you don't have the embedding function you can use a fake vector to finish the demo:
         # query_vectors = [ [ random.uniform(-1, 1) for _ in range(768) ] ]
@@ -144,7 +166,7 @@ if __name__ == "__main__":
 
         # This will exclude any text in "history" subject despite close to the query vector.
         res = client.search(
-            data=[client.get_text_embeddings(text="安装反推火箭堵盖")],
+            data=[await client.get_text_embeddings(text="安装反推火箭堵盖")],
             filter="subject == 'capp'",
             limit=2,
             output_fields=["text", "subject", "path"],

@@ -23,8 +23,11 @@ class APIRequester:
         self.embed_path = embed_path
         self.rerank_path = rerank_path
         self.image_path = image_path
-        with open(workflow_path, encoding="utf-8") as f:
-            self.workflow = json.load(f)
+        if workflow_path and os.path.exists(workflow_path):
+            with open(workflow_path, encoding="utf-8") as f:
+                self.workflow = json.load(f)
+        else:
+            self.workflow = None
 
     async def query_embedding(self, text: Optional[str], embed_image_path: Optional[str]):
         url = f"{self.base_url}{self.embed_path}"
