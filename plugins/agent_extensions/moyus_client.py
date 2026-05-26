@@ -252,7 +252,7 @@ class MoyuClient(MilvusClient):
                 "embedding": vectors[i],
                 "type": "image",
                 "text": texts[i],
-                "path": os.path.abspath(image_paths[i]),
+                "path": os.path.abspath(image_paths[i]).split(r'/')[-1],
                 "subject": "capp",
             }
             for i in range(len(vectors))

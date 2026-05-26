@@ -32,7 +32,7 @@ from text import TextProcessor
 # 默认配置
 MILVUS_URI = os.environ.get("MILVUS_BASE_URL", "http://localhost:19530")
 RAG_BASE_URL = os.environ.get("RAG_BASE_URL", "http://localhost:8050/api/v1")
-COLLECTION_NAME = "rag_embeddings"
+COLLECTION_NAME = "process"
 
 # Markdown 文件路径（相对于项目根目录）
 MD_PATH = _PROJECT_ROOT / "data" / "工艺卡片.md"
