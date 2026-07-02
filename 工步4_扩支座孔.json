@@ -1,0 +1,14 @@
+{
+    "info": {
+        "stepID": "4",
+        "stepName": "扩支座孔"
+    },
+    "stepContent": [
+        {
+            "title": "工步基本内容",
+            "detail": "将反推火箭支座上的预制孔扩成24-φ6.5孔（壳体及零件孔均已加工成）"
+        }
+    ],
+    "annex": "",
+    "animation": ""
+}
