@@ -5,7 +5,6 @@ build/
 dist/
 wheels/
 *.egg-info
-.tmp/
 
 # Virtual environments
 .venv
@@ -15,7 +14,6 @@ wheels/
 .sisyphus/
 .opencode/
 .claude/
-.agents/
 logs/
 
 data/
