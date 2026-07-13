@@ -2,12 +2,17 @@
 """agent_extensions 的 ProcessGen RAG HTTP 契约测试。"""
 
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
 
-from plugins.agent_extensions import AgentExtensionTools, _APIRequester
+import plugins.agent_extensions as agent_extensions
+from plugins.agent_extensions import (
+    AgentExtensionsPlugin,
+    AgentExtensionTools,
+    _APIRequester,
+)
 
 
 class FakeResponse:
@@ -470,3 +475,133 @@ async def test_query_knowledge_base_maps_backend_results():
     tools._requester.rag_search_text.assert_awaited_once_with(
         "process", "堵盖", limit=3
     )
+
+
+def test_main_assistant_registers_existing_rag_tool():
+    context = MagicMock()
+    plugin = AgentExtensionsPlugin()
+
+    plugin.on_enable(context)
+
+    registered_tools = context.tool_registry.register.call_args.args[1]
+    assert "tool_query_knowledge_base" in [tool.__name__ for tool in registered_tools]
+
+
+@pytest.mark.asyncio
+async def test_main_assistant_rag_tool_uses_text_search_without_image():
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    tools._requester.rag_search_text.return_value = []
+
+    result = await tools._query_knowledge_base_async(
+        "堵盖", "process", 3, image_path=None
+    )
+
+    assert result == []
+    tools._requester.rag_search_text.assert_awaited_once_with(
+        "process", "堵盖", limit=3
+    )
+    tools._requester.rag_search_mixed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_main_assistant_rag_tool_uses_mixed_search_with_image():
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    tools._requester.rag_search_mixed.return_value = []
+
+    result = await tools._query_knowledge_base_async(
+        "堵盖", "process", 3, image_path="query.png"
+    )
+
+    assert result == []
+    tools._requester.rag_search_mixed.assert_awaited_once_with(
+        "process", "堵盖", "query.png", limit=3
+    )
+    tools._requester.rag_search_text.assert_not_awaited()
+
+
+def test_main_assistant_sync_rag_tool_forwards_image_path(monkeypatch):
+    tools = AgentExtensionTools()
+    async_entry = MagicMock(return_value="query-coroutine")
+    monkeypatch.setattr(tools, "_query_knowledge_base_async", async_entry)
+    monkeypatch.setattr(agent_extensions, "_run_async", lambda coro: [])
+
+    tools.tool_query_knowledge_base(
+        "堵盖", collection_name="process", limit=3, image_path="query.png"
+    )
+
+    async_entry.assert_called_once_with("堵盖", "process", 3, "query.png")
+
+
+def _subagent_prompt_source(agent_name: str) -> str:
+    source = Path(agent_extensions.__file__).read_text(encoding="utf-8")
+    start = source.index(f'name="{agent_name}"')
+    end = source.index("model=OpenAIChatModel(", start)
+    return source[start:end]
+
+
+@pytest.mark.parametrize(
+    "agent_name",
+    ["unity_agent", "blender_agent", "process_agent", "comfyui_agent"],
+)
+def test_subagent_prompt_requires_structured_markdown_handoff(agent_name):
+    prompt = _subagent_prompt_source(agent_name)
+
+    for heading in (
+        "# 执行结果",
+        "## 状态",
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in prompt
+
+    assert "路径未提供" in prompt
+    assert "不得猜测" in prompt
+    assert "绝对路径" in prompt
+
+
+def test_subagent_prompt_process_requires_complete_file_contents():
+    prompt = _subagent_prompt_source("process_agent")
+
+    assert "完整 JSON 内容" in prompt
+    assert "工序与工步" in prompt
+    assert "view_text_file" in prompt
+    assert "检索知识" in prompt
+
+
+def test_subagent_prompt_image_requires_each_output_and_actual_prompt():
+    prompt = _subagent_prompt_source("comfyui_agent")
+
+    assert "每张图片" in prompt
+    assert "实际使用的提示词" in prompt
+    assert "工具明确返回成功" in prompt
+
+
+def test_subagent_prompt_blender_requires_objects_and_artifact_paths():
+    prompt = _subagent_prompt_source("blender_agent")
+
+    assert "创建、修改和删除的对象" in prompt
+    assert "关键尺寸" in prompt
+    assert ".blend" in prompt
+    assert "导出" in prompt
+
+
+def test_subagent_prompt_unity_requires_scene_assets_and_tool_results():
+    prompt = _subagent_prompt_source("unity_agent")
+
+    assert "GameObject" in prompt
+    assert "组件、脚本、资源" in prompt
+    assert "工程、场景、脚本" in prompt
+    assert "MCP/custom tool" in prompt
+
+
+@pytest.mark.asyncio
+async def test_main_assistant_mixed_rag_reports_missing_image(requester):
+    with pytest.raises(FileNotFoundError, match="missing.png"):
+        await requester.rag_search_mixed(
+            "process", "堵盖", "missing.png", limit=3
+        )

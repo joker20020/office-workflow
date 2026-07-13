@@ -704,6 +704,23 @@ class AgentExtensionTools:
         3.检查场景中是否有MainCanvas，若不存在则添加一个主界面
         4.根据工序工步信息向主界面中添加工序组
         5.在unity中运行AR程序
+
+        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        # 执行结果
+        ## 状态
+        只能填写：成功、部分成功或失败。
+        ## 完成摘要
+        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        ## 生成文件
+        逐项列出 Unity 工程、场景、脚本、资源、构建产物等文件的类型、路径、用途和验证状态。
+        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
+        没有生成文件时必须明确写“无”。
+        ## 具体结果
+        列出创建或修改的场景、GameObject、组件、脚本、资源和 AR 流程，并说明关键配置。
+        ## 执行记录
+        列出实际调用的 MCP/custom tool、关键参数和返回结果，明确区分已执行操作与建议操作。
+        ## 警告与未完成项
+        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
         """,
             model=OpenAIChatModel(
                 model_name=self._llm_name,
@@ -773,7 +790,24 @@ class AgentExtensionTools:
 
         blender_agent = ReActAgent(
             name="blender_agent",
-            sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查
+            sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+
+        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        # 执行结果
+        ## 状态
+        只能填写：成功、部分成功或失败。
+        ## 完成摘要
+        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        ## 生成文件
+        逐项列出 .blend 工程、导出模型、材质、贴图和渲染图的类型、路径、用途和验证状态。
+        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
+        未执行保存或导出时必须明确说明；没有生成文件时必须明确写“无”。
+        ## 具体结果
+        列出创建、修改和删除的对象，以及关键尺寸、材质、层级关系和多个检查视角的结果。
+        ## 执行记录
+        列出实际调用的 Blender MCP 工具、关键参数和返回结果，明确区分已执行操作与建议操作。
+        ## 警告与未完成项
+        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
         """,
             model=OpenAIChatModel(
                 model_name=self._llm_name,
@@ -942,6 +976,25 @@ class AgentExtensionTools:
         在你进行规划前，请先制定一个工艺规划计划，并使用plan工具创建一个工艺编写任务列表,并逐步执行直至计划完成才能结束规划
         每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入当前文件夹下的文件内进行保存，注意输出文件结构的可读性
         同时你需要编写完成所有规划任务后再结束，请确保所有工序工步均保存，不能提前退出
+
+        每个文件写入后必须调用 view_text_file 重新读取并核对，确认 JSON 完整且工序与工步关系一致。
+        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        # 执行结果
+        ## 状态
+        只能填写：成功、部分成功或失败。
+        ## 完成摘要
+        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        ## 生成文件
+        逐项列出全部工序和工步 JSON 文件的类型、路径、用途和验证状态。
+        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
+        没有生成文件时必须明确写“无”。
+        ## 具体结果
+        按文件分别给出完整 JSON 内容，每个文件都使用带 json 语言标识的 Markdown 代码块，不得省略、截断或只给摘要。
+        同时说明实际采用的检索知识、工艺决策依据和仍存在的不确定信息。
+        ## 执行记录
+        列出计划任务、检索知识、文件写入与 view_text_file 复核结果。
+        ## 警告与未完成项
+        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因；中间文件仍须列出。
         """,
             model=OpenAIChatModel(
                 model_name=self._vlm_name,
@@ -1023,6 +1076,23 @@ class AgentExtensionTools:
         注意：请将用户描述往符合图像生成模型要求的方向进行细化，使其包含必要的细节，及要求
         图像应该为2维工程图风格，以指示为主，尽量不要出现人物等元素
         若有多张图片需要生成，请逐张生成
+
+        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        # 执行结果
+        ## 状态
+        只能填写：成功、部分成功或失败；只有工具明确返回成功时才能标记对应图片生成成功。
+        ## 完成摘要
+        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        ## 生成文件
+        对每张图片逐项列出类型、输出文件名或路径、用途和验证状态。
+        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
+        没有生成文件时必须明确写“无”。
+        ## 具体结果
+        对每张图片分别给出实际使用的提示词、输出名称和生成结果，不得只给总体结论。
+        ## 执行记录
+        按调用顺序列出每次图像生成工具调用的关键参数和返回结果。
+        ## 警告与未完成项
+        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
         """,
             model=OpenAIChatModel(
                 model_name=self._llm_name,
@@ -1088,20 +1158,29 @@ class AgentExtensionTools:
         query: str,
         collection_name: str = "process",
         limit: int = 5,
+        image_path: str = "",
     ) -> Any:
-        """查询向量知识库获取相关文档（仅查询，不生成）
+        """查询 RAG 知识库获取相关文档（仅查询，不生成）。
+
+        提供图片时执行文本与图片混合检索，否则执行文本检索。
 
         Args:
             query: 查询文本
             collection_name: 集合名称
             limit: 返回条数
+            image_path: 查询图片路径（可选）
 
         Returns:
             搜索结果列表
         """
         try:
             result = _run_async(
-                self._query_knowledge_base_async(query, collection_name, limit)
+                self._query_knowledge_base_async(
+                    query,
+                    collection_name,
+                    limit,
+                    image_path or None,
+                )
             )
             return _make_response(json.dumps(result, ensure_ascii=False, indent=2))
         except Exception as e:
@@ -1112,13 +1191,22 @@ class AgentExtensionTools:
         query: str,
         collection_name: str,
         limit: int,
+        image_path: str = None,
     ) -> List[Dict]:
         requester = self._get_requester()
-        search_results = await requester.rag_search_text(
-            collection_name,
-            query,
-            limit=limit,
-        )
+        if image_path:
+            search_results = await requester.rag_search_mixed(
+                collection_name,
+                query,
+                image_path,
+                limit=limit,
+            )
+        else:
+            search_results = await requester.rag_search_text(
+                collection_name,
+                query,
+                limit=limit,
+            )
 
         results = []
         for item in search_results:
