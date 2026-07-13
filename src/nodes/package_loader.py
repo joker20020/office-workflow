@@ -186,6 +186,7 @@ class PackageLoader:
             return []
 
         definitions: List[NodeDefinition] = []
+        seen_node_types: set[str] = set()
 
         init_file = nodes_dir / "__init__.py"
         if not init_file.exists():
@@ -220,7 +221,12 @@ class PackageLoader:
                 attr = getattr(init_module, attr_name)
 
                 if isinstance(attr, NodeDefinition):
+                    if attr.node_type in seen_node_types:
+                        _logger.debug(f"跳过重复节点定义: {attr.node_type}")
+                        continue
+
                     definitions.append(attr)
+                    seen_node_types.add(attr.node_type)
                     _logger.debug(f"从 __init__.py 加载节点定义: {attr.node_type}")
 
         except Exception as e:
@@ -247,7 +253,12 @@ class PackageLoader:
                     attr = getattr(module, attr_name)
 
                     if isinstance(attr, NodeDefinition):
+                        if attr.node_type in seen_node_types:
+                            _logger.debug(f"跳过重复节点定义: {attr.node_type}")
+                            continue
+
                         definitions.append(attr)
+                        seen_node_types.add(attr.node_type)
                         _logger.debug(f"从 {py_file.name} 加载节点定义: {attr.node_type}")
 
             except Exception as e:
