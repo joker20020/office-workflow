@@ -26,16 +26,154 @@
 
 import json
 import threading
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-try:
-    from agentscope.message import Msg
+from agentscope.message import (
+    AssistantMsg,
+    Base64Source,
+    ContentBlock,
+    DataBlock,
+    Msg,
+    SystemMsg,
+    TextBlock,
+    ToolCallBlock,
+    URLSource,
+    UserMsg,
+)
+from pydantic import TypeAdapter
 
-    AGENTSCOPE_AVAILABLE = True
-except ImportError:
-    AGENTSCOPE_AVAILABLE = False
-    Msg = None
+AGENTSCOPE_AVAILABLE = True
+
+_CONTENT_BLOCK_ADAPTER = TypeAdapter(ContentBlock)
+_NATIVE_BLOCK_TYPES = {
+    "data",
+    "hint",
+    "text",
+    "thinking",
+    "tool_call",
+    "tool_result",
+}
+_LEGACY_MEDIA_TYPES = {"image", "audio", "video"}
+_LEGACY_TOOL_CALL_TYPES = {"tool_use", "tool-use", "tool-call", "toolUse", "toolCall"}
+
+
+def serialize_message(msg: Msg) -> dict[str, Any]:
+    """Serialize an AgentScope 2.0 message to JSON-compatible data."""
+    if not isinstance(msg, Msg):
+        raise TypeError("msg must be an AgentScope 2.0 Msg")
+    return msg.model_dump(mode="json")
+
+
+def _parse_data_source(source_data: Any) -> Base64Source | URLSource:
+    """Parse a persisted AgentScope data source without losing its fields."""
+    if not isinstance(source_data, dict):
+        raise ValueError("media block source must be a dictionary")
+
+    source_type = source_data.get("type")
+    if source_type == "base64":
+        return Base64Source.model_validate(source_data)
+    if source_type == "url":
+        return URLSource.model_validate(source_data)
+    raise ValueError(f"unsupported media source type: {source_type!r}")
+
+
+def _parse_content_block(block_data: Any, warnings: list[str]) -> ContentBlock:
+    """Parse one native block or normalize a legacy persisted block."""
+    if not isinstance(block_data, dict):
+        warnings.append(
+            f"Converted non-dictionary legacy content block: {type(block_data).__name__}",
+        )
+        return TextBlock(text=json.dumps(block_data, ensure_ascii=False))
+
+    block = deepcopy(block_data)
+    block_type = block.get("type")
+
+    if block_type in _LEGACY_MEDIA_TYPES:
+        source = _parse_data_source(block.get("source"))
+        kwargs = {"source": source}
+        if "id" in block:
+            kwargs["id"] = block["id"]
+        if "name" in block:
+            kwargs["name"] = block["name"]
+        return DataBlock(**kwargs)
+
+    if block_type in _LEGACY_TOOL_CALL_TYPES:
+        block["type"] = "tool_call"
+        block_type = "tool_call"
+
+    if block_type == "tool_call" and isinstance(block.get("input"), dict):
+        block["input"] = json.dumps(block["input"], ensure_ascii=False)
+
+    if block_type == "data":
+        block["source"] = _parse_data_source(block.get("source"))
+
+    if block_type in _NATIVE_BLOCK_TYPES:
+        return _CONTENT_BLOCK_ADAPTER.validate_python(block)
+
+    warnings.append(
+        f"Converted unsupported legacy content block type {block_type!r} to text",
+    )
+    return TextBlock(text=json.dumps(block, ensure_ascii=False))
+
+
+def deserialize_message(data: dict[str, Any]) -> Msg:
+    """Load native AgentScope 2.0 data or normalize a legacy message record."""
+    if not isinstance(data, dict):
+        raise TypeError("message data must be a dictionary")
+
+    message_data = deepcopy(data)
+    role = message_data.get("role")
+    factories = {
+        "user": UserMsg,
+        "assistant": AssistantMsg,
+        "system": SystemMsg,
+    }
+    if role not in factories:
+        raise ValueError(f"unsupported message role: {role!r}")
+
+    content_data = message_data.get("content")
+    migration_warnings: list[str] = []
+    if isinstance(content_data, str):
+        content: list[ContentBlock] = [TextBlock(text=content_data)]
+    elif isinstance(content_data, list):
+        content = [_parse_content_block(block, migration_warnings) for block in content_data]
+    else:
+        raise ValueError("message content must be a string or list")
+
+    metadata = message_data.get("metadata")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError("message metadata must be a dictionary")
+    metadata = deepcopy(metadata)
+
+    if migration_warnings:
+        existing_warnings = metadata.get("migration_warnings")
+        if existing_warnings is None:
+            metadata["migration_warnings"] = migration_warnings
+        elif isinstance(existing_warnings, list):
+            metadata["migration_warnings"] = deepcopy(existing_warnings) + migration_warnings
+        else:
+            metadata["migration_warnings"] = [existing_warnings, *migration_warnings]
+
+    kwargs: dict[str, Any] = {
+        "name": message_data.get("name", role.capitalize()),
+        "content": content,
+        "metadata": metadata,
+    }
+    if "id" in message_data:
+        kwargs["id"] = message_data["id"]
+    created_at = message_data.get("created_at", message_data.get("timestamp"))
+    if created_at is not None:
+        kwargs["created_at"] = created_at
+    if "finished_at" in message_data:
+        kwargs["finished_at"] = message_data["finished_at"]
+    if role == "assistant" and "usage" in message_data:
+        kwargs["usage"] = message_data["usage"]
+
+    return factories[role](**kwargs)
 
 if TYPE_CHECKING:
     from src.storage.repositories import ChatHistoryRepository

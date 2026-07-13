@@ -26,6 +26,7 @@ from typing import List, Optional, Dict, Any
 import json
 import uuid
 
+from agentscope.message import Msg
 from sqlalchemy import select, delete, desc, func
 from sqlalchemy.orm import Session
 
@@ -354,7 +355,7 @@ class ChatHistoryRepository:
         """
         添加消息到会话
 
-        直接存储 Msg.to_dict() 返回的完整 JSON 数据。
+        Store the complete AgentScope 2.0 ``model_dump(mode="json")`` data.
 
         Args:
             session_id: 会话ID
@@ -372,8 +373,8 @@ class ChatHistoryRepository:
             _logger.error("msg 参数不能为 None")
             return None
 
-        if not hasattr(msg, "to_dict"):
-            _logger.error("msg 必须是 AgentScope Msg 对象，必须有 to_dict 方法")
+        if not isinstance(msg, Msg):
+            _logger.error("msg must be an AgentScope 2.0 Msg object")
             return None
 
         try:
@@ -386,7 +387,7 @@ class ChatHistoryRepository:
                     _logger.warning(f"会话不存在，无法添加消息: {session_id[:8]}...")
                     return None
 
-                msg_dict = msg.to_dict()
+                msg_dict = msg.model_dump(mode="json")
                 actual_role = getattr(msg, "role", "user")
                 actual_content = self._extract_content(msg)
                 extra_data = json.dumps(msg_dict, ensure_ascii=False)
@@ -428,13 +429,12 @@ class ChatHistoryRepository:
             limit: 限制返回数量（可选，从最新开始）
 
         Returns:
-            消息列表，每项包含完整的Msg字典数据，可用于Msg.from_dict()重建
+            Complete message dictionaries for the 2.0 deserialization boundary.
 
         Example:
             >>> messages = repo.get_session_messages(session_id, limit=10)
-            >>> # 重建Msg对象
-            >>> from agentscope.message import Msg
-            >>> msg = Msg.from_dict(messages[0])
+            >>> from src.agent.chat_history import deserialize_message
+            >>> msg = deserialize_message(messages[0])
         """
         try:
             with self._database.session() as session:
