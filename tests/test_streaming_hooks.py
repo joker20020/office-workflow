@@ -107,9 +107,11 @@ async def test_consume_reply_stream_rebuilds_reply_and_uses_reply_start_id() -> 
 def test_notify_stream_event_preserves_events_order_and_callback_shape() -> None:
     events = _reply_events()
     integration = _integration_with(events)
+    failing_deliveries: list[AgentEvent] = []
     delivered: list[tuple[Any, dict[str, AgentEvent], AgentEvent]] = []
 
     def failing_callback(agent: Any, kwargs: dict, output: Any) -> None:
+        failing_deliveries.append(output)
         raise RuntimeError("one callback must not stop delivery")
 
     def recording_callback(
@@ -125,6 +127,11 @@ def test_notify_stream_event_preserves_events_order_and_callback_shape() -> None
     for event in events:
         integration._notify_stream_event(event)
 
+    assert len(failing_deliveries) == len(events)
+    assert all(
+        received is original
+        for received, original in zip(failing_deliveries, events)
+    )
     assert len(delivered) == len(events)
     for delivery, original_event in zip(delivered, events):
         agent, kwargs, output = delivery
