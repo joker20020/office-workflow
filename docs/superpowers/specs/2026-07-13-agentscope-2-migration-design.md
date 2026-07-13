@@ -51,7 +51,7 @@ ProcessGen RAG 后端、插件系统的外部工具接口、UI 对外行为和�
 | `Msg(role=...)` | `UserMsg` / `AssistantMsg` / `SystemMsg` |
 | `ImageBlock` / `AudioBlock` / `VideoBlock` | `DataBlock` |
 | `ToolUseBlock` | `ToolCallBlock` |
-| `ToolResponse` | 2.0 ToolChunk/ToolResult 输出协议 |
+| 1.x `ToolResponse` 原始字典内容 | 2.0 `ToolResponse` / `ToolChunk` + `TextBlock` / `DataBlock` 状态协议 |
 | `register_tool_function` | `FunctionTool` 或 2.0 Toolkit 工具构造 |
 | 多个 MCP Client 类 | `MCPClient` + `StdioMCPConfig` / `HttpMCPConfig` |
 | `register_agent_skill` | `Toolkit(skills_or_loaders=...)` |
@@ -194,7 +194,7 @@ Credential、Model、Toolkit 和 MCP。子智能体输出继续使用结构化 M
 - 完整测试通过；
 - 运行时代码中不存在 `ReActAgent`、`InMemoryMemory`、旧 Hook 注册、
   `register_agent_skill`、旧 MCP Client、`ImageBlock`、`AudioBlock`、`VideoBlock`、
-  `PlanNotebook` 或旧 `ToolResponse` 用法。
+  `PlanNotebook` 或把原始字典作为内容块传给 `ToolResponse` 的 1.x 用法。
 
 ## 参考资料
 
