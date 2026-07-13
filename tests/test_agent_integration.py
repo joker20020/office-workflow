@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """AgentIntegration 单元测试"""
 
+from unittest.mock import Mock
+
 import pytest
 
+import src.agent.agent_integration as agent_integration
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.skill_manager import SkillManager
@@ -78,6 +81,96 @@ class TestAgentIntegration:
         assert len(history) == 2
         assert history[0]["role"] == "user"
         assert history[1]["role"] == "assistant"
+
+
+@pytest.mark.parametrize(
+    ("provider", "credential_name", "model_name", "default_model", "default_url"),
+    [
+        (
+            "openai",
+            "OpenAICredential",
+            "OpenAIChatModel",
+            "gpt-4o",
+            "https://api.openai.com/v1",
+        ),
+        (
+            "deepseek",
+            "DeepSeekCredential",
+            "DeepSeekChatModel",
+            "deepseek-chat",
+            "https://api.deepseek.com",
+        ),
+        (
+            "dashscope",
+            "DashScopeCredential",
+            "DashScopeChatModel",
+            "qwen-turbo",
+            "https://api.dashscope.com",
+        ),
+    ],
+)
+def test_create_model_uses_provider_defaults(
+    agent,
+    monkeypatch,
+    provider,
+    credential_name,
+    model_name,
+    default_model,
+    default_url,
+):
+    credential = object()
+    credential_class = Mock(return_value=credential)
+    model_class = Mock()
+    monkeypatch.setattr(agent_integration, credential_name, credential_class, raising=False)
+    monkeypatch.setattr(agent_integration, model_name, model_class, raising=False)
+
+    agent._create_model(provider, "", "", "key")
+
+    credential_class.assert_called_once_with(api_key="key", base_url=default_url)
+    model_class.assert_called_once_with(
+        credential=credential,
+        model=default_model,
+        stream=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "credential_name", "model_name"),
+    [
+        ("openai", "OpenAICredential", "OpenAIChatModel"),
+        ("deepseek", "DeepSeekCredential", "DeepSeekChatModel"),
+        ("dashscope", "DashScopeCredential", "DashScopeChatModel"),
+    ],
+)
+def test_create_model_forwards_custom_model_and_base_url(
+    agent,
+    monkeypatch,
+    provider,
+    credential_name,
+    model_name,
+):
+    credential = object()
+    credential_class = Mock(return_value=credential)
+    model_class = Mock()
+    monkeypatch.setattr(agent_integration, credential_name, credential_class, raising=False)
+    monkeypatch.setattr(agent_integration, model_name, model_class, raising=False)
+
+    agent._create_model(provider, "custom-model", "https://custom.example/v1", "key")
+
+    credential_class.assert_called_once_with(
+        api_key="key",
+        base_url="https://custom.example/v1",
+    )
+    model_class.assert_called_once_with(
+        credential=credential,
+        model="custom-model",
+        stream=True,
+    )
+
+
+def test_create_model_rejects_unsupported_provider(agent):
+    with pytest.raises(ValueError, match="unsupported provider"):
+        agent._create_model("unknown", "", "", "key")
 
 
 class TestSkillManager:

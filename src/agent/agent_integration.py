@@ -6,6 +6,25 @@ import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 try:
+    from agentscope.credential import (
+        DashScopeCredential,
+        DeepSeekCredential,
+        OpenAICredential,
+    )
+    from agentscope.model import (
+        DashScopeChatModel,
+        DeepSeekChatModel,
+        OpenAIChatModel,
+    )
+except ImportError:
+    DashScopeCredential = None
+    DeepSeekCredential = None
+    OpenAICredential = None
+    DashScopeChatModel = None
+    DeepSeekChatModel = None
+    OpenAIChatModel = None
+
+try:
     from agentscope.agent import ReActAgent
     from agentscope.message import (
         Msg,
@@ -15,7 +34,6 @@ try:
         VideoBlock,
     )
     from agentscope.message import URLSource, Base64Source
-    from agentscope.model import DashScopeChatModel, OpenAIChatModel
     from agentscope.formatter import (
         DashScopeChatFormatter,
         DeepSeekChatFormatter,
@@ -38,8 +56,6 @@ except ImportError as e:
     VideoBlock = None
     URLSource = None
     Base64Source = None
-    DashScopeChatModel = None
-    OpenAIChatModel = None
     DashScopeChatFormatter = None
     DeepSeekChatFormatter = None
     OpenAIChatFormatter = None
@@ -153,6 +169,45 @@ class AgentIntegration:
 
         return streaming_hook
 
+    def _create_model(
+        self,
+        provider: str,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+    ) -> Any:
+        if provider == "openai":
+            credential = OpenAICredential(
+                api_key=api_key,
+                base_url=base_url or "https://api.openai.com/v1",
+            )
+            return OpenAIChatModel(
+                credential=credential,
+                model=model_name or "gpt-4o",
+                stream=True,
+            )
+        if provider == "deepseek":
+            credential = DeepSeekCredential(
+                api_key=api_key,
+                base_url=base_url or "https://api.deepseek.com",
+            )
+            return DeepSeekChatModel(
+                credential=credential,
+                model=model_name or "deepseek-chat",
+                stream=True,
+            )
+        if provider == "dashscope":
+            credential = DashScopeCredential(
+                api_key=api_key,
+                base_url=base_url or "https://api.dashscope.com",
+            )
+            return DashScopeChatModel(
+                credential=credential,
+                model=model_name or "qwen-turbo",
+                stream=True,
+            )
+        raise ValueError(f"unsupported provider: {provider}")
+
     def initialize(
         self, provider: str = "dashscope", model_name: str = "", base_url: str = ""
     ) -> bool:
@@ -187,34 +242,7 @@ class AgentIntegration:
             self._toolkit = Toolkit()
             _logger.info("Toolkit创建成功")
 
-            # Create model based on provider
-            if provider == "dashscope":
-                model_name = model_name or "qwen-turbo"
-                base_url = base_url or "https://api.dashscope.com"
-                _logger.info(f"创建DashScope模型: model_name={model_name}, base_url={base_url}")
-                model = DashScopeChatModel(
-                    model_name=model_name, api_key=api_key, client_kwargs={"base_url": base_url}
-                )
-                formatter = DashScopeChatFormatter()
-            elif provider == "deepseek":
-                final_model = model_name or "deepseek-chat"
-                final_url = base_url or "https://api.deepseek.com"
-                _logger.info(f"创建DeepSeek模型: model_name={final_model}, base_url={final_url}")
-                model = OpenAIChatModel(
-                    model_name=final_model, api_key=api_key, client_kwargs={"base_url": final_url}
-                )
-                formatter = DeepSeekChatFormatter()
-            elif provider == "openai":
-                final_model = model_name or "gpt-4o"
-                final_url = base_url or "https://api.openai.com/v1"
-                _logger.info(f"创建OpenAI模型: model_name={final_model}, base_url={final_url}")
-                model = OpenAIChatModel(
-                    model_name=final_model, api_key=api_key, client_kwargs={"base_url": final_url}
-                )
-                formatter = OpenAIChatFormatter()
-            else:
-                _logger.error(f"不支持的provider: {provider}")
-                return False
+            model = self._create_model(provider, model_name, base_url, api_key)
 
             _logger.info("模型创建成功")
             system_prompt = self.config.get(
@@ -242,7 +270,6 @@ class AgentIntegration:
                 name="WorkflowAssistant",
                 sys_prompt=system_prompt,
                 model=model,
-                formatter=formatter,
                 memory=InMemoryMemory(),
                 toolkit=self._toolkit,
                 max_iters=50,
