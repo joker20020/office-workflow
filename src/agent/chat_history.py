@@ -19,8 +19,8 @@
     history.add_message("user", "你好")
 
     # 或直接传入 Msg 对象
-    from agentscope.message import Msg
-    msg = Msg(name="User", role="user", content="你好")
+    from agentscope.message import UserMsg
+    msg = UserMsg(name="User", content="你好")
     history.add_message(msg=msg)
 """
 
@@ -251,16 +251,21 @@ class ChatHistory:
             if role is None or content is None:
                 raise ValueError("当不传入 msg 时，role 和 content 参数必需")
 
-            if name is None:
-                name = (
-                    "User" if role == "user" else ("Assistant" if role == "assistant" else "System")
-                )
+            factories = {
+                "user": UserMsg,
+                "assistant": AssistantMsg,
+                "system": SystemMsg,
+            }
+            if role not in factories:
+                raise ValueError(f"不支持的消息 role: {role!r}")
 
-            msg = Msg(
+            if name is None:
+                name = role.capitalize()
+
+            msg = factories[role](
                 name=name,
-                role=role,
                 content=content,
-                metadata=metadata,
+                metadata=metadata if metadata is not None else {},
             )
 
         with self._lock:
@@ -291,7 +296,7 @@ class ChatHistory:
         获取所有持久化的消息
 
         Returns:
-            Msg.to_dict() 格式的字典列表
+            AgentScope 2.0 JSON-compatible 字典列表
         """
         if self._repository and self._session_id:
             return self._repository.get_session_messages(self._session_id)
@@ -323,14 +328,14 @@ class ChatHistory:
             return True
 
     def to_dict_list(self) -> List[Dict[str, Any]]:
-        """转换为字典列表（使用 Msg.to_dict() 序列化）"""
+        """转换为 JSON-compatible 字典列表。"""
         with self._lock:
             result = []
             for msg in self._messages:
-                if hasattr(msg, "to_dict"):
-                    result.append(msg.to_dict())
+                if isinstance(msg, Msg):
+                    result.append(serialize_message(msg))
                 elif isinstance(msg, dict):
-                    result.append(msg)
+                    result.append(deepcopy(msg))
                 else:
                     raise ValueError(f"不支持的消息类型: {type(msg)}")
             return result
@@ -354,7 +359,7 @@ class ChatHistory:
                 self._messages = []
                 for data in messages_data:
                     try:
-                        msg = Msg.from_dict(data)
+                        msg = deserialize_message(data)
                         self._messages.append(msg)
                     except Exception as e:
                         # 记录错误但继续处理其他消息
