@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """AgentIntegration 单元测试"""
 
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
+from agentscope.message import AssistantMsg, SystemMsg, UserMsg
+from agentscope.state import AgentState
 
 import src.agent.agent_integration as agent_integration
 from src.agent.agent_integration import AgentIntegration
@@ -70,9 +74,15 @@ class TestAgentIntegration:
 
     def test_reset(self, agent):
         agent._history.add_message("user", "test message")
+        previous_state = AgentState(context=agent._history.get_messages())
+        agent._agent = SimpleNamespace(state=previous_state)
+
         agent.reset()
+
         history = agent.get_history()
         assert len(history) == 0
+        assert agent._agent.state.context == []
+        assert agent._agent.state is not previous_state
 
     def test_get_history(self, agent):
         agent._history.add_message("user", "Hello")
@@ -173,6 +183,126 @@ def test_create_model_rejects_unsupported_provider(agent):
         agent._create_model("unknown", "", "", "key")
 
 
+def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
+    history_messages = [
+        UserMsg(name="User", content="question", metadata={"turn": 1}),
+        AssistantMsg(name="Assistant", content="answer", metadata={"turn": 2}),
+    ]
+    for message in history_messages:
+        agent._history.add_message(msg=message)
+
+    constructed_agent = SimpleNamespace(state=None)
+    agent_factory = Mock(return_value=constructed_agent)
+    toolkit = object()
+    model = object()
+    monkeypatch.setattr(agent_integration, "Agent", agent_factory)
+    monkeypatch.setattr(agent_integration, "Toolkit", Mock(return_value=toolkit))
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=model))
+    monkeypatch.setattr(agent, "_register_registry_tools", Mock())
+    monkeypatch.setattr(agent, "_register_mcp_tools", Mock())
+    monkeypatch.setattr(agent, "_register_skills", Mock())
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+    kwargs = agent_factory.call_args.kwargs
+    assert kwargs["name"] == "WorkflowAssistant"
+    assert kwargs["system_prompt"] == "configured prompt"
+    assert kwargs["model"] is model
+    assert kwargs["toolkit"] is toolkit
+    assert isinstance(kwargs["state"], AgentState)
+    assert kwargs["state"].context == history_messages
+    assert kwargs["react_config"].max_iters == 50
+    assert kwargs["react_config"].interruption_raise_cancelled_error is False
+
+
+def test_stable_core_imports_keep_agentscope_available():
+    assert agent_integration.AGENTSCOPE_AVAILABLE is True
+    assert agent_integration.Agent is not None
+    assert agent_integration.ReActConfig is not None
+    assert agent_integration.AgentState is not None
+    assert not hasattr(agent_integration, "ReAct" + "Agent")
+    assert not hasattr(agent_integration, "InMemory" + "Memory")
+
+
+def test_sync_history_assigns_fresh_agent_state(agent):
+    messages = [
+        UserMsg(name="User", content="one", metadata={"sequence": 1}),
+        AssistantMsg(name="Assistant", content="two", metadata={"sequence": 2}),
+    ]
+    for message in messages:
+        agent._history.add_message(msg=message)
+    previous_state = AgentState()
+    agent._agent = SimpleNamespace(state=previous_state)
+
+    agent._sync_history_to_memory()
+
+    assert agent._agent.state is not previous_state
+    assert agent._agent.state.context == messages
+
+
+def test_switch_session_success_refreshes_state(agent, monkeypatch):
+    selected_messages = [UserMsg(name="User", content="selected")]
+    previous_state = AgentState(
+        context=[AssistantMsg(name="Assistant", content="previous")],
+    )
+    agent._agent = SimpleNamespace(state=previous_state)
+    agent._history_repository = object()
+    monkeypatch.setattr(agent._history, "set_session", Mock(return_value=True))
+    monkeypatch.setattr(agent._history, "get_messages", Mock(return_value=selected_messages))
+
+    assert agent.switch_session("selected-session") is True
+    assert agent._agent.state is not previous_state
+    assert agent._agent.state.context == selected_messages
+
+
+def test_switch_session_failure_leaves_state_unchanged(agent, monkeypatch):
+    previous_state = AgentState(
+        context=[AssistantMsg(name="Assistant", content="previous")],
+    )
+    agent._agent = SimpleNamespace(state=previous_state)
+    agent._history_repository = object()
+    monkeypatch.setattr(agent._history, "set_session", Mock(return_value=False))
+
+    assert agent.switch_session("missing-session") is False
+    assert agent._agent.state is previous_state
+
+
+def test_extract_agent_memory_reads_context_after_most_recent_user(agent):
+    old_assistant = AssistantMsg(name="Assistant", content="old")
+    recent_user = UserMsg(name="User", content="latest question")
+    system = SystemMsg(
+        name="System",
+        content="note",
+        id="system-message-id",
+        metadata={"source": "policy"},
+        created_at="2026-07-14T01:02:03",
+    )
+    assistant = AssistantMsg(
+        name="WorkflowAssistant",
+        content="latest answer",
+        id="assistant-message-id",
+        metadata={"trace": {"step": 2}},
+        created_at="2026-07-14T01:02:04",
+    )
+    agent._agent = SimpleNamespace(
+        state=AgentState(
+            context=[old_assistant, recent_user, system, assistant],
+        ),
+    )
+
+    messages = agent.extract_agent_memory()
+
+    assert [message["role"] for message in messages] == ["system", "assistant"]
+    assert messages[0]["id"] == "system-message-id"
+    assert messages[0]["metadata"] == {"source": "policy"}
+    assert messages[1]["id"] == "assistant-message-id"
+    assert messages[1]["metadata"] == {"trace": {"step": 2}}
+    assert messages[1]["content"][0]["text"] == "latest answer"
+
+
 class TestSkillManager:
     def test_add_skill(self, skill_manager):
         skill_manager.add_skill("test_skill", "/path/to/skill", "Test skill description")
@@ -267,73 +397,21 @@ class TestMcpServerManager:
         assert config["transport"] == "sse"
 
 
-try:
-    from agentscope.message import Msg
-
-    AGENTSCOPE_MSG_AVAILABLE = True
-except ImportError:
-    AGENTSCOPE_MSG_AVAILABLE = False
-    Msg = None
-
-
-@pytest.mark.skipif(not AGENTSCOPE_MSG_AVAILABLE, reason="AgentScope Msg not available")
 class TestHistorySyncPreservation:
-    """Test that _sync_history_to_memory preserves all Msg fields"""
-
-    @pytest.mark.asyncio
-    async def test_sync_preserves_metadata(self):
-        """Metadata should be preserved during sync"""
-        # Create Msg with complex metadata
-        msg = Msg(
+    def test_state_context_preserves_identity_and_metadata(self, agent):
+        message = UserMsg(
             name="User",
-            role="user",
             content="test",
-            metadata={"tool_calls": [{"id": "1", "name": "search"}], "usage": {"tokens": 100}},
+            id="preserved-id",
+            created_at="2026-07-14T01:02:03",
+            metadata={"tool_calls": [{"id": "1", "name": "search"}]},
         )
+        agent._history.add_message(msg=message)
+        agent._agent = SimpleNamespace(state=AgentState())
 
-        # Verify metadata is set
-        assert msg.metadata is not None
-        assert msg.metadata["tool_calls"] == [{"id": "1", "name": "search"}]
-        assert msg.metadata["usage"]["tokens"] == 100
+        agent._sync_history_to_memory()
 
-    @pytest.mark.asyncio
-    async def test_sync_preserves_id_and_timestamp(self):
-        """ID and timestamp should be preserved"""
-        # Create Msg
-        msg = Msg(name="User", role="user", content="test message")
-        original_id = msg.id
-        original_timestamp = msg.timestamp
-
-        # Verify id and timestamp exist
-        assert original_id is not None
-        assert original_timestamp is not None
-
-        # Test that Msg.from_dict preserves fields
-        msg_dict = msg.to_dict()
-        reconstructed_msg = Msg.from_dict(msg_dict)
-
-        assert reconstructed_msg.id == original_id
-        assert reconstructed_msg.timestamp == original_timestamp
-
-    @pytest.mark.asyncio
-    async def test_sync_from_dict_preserves_all_fields(self):
-        """Msg.from_dict should preserve all fields including metadata"""
-        # Create a message with all fields
-        original_msg = Msg(
-            name="Assistant",
-            role="assistant",
-            content="Response content",
-            metadata={"key": "value", "nested": {"a": 1}},
-        )
-
-        # Convert to dict and back
-        msg_dict = original_msg.to_dict()
-        reconstructed_msg = Msg.from_dict(msg_dict)
-
-        # Verify all fields preserved
-        assert reconstructed_msg.name == "Assistant"
-        assert reconstructed_msg.role == "assistant"
-        assert reconstructed_msg.content == "Response content"
-        assert reconstructed_msg.metadata == {"key": "value", "nested": {"a": 1}}
-        assert reconstructed_msg.id == original_msg.id
-        assert reconstructed_msg.timestamp == original_msg.timestamp
+        synced = agent._agent.state.context[0]
+        assert synced.id == "preserved-id"
+        assert synced.created_at == "2026-07-14T01:02:03"
+        assert synced.metadata == {"tool_calls": [{"id": "1", "name": "search"}]}

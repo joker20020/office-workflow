@@ -25,50 +25,53 @@ except ImportError:
     OpenAIChatModel = None
 
 try:
-    from agentscope.agent import ReActAgent
+    from agentscope.agent import Agent, ReActConfig
     from agentscope.message import (
+        AssistantMsg,
+        Base64Source,
         Msg,
+        SystemMsg,
         TextBlock,
-        ImageBlock,
-        AudioBlock,
-        VideoBlock,
+        URLSource,
+        UserMsg,
     )
-    from agentscope.message import URLSource, Base64Source
-    from agentscope.formatter import (
-        DashScopeChatFormatter,
-        DeepSeekChatFormatter,
-        OpenAIChatFormatter,
-    )
-    from agentscope.memory import InMemoryMemory
+    from agentscope.state import AgentState
     from agentscope.tool import Toolkit
-    from agentscope.mcp import HttpStatelessClient, StdIOStatefulClient
 
     AGENTSCOPE_AVAILABLE = True
     _logger_agent = __import__("src.utils.logger", fromlist=["get_logger"]).get_logger(__name__)
     _logger_agent.info("AgentScope框架加载成功")
 except ImportError as e:
     AGENTSCOPE_AVAILABLE = False
-    ReActAgent = None
+    Agent = None
+    ReActConfig = None
+    AgentState = None
+    AssistantMsg = None
     Msg = None
+    SystemMsg = None
     TextBlock = None
-    ImageBlock = None
-    AudioBlock = None
-    VideoBlock = None
+    UserMsg = None
     URLSource = None
     Base64Source = None
-    DashScopeChatFormatter = None
-    DeepSeekChatFormatter = None
-    OpenAIChatFormatter = None
-    InMemoryMemory = None
     Toolkit = None
-    StdIOStatelessClient = None
-    HttpStatelessClient = None
     _logger_agent = None
 
+try:
+    from agentscope.message import AudioBlock, ImageBlock, VideoBlock
+except ImportError:
+    AudioBlock = None
+    ImageBlock = None
+    VideoBlock = None
+
+try:
+    from agentscope.mcp import HttpStatelessClient, StdIOStatefulClient
+except ImportError:
+    HttpStatelessClient = None
+    StdIOStatefulClient = None
+
 from src.agent.api_key_manager import ApiKeyManager
-from src.agent.chat_history import ChatHistory
+from src.agent.chat_history import ChatHistory, deserialize_message, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
-from src.agent.node_formatter import NodeFormatter
 from src.engine.node_engine import NodeEngine
 from src.core.config_manager import get_config_manager
 from src.utils.logger import get_logger
@@ -265,23 +268,21 @@ class AgentIntegration:
             
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
 
-            _logger.info("创建ReActAgent...")
-            self._agent = ReActAgent(
-                name="WorkflowAssistant",
-                sys_prompt=system_prompt,
-                model=model,
-                memory=InMemoryMemory(),
-                toolkit=self._toolkit,
+            _logger.info("创建Agent...")
+            state = AgentState(context=self._history.get_messages())
+            react_config = ReActConfig(
                 max_iters=50,
+                interruption_raise_cancelled_error=False,
             )
-            _logger.info("ReActAgent创建成功")
-
-            # Register streaming hook (unconditionally)
-            self._agent.register_instance_hook(
-                hook_type="post_print",
-                hook_name="streaming_output",
-                hook=self._create_streaming_hook(),
+            self._agent = Agent(
+                name="WorkflowAssistant",
+                system_prompt=system_prompt,
+                model=model,
+                toolkit=self._toolkit,
+                state=state,
+                react_config=react_config,
             )
+            _logger.info("Agent创建成功")
 
             self._initialized = True
             _logger.info(f"Agent初始化成功: provider={provider}, model={self._model_name}")
@@ -405,7 +406,7 @@ class AgentIntegration:
                 if isinstance(message, str):
                     self._history.add_message("user", message)
                     _logger.info("用户消息已添加到历史记录")
-                    msg = Msg(name="User", content=message, role="user")
+                    msg = UserMsg(name="User", content=message)
                 else:
                     content_blocks = []
                     text_parts = []
@@ -434,7 +435,7 @@ class AgentIntegration:
                             text_parts.append(f"[视频]:{source}")
 
                     content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
-                    msg = Msg(name="User", content=content_blocks, role="user")
+                    msg = UserMsg(name="User", content=content_blocks)
                     self._history.add_message(msg=msg)
                     _logger.info(f"多模态消息已添加到历史记录: {len(content_blocks)} 个内容块")
 
@@ -481,18 +482,15 @@ class AgentIntegration:
                     self._history.clear()
                     for mem_msg_dict in memory_messages:
                         try:
-                            restored_msg = Msg.from_dict(mem_msg_dict)
+                            restored_msg = deserialize_message(mem_msg_dict)
                             self._history.add_message(msg=restored_msg)
                         except Exception as e:
                             _logger.warning(f"存储消息失败: {e}")
                 else:
                     # Fallback: store response directly if memory retrieval fails
                     if hasattr(response_msg, "content"):
-                        from agentscope.message import Msg as ASMsg
-
-                        full_msg = ASMsg(
+                        full_msg = AssistantMsg(
                             name="Assistant",
-                            role="assistant",
                             content=response_msg.content,
                             metadata=getattr(response_msg, "metadata", None),
                         )
@@ -537,7 +535,7 @@ class AgentIntegration:
             if AGENTSCOPE_AVAILABLE and Msg is not None:
                 if isinstance(message, str):
                     self._history.add_message("user", message)
-                    msg = Msg(name="User", content=message, role="user")
+                    msg = UserMsg(name="User", content=message)
                 else:
                     content_blocks = []
                     text_parts = []
@@ -566,7 +564,7 @@ class AgentIntegration:
                             text_parts.append(f"[视频]:{source}")
 
                     content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
-                    msg = Msg(name="User", content=content_blocks, role="user")
+                    msg = UserMsg(name="User", content=content_blocks)
                     self._history.add_message(msg=msg)
 
                 _logger.info("[异步] 调用Agent...")
@@ -645,7 +643,7 @@ class AgentIntegration:
             return False
 
         try:
-            interrupt_msg = Msg(name="system", content=reason, role="system")
+            interrupt_msg = SystemMsg(name="system", content=reason)
             asyncio.run_coroutine_threadsafe(
                 self._agent.interrupt(interrupt_msg),
                 self._current_loop,
@@ -665,13 +663,8 @@ class AgentIntegration:
         _logger.info("重置Agent...")
         self._history.clear()
 
-        if self._agent and hasattr(self._agent, "memory"):
-            try:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(self._agent.memory.clear())
-                loop.close()
-            except Exception as e:
-                _logger.warning(f"清空Agent记忆失败: {e}")
+        if self._agent and AGENTSCOPE_AVAILABLE:
+            self._agent.state = AgentState(context=[])
 
         _logger.info("Agent已重置")
 
@@ -681,26 +674,21 @@ class AgentIntegration:
         return self._history.to_dict_list()
 
     def extract_agent_memory(self) -> List[Dict]:
-        if not self._agent or not hasattr(self._agent, "memory"):
-            _logger.warning("Agent memory not available")
+        if not self._agent or not hasattr(self._agent, "state"):
+            _logger.warning("Agent state not available")
             return []
 
-        loop = asyncio.new_event_loop()
         try:
-            memory = loop.run_until_complete(self._agent.memory.get_memory())
-
             messages = []
-            for msg in reversed(memory):
-                msg_dict = msg.to_dict() if hasattr(msg, "to_dict") else msg
-
-                role = msg_dict.get("role", "unknown")
+            for msg in reversed(self._agent.state.context):
+                role = getattr(msg, "role", "unknown")
                 if role not in ["user", "assistant", "system"]:
                     continue
                 if role == "user":
                     # user message is add, skip here
                     break
 
-                messages.append(msg_dict)
+                messages.append(serialize_message(msg))
 
             _logger.info(f"Extracted {len(messages)} messages from agent memory")
             messages.reverse()
@@ -709,8 +697,6 @@ class AgentIntegration:
         except Exception as e:
             _logger.error(f"Failed to extract agent memory: {e}")
             return []
-        finally:
-            loop.close()
 
     def create_new_session(self, title: Optional[str] = None) -> Optional[str]:
         if not self._history_repository:
@@ -733,52 +719,16 @@ class AgentIntegration:
         return success
 
     def _sync_history_to_memory(self) -> None:
-        if not self._agent or not hasattr(self._agent, "memory"):
-            _logger.warning("Agent或memory不存在")
+        if not self._agent or not hasattr(self._agent, "state"):
+            _logger.warning("Agent或state不存在")
             return
 
         if not AGENTSCOPE_AVAILABLE:
             return
 
-        loop = asyncio.new_event_loop()
-        try:
-            _logger.info("清空Agent memory...")
-            loop.run_until_complete(self._agent.memory.clear())
-            _logger.info("Agent memory已清空")
-
-            messages = self._history.get_messages()
-            _logger.info(f"从内存加载 {len(messages)} 条历史消息")
-
-            sync_count = 0
-            for msg in messages:
-                if hasattr(msg, "role") and hasattr(msg, "content"):
-                    loop.run_until_complete(self._agent.memory.add(msg))
-                    sync_count += 1
-                elif isinstance(msg, dict):
-                    try:
-                        reconstructed_msg = Msg.from_dict(msg)
-                        loop.run_until_complete(self._agent.memory.add(reconstructed_msg))
-                        sync_count += 1
-                    except Exception as e:
-                        _logger.warning(f"Failed to reconstruct Msg: {e}")
-                        role = msg.get("role", "user")
-                        content = msg.get("content", "")
-                        if role in ("user", "assistant"):
-                            fallback_msg = Msg(
-                                name=msg.get("name", "User" if role == "user" else "Assistant"),
-                                content=content,
-                                role=role,
-                                metadata=msg.get("metadata", {}),
-                            )
-                            loop.run_until_complete(self._agent.memory.add(fallback_msg))
-                            sync_count += 1
-
-            _logger.info(f"已同步 {sync_count} 条消息到Agent memory")
-
-        except Exception as e:
-            _logger.warning(f"同步历史到Memory失败: {e}")
-        finally:
-            loop.close()
+        messages = self._history.get_messages()
+        self._agent.state = AgentState(context=messages)
+        _logger.info(f"已同步 {len(messages)} 条消息到Agent state")
 
     def list_sessions(self, limit: int = 20) -> List[Dict]:
         if not self._history_repository:
