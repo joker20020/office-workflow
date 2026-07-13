@@ -374,12 +374,40 @@ Content-Type: multipart/form-data
 
 **参数:** `image`(file)、`limit`(int)、`subject`(string 可选)
 
-**响应示例（文本/图像检索通用）:**
+#### 检索（文本 + 图像混合）
+
+```http
+POST /api/v1/rag/collections/{name}/search/mixed
+Content-Type: multipart/form-data
+```
+
+使用统一多模态模型的融合嵌入，将查询文本和查询图片一起编码后检索。
+
+**参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `query` | string | 是 | 查询文本 |
+| `image` | file | 是 | 查询图像 |
+| `limit` | int | 否 | 返回数量，默认 10，范围 1-100 |
+| `subject` | string | 否 | 分区标签 |
+
+**curl 示例:**
+
+```bash
+curl -X POST \
+  -F "query=火箭反推堵盖" \
+  -F "image=@query.png" \
+  -F "limit=10" \
+  http://localhost:8050/api/v1/rag/collections/capp/search/mixed
+```
+
+**响应示例（文本/图像/混合检索通用）:**
 
 ```json
 {
   "collection_name": "capp",
-  "query_type": "text",
+  "query_type": "mixed",
   "results": [
     {"id": 1, "score": 0.82, "type": "text", "text": "...", "path": "/abs/...", "subject": "capp", "asset_path": null},
     {"id": 2, "score": 0.71, "type": "image", "text": "描述", "path": "/abs/...", "subject": "capp", "asset_path": "images/capp/1_0.png"}

@@ -89,10 +89,10 @@ def _run_async(coro):
 class _APIRequester:
     """与 requester.py 中 APIRequester 完全一致的 HTTP 客户端"""
 
-    def __init__(self, base_url="http://localhost:8000/api/v1",
+    def __init__(self, base_url="http://localhost:8050/api/v1",
                  data_dir="./data/",
                  workflow_path="./data/workflow/Flux-Dev-ComfyUI-Workflow.json"):
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.data_dir = data_dir
         import aiohttp
 
@@ -101,6 +101,265 @@ class _APIRequester:
                 self.workflow = json.load(f)
         else:
             self.workflow = None
+
+    @staticmethod
+    def _image_content_type(path: str) -> str:
+        extension = os.path.splitext(path)[1].lower()
+        if extension == ".png":
+            return "image/png"
+        if extension in {".jpg", ".jpeg"}:
+            return "image/jpeg"
+        if extension == ".webp":
+            return "image/webp"
+        return "application/octet-stream"
+
+    @staticmethod
+    async def _response_json(response, operation: str) -> Dict[str, Any]:
+        if response.status < 200 or response.status >= 300:
+            detail = await response.text()
+            raise RuntimeError(f"{operation}失败: HTTP {response.status} - {detail}")
+        return await response.json()
+
+    @staticmethod
+    async def _response_bytes(response, operation: str) -> bytes:
+        if response.status < 200 or response.status >= 300:
+            detail = await response.text()
+            raise RuntimeError(f"{operation}失败: HTTP {response.status} - {detail}")
+        return await response.read()
+
+    @staticmethod
+    def _search_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list):
+            raise RuntimeError("RAG 后端响应格式无效: results 必须为列表")
+        return results
+
+    @staticmethod
+    def _collection_name(collection_name: str) -> str:
+        from urllib.parse import quote
+
+        return quote(collection_name, safe="")
+
+    async def rag_create_collection(self, collection_name: str) -> Dict[str, Any]:
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.base_url}/rag/collections",
+                json={"collection_name": collection_name},
+            ) as response:
+                return await self._response_json(response, "创建 RAG 集合")
+
+    async def rag_list_collections(self) -> Dict[str, Any]:
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.base_url}/rag/collections") as response:
+                return await self._response_json(response, "列出 RAG 集合")
+
+    async def rag_delete_collection(self, collection_name: str) -> Dict[str, Any]:
+        import aiohttp
+
+        name = self._collection_name(collection_name)
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"{self.base_url}/rag/collections/{name}"
+            ) as response:
+                return await self._response_json(response, "删除 RAG 集合")
+
+    async def rag_add_text(
+        self,
+        collection_name: str,
+        file_path: str,
+        subject: str = None,
+    ) -> Dict[str, Any]:
+        import aiohttp
+
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(file_path)
+        data = aiohttp.FormData()
+        if subject is not None:
+            data.add_field("subject", subject)
+        name = self._collection_name(collection_name)
+        with open(file_path, "rb") as file_handle:
+            data.add_field(
+                "file",
+                file_handle,
+                filename=os.path.basename(file_path),
+                content_type="application/octet-stream",
+            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/rag/collections/{name}/text",
+                    data=data,
+                ) as response:
+                    return await self._response_json(response, "添加 RAG 文本")
+
+    async def rag_add_images(
+        self,
+        collection_name: str,
+        image_paths: List[str],
+        descriptions: List[str],
+        subject: str = None,
+    ) -> Dict[str, Any]:
+        import aiohttp
+        from contextlib import ExitStack
+
+        if not image_paths or len(image_paths) != len(descriptions):
+            raise ValueError("图片和描述数量必须一致且不能为空")
+        missing = [path for path in image_paths if not os.path.isfile(path)]
+        if missing:
+            raise FileNotFoundError(missing[0])
+
+        data = aiohttp.FormData()
+        for description in descriptions:
+            data.add_field("descriptions", description)
+        if subject is not None:
+            data.add_field("subject", subject)
+
+        name = self._collection_name(collection_name)
+        with ExitStack() as stack:
+            for image_path in image_paths:
+                image_file = stack.enter_context(open(image_path, "rb"))
+                data.add_field(
+                    "images",
+                    image_file,
+                    filename=os.path.basename(image_path),
+                    content_type=self._image_content_type(image_path),
+                )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/rag/collections/{name}/images",
+                    data=data,
+                ) as response:
+                    return await self._response_json(response, "添加 RAG 图片")
+
+    async def rag_search_text(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 10,
+        subject: str = None,
+    ) -> List[Dict[str, Any]]:
+        import aiohttp
+
+        params = {"query": query, "limit": limit}
+        if subject is not None:
+            params["subject"] = subject
+        name = self._collection_name(collection_name)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/rag/collections/{name}/search",
+                params=params,
+            ) as response:
+                payload = await self._response_json(response, "RAG 文本检索")
+        return self._search_results(payload)
+
+    async def _rag_search_with_image(
+        self,
+        collection_name: str,
+        image_path: str,
+        limit: int,
+        subject: str = None,
+        query: str = None,
+    ) -> List[Dict[str, Any]]:
+        import aiohttp
+
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(image_path)
+        data = aiohttp.FormData()
+        if query is not None:
+            data.add_field("query", query)
+        data.add_field("limit", str(limit))
+        if subject is not None:
+            data.add_field("subject", subject)
+        name = self._collection_name(collection_name)
+        suffix = "/search/mixed" if query is not None else "/search"
+        operation = "RAG 混合检索" if query is not None else "RAG 图片检索"
+        with open(image_path, "rb") as image_file:
+            data.add_field(
+                "image",
+                image_file,
+                filename=os.path.basename(image_path),
+                content_type=self._image_content_type(image_path),
+            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/rag/collections/{name}{suffix}",
+                    data=data,
+                ) as response:
+                    payload = await self._response_json(response, operation)
+        return self._search_results(payload)
+
+    async def rag_search_image(
+        self,
+        collection_name: str,
+        image_path: str,
+        limit: int = 10,
+        subject: str = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._rag_search_with_image(
+            collection_name=collection_name,
+            image_path=image_path,
+            limit=limit,
+            subject=subject,
+        )
+
+    async def rag_search_mixed(
+        self,
+        collection_name: str,
+        query: str,
+        image_path: str,
+        limit: int = 10,
+        subject: str = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._rag_search_with_image(
+            collection_name=collection_name,
+            query=query,
+            image_path=image_path,
+            limit=limit,
+            subject=subject,
+        )
+
+    async def rag_list_entities(
+        self,
+        collection_name: str,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        import aiohttp
+
+        name = self._collection_name(collection_name)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/rag/collections/{name}/entities",
+                params={"offset": offset, "limit": limit},
+            ) as response:
+                return await self._response_json(response, "浏览 RAG 实体")
+
+    async def rag_delete_entity(
+        self,
+        collection_name: str,
+        entity_id: int,
+    ) -> Dict[str, Any]:
+        import aiohttp
+
+        name = self._collection_name(collection_name)
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"{self.base_url}/rag/collections/{name}/entities/{entity_id}"
+            ) as response:
+                return await self._response_json(response, "删除 RAG 实体")
+
+    async def rag_get_asset(self, asset_path: str) -> bytes:
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/rag/asset",
+                params={"path": asset_path},
+            ) as response:
+                return await self._response_bytes(response, "获取 RAG 图片资源")
 
     async def query_embedding(self, text, embed_image_path=None):
         import aiohttp
@@ -218,263 +477,6 @@ class _APIRequester:
                     return False
 
 
-class _MoyuClient:
-    """MoyuClient - Milvus 向量数据库客户端，支持完整的 CRUD 操作。
-
-    嵌入全部通过远程 requester 完成，向量维度根据嵌入结果动态确定。
-    """
-
-    def __init__(self, requester: _APIRequester, uri="http://localhost:19530", dim=None):
-        from pymilvus import MilvusClient, DataType
-        self._client = MilvusClient(uri=uri)
-        self.requester = requester
-        self._DataType = DataType
-        self._dim = dim
-
-    # ==================== Collection 管理 ====================
-
-    def init_collection(self, collection_name: str = "rag_embeddings"):
-        """初始化集合。如果集合已存在则返回加载状态，否则创建新集合。"""
-        if self._client.has_collection(collection_name=collection_name):
-            return self._client.get_load_state(collection_name=collection_name)
-
-        dim = self._get_embedding_dim()
-
-        schema = self._client.create_schema(
-            auto_id=True,
-            enable_dynamic_field=True,
-        )
-
-        schema.add_field(field_name="id", datatype=self._DataType.INT64, is_primary=True)
-        schema.add_field(field_name="embedding", datatype=self._DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(field_name="type", datatype=self._DataType.VARCHAR, max_length=16)
-        schema.add_field(field_name="path", datatype=self._DataType.VARCHAR, max_length=1024)
-        schema.add_field(field_name="text", datatype=self._DataType.VARCHAR, max_length=65535)
-        schema.add_field(field_name="subject", datatype=self._DataType.VARCHAR, max_length=64)
-
-        index_params = self._client.prepare_index_params()
-        index_params.add_index(field_name="id", index_type="")
-        index_params.add_index(field_name="embedding", index_type="", metric_type="COSINE")
-
-        self._client.create_collection(
-            collection_name=collection_name,
-            schema=schema,
-            index_params=index_params,
-        )
-        return self._client.get_load_state(collection_name=collection_name)
-
-    def drop_collection(self, collection_name: str):
-        """删除指定集合。"""
-        if self._client.has_collection(collection_name=collection_name):
-            self._client.drop_collection(collection_name=collection_name)
-
-    def list_collections(self):
-        """列出所有集合名称。"""
-        return self._client.list_collections()
-
-    def count(self, collection_name: str, **kwargs):
-        """统计集合中的实体数量。"""
-        stats = self._client.get_collection_stats(collection_name=collection_name, **kwargs)
-        return stats.get("row_count", 0)
-
-    # ==================== Create (插入) ====================
-
-    def insert(self, data, collection_name="rag_embeddings", timeout=None,
-               partition_name="", **kwargs):
-        """插入数据到集合。"""
-        return self._client.insert(
-            collection_name=collection_name,
-            data=data,
-            timeout=timeout,
-            partition_name=partition_name,
-            **kwargs,
-        )
-
-    async def insert_image(self, image_paths: List[str], texts: List[str],
-                           collection_name="rag_embeddings", timeout=None,
-                           partition_name="", **kwargs):
-        """插入图像数据，自动计算融合嵌入向量。"""
-        assert len(image_paths) == len(texts), "image_paths 和 texts 长度必须相同"
-        vectors = []
-        for i in range(len(texts)):
-            vec = await self.get_fused_embeddings(text=texts[i], image_path=image_paths[i])
-            vectors.append(vec)
-        data = [
-            {
-                "embedding": vectors[i],
-                "type": "image",
-                "text": texts[i],
-                "path": os.path.abspath(image_paths[i]),
-                "subject": "capp",
-            }
-            for i in range(len(vectors))
-        ]
-        return self._client.insert(
-            collection_name=collection_name,
-            data=data,
-            timeout=timeout,
-            partition_name=partition_name,
-            **kwargs,
-        )
-
-    # ==================== Read (查询) ====================
-
-    def search(self, data, collection_name="rag_embeddings", limit=10,
-               output_fields=None, **kwargs):
-        """向量相似度搜索。"""
-        return self._client.search(
-            collection_name=collection_name,
-            data=data,
-            limit=limit,
-            output_fields=output_fields,
-            **kwargs,
-        )
-
-    async def search_by_text(self, texts: List[str], collection_name="rag_embeddings",
-                              limit=10, output_fields=None, **kwargs):
-        """通过文本进行向量搜索，自动计算查询向量。"""
-        vectors = []
-        for text in texts:
-            vec = await self.get_text_embeddings(text=text)
-            vectors.append(vec)
-        return self._client.search(
-            collection_name=collection_name,
-            data=vectors,
-            limit=limit,
-            output_fields=output_fields,
-            **kwargs,
-        )
-
-    def get(self, ids, collection_name="rag_embeddings", output_fields=None,
-            timeout=None, **kwargs):
-        """根据主键 ID 获取实体。"""
-        return self._client.get(
-            collection_name=collection_name,
-            ids=ids,
-            output_fields=output_fields,
-            timeout=timeout,
-            **kwargs,
-        )
-
-    def query(self, collection_name="rag_embeddings", filter_expr="",
-              output_fields=None, limit=None, offset=None, timeout=None, **kwargs):
-        """根据标量过滤表达式查询实体。"""
-        return self._client.query(
-            collection_name=collection_name,
-            filter=filter_expr,
-            output_fields=output_fields,
-            limit=limit,
-            offset=offset,
-            timeout=timeout,
-            **kwargs,
-        )
-
-    # ==================== Update (更新) ====================
-
-    def upsert(self, data, collection_name="rag_embeddings", timeout=None,
-               partition_name="", **kwargs):
-        """更新或插入数据。如果 ID 已存在则更新，否则插入。"""
-        return self._client.upsert(
-            collection_name=collection_name,
-            data=data,
-            timeout=timeout,
-            partition_name=partition_name,
-            **kwargs,
-        )
-
-    def update(self, ids, data: Dict[str, Any], collection_name="rag_embeddings",
-               timeout=None, **kwargs):
-        """根据 ID 更新实体字段。"""
-        if not isinstance(ids, list):
-            ids = [ids]
-        existing = self._client.get(
-            collection_name=collection_name,
-            ids=ids,
-            output_fields=["*"],
-            timeout=timeout,
-        )
-        if not existing:
-            return {"upsert_count": 0}
-        upsert_data = []
-        for entity in existing:
-            updated = {**entity, **data}
-            updated.pop("_distance", None)
-            updated.pop("_score", None)
-            upsert_data.append(updated)
-        return self._client.upsert(
-            collection_name=collection_name,
-            data=upsert_data,
-            timeout=timeout,
-            **kwargs,
-        )
-
-    # ==================== Delete (删除) ====================
-
-    def delete(self, ids=None, collection_name="rag_embeddings", filter_expr="",
-               timeout=None, partition_name="", **kwargs):
-        """删除实体。可以通过 ID 或过滤条件删除。"""
-        if ids and filter_expr:
-            raise ValueError("不能同时指定 ids 和 filter，请选择一种删除方式")
-        return self._client.delete(
-            collection_name=collection_name,
-            ids=ids,
-            filter=filter_expr,
-            timeout=timeout,
-            partition_name=partition_name,
-            **kwargs,
-        )
-
-    def delete_by_filter(self, filter_expr: str, collection_name="rag_embeddings",
-                         timeout=None, **kwargs):
-        """根据过滤条件删除实体。"""
-        return self._client.delete(
-            collection_name=collection_name,
-            filter=filter_expr,
-            timeout=timeout,
-            **kwargs,
-        )
-
-    # ==================== Embedding (嵌入向量) ====================
-
-    async def get_text_embeddings(self, text: str):
-        """获取文本嵌入向量。"""
-        return (await self.requester.query_embedding(text, None))["vector"]
-
-    async def get_image_embeddings(self, image_path: str):
-        """获取图像嵌入向量。"""
-        return (await self.requester.query_embedding(None, image_path))["vector"]
-
-    async def get_fused_embeddings(self, text, image_path=None):
-        """获取文本和图像的融合嵌入向量。"""
-        return (await self.requester.query_embedding(text, image_path))["vector"]
-
-    def _get_embedding_dim(self) -> int:
-        """获取嵌入向量维度。
-
-        优先使用已缓存的 _dim，否则通过 requester 获取测试向量来动态检测。
-
-        Returns:
-            嵌入向量维度
-        """
-        if self._dim is not None:
-            return self._dim
-
-        import asyncio
-        coro = self.requester.query_embedding("dimension detection", None)
-        try:
-            asyncio.get_running_loop()
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                result = future.result()
-        except RuntimeError:
-            result = asyncio.run(coro)
-
-        vector = result["vector"]
-        self._dim = len(vector) if isinstance(vector, list) else vector.shape[-1]
-        return self._dim
-
-
 # ============================================================
 #  工具集
 # ============================================================
@@ -490,11 +492,131 @@ class AgentExtensionTools:
     def _get_requester(self) -> _APIRequester:
         if self._requester is None:
             self._requester = _APIRequester(
-                base_url=os.environ.get("RAG_BASE_URL", "http://localhost:8000/api/v1"),
+                base_url=os.environ.get("RAG_BASE_URL", "http://localhost:8050/api/v1"),
                 data_dir="./data/",
                 workflow_path="./data/workflow/Flux-Dev-ComfyUI-Workflow.json",
             )
         return self._requester
+
+    async def _search_rag_candidates(
+        self,
+        task: str,
+        image_path: str,
+        collection_name: str,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        requester = self._get_requester()
+        if image_path:
+            return await requester.rag_search_mixed(
+                collection_name,
+                task,
+                image_path,
+                limit=limit,
+            )
+        return await requester.rag_search_text(
+            collection_name,
+            task,
+            limit=limit,
+        )
+
+    async def _cache_rag_asset(self, asset_path: str) -> str:
+        import hashlib
+
+        requester = self._get_requester()
+        image_data = await requester.rag_get_asset(asset_path)
+        basename = os.path.basename(asset_path.replace("\\", "/"))
+        if not basename:
+            raise RuntimeError(f"RAG 图片资源路径无效: {asset_path}")
+        namespace = hashlib.sha256(asset_path.encode("utf-8")).hexdigest()[:12]
+        filename = f"{namespace}_{basename}"
+        image_dir = os.path.join(self._get_requester().data_dir, "img")
+        os.makedirs(image_dir, exist_ok=True)
+        local_path = os.path.join(image_dir, filename)
+        with open(local_path, "wb") as file_handle:
+            file_handle.write(image_data)
+        return local_path
+
+    async def _rerank_rag_candidates(
+        self,
+        task: str,
+        candidates: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        requester = self._get_requester()
+        ranked = []
+        for candidate in candidates:
+            item = dict(candidate)
+            rerank_kwargs = None
+            if item.get("type") == "image" and item.get("asset_path"):
+                image_path = await self._cache_rag_asset(item["asset_path"])
+                item["_local_asset_path"] = image_path
+                rerank_kwargs = {
+                    "query_type": "text",
+                    "query_text": task,
+                    "query_image_path": None,
+                    "doc_type": "image",
+                    "doc_text": None,
+                    "doc_image_path": image_path,
+                }
+            elif item.get("type") == "text":
+                rerank_kwargs = {
+                    "query_type": "text",
+                    "query_text": task,
+                    "query_image_path": None,
+                    "doc_type": "text",
+                    "doc_text": item.get("text", ""),
+                    "doc_image_path": None,
+                }
+            try:
+                response = (
+                    await requester.query_rerank(**rerank_kwargs)
+                    if rerank_kwargs is not None
+                    else None
+                )
+                if response is not None:
+                    item["score"] = response["score"]
+            except Exception as exc:
+                _logger.warning(f"RAG 候选重排失败，保留原始分数: {exc}")
+            ranked.append(item)
+        return sorted(
+            ranked,
+            key=lambda item: item.get("score", 0.0),
+            reverse=True,
+        )
+
+    def _build_rag_content_blocks(self, candidates, image_loader=None):
+        if image_loader is None:
+            def image_loader(path):
+                with open(path, "rb") as image_file:
+                    return image_file.read()
+
+        blocks = []
+        for index, candidate in enumerate(candidates):
+            description = (
+                f"{index + 1}.{candidate.get('text', '')}"
+                f"(来源为{candidate.get('path', '')})\n"
+            )
+            blocks.append(TextBlock(type="text", text=description))
+            if candidate.get("type") != "image":
+                continue
+            local_path = candidate.get("_local_asset_path")
+            if not local_path:
+                _logger.warning(
+                    "RAG 图片候选缺少 asset_path，已仅保留文本描述: "
+                    f"{candidate.get('id')}"
+                )
+                continue
+            image_data = image_loader(local_path)
+            blocks.append(
+                ImageBlock(
+                    type="image",
+                    source=Base64Source(
+                        type="base64",
+                        media_type=_APIRequester._image_content_type(local_path),
+                        data=base64.b64encode(image_data).decode("utf-8"),
+                    ),
+                )
+            )
+        return blocks
 
     def get_all_tools(self) -> list:
         return [
@@ -715,86 +837,22 @@ class AgentExtensionTools:
         limit: int = 5,
     ) -> str:
         """
-        严格对应 main.py process_agent_tool 的完整流程：
-        1. 查询向量数据库获取嵌入
-        2. Milvus 搜索
-        3. 对每条结果调用 rerank 重排序
-        4. 按重排序分数排序
-        5. 构建包含知识库结果+图片+JSON模板的完整prompt
-        6. 创建带 PlanNotebook 的 ReActAgent 执行规划
+        通过 ProcessGen RAG 后端检索候选，重排后构建完整 prompt，
+        再由带 PlanNotebook 的 ReActAgent 执行工艺规划。
         """
         if not AGENTSCOPE_AVAILABLE:
             return "AgentScope 未安装，无法使用工艺规划功能"
 
-        requester = self._get_requester()
-        milvus_uri = os.environ.get("MILVUS_BASE_URL", "http://localhost:19530")
-        client = _MoyuClient(requester, milvus_uri)
-
-        # ---- 1. 查询向量数据库 ----
-        query_vector = await client.get_fused_embeddings(text=task, image_path=image_path)
-
-        query_res = client.search(
-            data=[query_vector],
-            collection_name=collection_name,
-            limit=limit,
-            output_fields=["text", "subject", "path", "type"],
+        candidates = await self._search_rag_candidates(
+            task,
+            image_path,
+            collection_name,
+            limit,
         )
+        query_res = (await self._rerank_rag_candidates(task, candidates))[:limit]
 
-        # ---- 2. rerank 重排序 ----
-        for i in range(len(query_res[0])):
-            entity = query_res[0][i]['entity']
-            if entity['type'] == "text":
-                res = await requester.query_rerank(
-                    query_type="text", query_text=task, query_image_path=None,
-                    doc_type="text", doc_text=entity['text'], doc_image_path=None,
-                )
-                query_res[0][i]['score'] = res["score"]
-            elif entity['type'] == "image":
-                # 获取图片数据
-                img_path = f"./data/img/{entity['path']}"
-                if not os.path.exists(img_path):
-                    image_data = await requester.get_image(entity['path'])
-                res = await requester.query_rerank(
-                    query_type="text", query_text=task, query_image_path=None,
-                    doc_type="image", doc_text=None,
-                    doc_image_path=f"./data/img/{entity['path']}",
-                )
-                query_res[0][i]['score'] = res["score"]
-
-        query_res[0].sort(key=lambda x: x['score'], reverse=True)
-
-        # ---- 3. 构建知识库结果消息 ----
-        rerank_num = limit
-        query_content_list = []
-
-        for i in range(rerank_num):
-            entity = query_res[0][i]['entity']
-            if entity['type'] == "text":
-                query_content_list.append(
-                    TextBlock(type="text", text=f"{i + 1}.{entity['text']}(来源为{entity['path']})\n")
-                )
-            elif entity['type'] == "image":
-                # 获取图片数据
-                img_path = f"./data/img/{entity['path']}"
-                if not os.path.exists(img_path):
-                    image_data = await requester.get_image(entity['path'])
-                else:
-                    image_data = open(img_path, "rb").read()
-                query_content_list.append(
-                    TextBlock(type="text", text=f"{i + 1}.{entity['text']}(来源为{entity['path']})\n")
-                )
-                query_content_list.append(
-                    ImageBlock(type="image", source=Base64Source(
-                        type="base64",
-                        media_type="image/png"
-                        if entity['path'] and entity['path'].split(".")[-1] == "png"
-                        else "image/jpeg",
-                        data=base64.b64encode(image_data).decode("utf-8"),
-                    ))
-                )
-                query_content_list.append(
-                    TextBlock(type="text", text=f"{i + 1}.{entity['text']}(来源为{entity['path']})\n")
-                )
+        # ---- 构建知识库结果消息 ----
+        query_content_list = self._build_rag_content_blocks(query_res)
 
         # ---- 4. 构建完整prompt（知识库结果 + 用户问题 + 工序/工步JSON模板） ----
         msg = Msg(
@@ -964,6 +1022,7 @@ class AgentExtensionTools:
         你是一个ai图片生成助手,你的任务是根据用户的描述，合理细化生成图片细节要求，并调用api进行生成
         注意：请将用户描述往符合图像生成模型要求的方向进行细化，使其包含必要的细节，及要求
         图像应该为2维工程图风格，以指示为主，尽量不要出现人物等元素
+        若有多张图片需要生成，请逐张生成
         """,
             model=OpenAIChatModel(
                 model_name=self._llm_name,
@@ -1055,25 +1114,22 @@ class AgentExtensionTools:
         limit: int,
     ) -> List[Dict]:
         requester = self._get_requester()
-        milvus_uri = os.environ.get("MILVUS_BASE_URL", "http://localhost:19530")
-        client = _MoyuClient(requester, milvus_uri)
-
-        query_vector = await client.get_fused_embeddings(text=query)
-        search_res = client.search(
-            data=[query_vector],
-            collection_name=collection_name,
+        search_results = await requester.rag_search_text(
+            collection_name,
+            query,
             limit=limit,
-            output_fields=["text", "subject", "path", "type"],
         )
 
         results = []
-        for hit in search_res[0]:
-            entity = hit["entity"]
+        for item in search_results:
             results.append({
-                "score": round(hit["distance"], 4),
-                "text": entity.get("text", "")[:500],
-                "path": entity.get("path", ""),
-                "type": entity.get("type", ""),
+                "id": item.get("id"),
+                "score": round(item.get("score", 0.0), 4),
+                "text": item.get("text", "")[:500],
+                "path": item.get("path", ""),
+                "type": item.get("type", ""),
+                "subject": item.get("subject", ""),
+                "asset_path": item.get("asset_path"),
             })
         return results
 
