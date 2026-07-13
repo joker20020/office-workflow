@@ -48,10 +48,10 @@ class MockPlugin(PluginBase):
         self.load_called = False
         self.unload_called = False
 
-    def on_load(self, context):
+    def on_enable(self, context):
         self.load_called = True
 
-    def on_unload(self):
+    def on_disable(self, context=None):
         self.unload_called = True
 
 
@@ -122,10 +122,10 @@ class TestPlugin(PluginBase):
         Permission.FILE_READ,
     ])
     
-    def on_load(self, context):
+    def on_enable(self, context):
         pass
     
-    def on_unload(self):
+    def on_disable(self, context=None):
         pass
 """
         (plugin_dir / "__init__.py").write_text(init_content, encoding="utf-8")

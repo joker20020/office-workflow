@@ -63,13 +63,11 @@ class TestWidgetDualInputMechanism:
     def setup_nodes(self, simple_graph, source_node_def, target_node_def):
         """设置测试节点"""
         # 创建源节点
-        source_node = Node(node_type="test.source", position=(0, 0))
-        simple_graph.add_node(source_node)
+        source_node = simple_graph.add_node("test.source", position=(0, 0))
 
         # 创建目标节点
-        target_node = Node(node_type="test.target", position=(200, 0))
+        target_node = simple_graph.add_node("test.target", position=(200, 0))
         target_node.widget_values["input"] = "widget_value"
-        simple_graph.add_node(target_node)
 
         return simple_graph, source_node, target_node, source_node_def, target_node_def
 
@@ -92,6 +90,7 @@ class TestWidgetDualInputMechanism:
             target_node=target_node.id,
             target_port="input",
         )
+        source_node.outputs["output"] = "connection_value"
 
         from src.engine.node_engine import NodeEngine
 
@@ -142,9 +141,8 @@ class TestWidgetDualInputMechanism:
             outputs=[],
         )
 
-        target_node = Node(node_type="test.default", position=(0, 0))
+        target_node = graph.add_node("test.default", position=(0, 0))
         # 不设置 widget_values
-        graph.add_node(target_node)
 
         engine = NodeEngine()
         engine.register_node_type(target_def)
@@ -175,8 +173,7 @@ class TestWidgetDualInputMechanism:
             outputs=[],
         )
 
-        target_node = Node(node_type="test.required", position=(0, 0))
-        graph.add_node(target_node)
+        target_node = graph.add_node("test.required", position=(0, 0))
 
         engine = NodeEngine()
         engine.register_node_type(target_def)
@@ -222,12 +219,9 @@ class TestRemoveConnectionWidgetReEnable:
             outputs=[],
         )
 
-        source_node = Node(node_type="test.source", position=(0, 0))
-        target_node = Node(node_type="test.target", position=(200, 0))
+        source_node = graph.add_node("test.source", position=(0, 0))
+        target_node = graph.add_node("test.target", position=(200, 0))
         target_node.widget_values["input"] = "widget_value"
-
-        graph.add_node(source_node)
-        graph.add_node(target_node)
 
         conn = graph.add_connection(
             source_node=source_node.id,

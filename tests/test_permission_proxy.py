@@ -726,7 +726,7 @@ class TestPluginLoadIntegration:
         context.is_initialized = True
         return context
 
-    def test_proxy_passed_to_plugin_on_load(
+    def test_proxy_passed_to_plugin_on_enable(
         self, mock_context, plugin_name: str, granted_permissions: Set[Permission]
     ):
         """测试插件加载时收到的是代理而非原始上下文"""
@@ -737,18 +737,18 @@ class TestPluginLoadIntegration:
             version = "1.0.0"
             received_context = None
 
-            def on_load(self, context):
+            def on_enable(self, context):
                 self.received_context = context
 
-            def on_unload(self):
+            def on_disable(self, context=None):
                 pass
 
         # 创建代理
         proxy = PermissionProxy(mock_context, plugin_name, granted_permissions)
 
-        # 创建插件实例并调用 on_load
+        # 创建插件实例并调用 on_enable
         plugin = TestPlugin()
-        plugin.on_load(proxy)
+        plugin.on_enable(proxy)
 
         # 验证插件收到的是代理
         assert plugin.received_context is proxy
@@ -824,7 +824,7 @@ class TestPluginLoadIntegration:
             subscription_id = None
             events_received = []
 
-            def on_load(self, context):
+            def on_enable(self, context):
                 # 检查权限
                 if context.check_permission(Permission.EVENT_SUBSCRIBE):
                     # 订阅事件
@@ -832,7 +832,7 @@ class TestPluginLoadIntegration:
                         EventType.APP_STARTED, self.on_app_started
                     )
 
-            def on_unload(self):
+            def on_disable(self, context=None):
                 pass
 
             def on_app_started(self, event):
@@ -843,7 +843,7 @@ class TestPluginLoadIntegration:
 
         # 创建并加载插件
         plugin = FullTestPlugin()
-        plugin.on_load(proxy)
+        plugin.on_enable(proxy)
 
         # 验证订阅成功
         assert plugin.subscription_id is not None

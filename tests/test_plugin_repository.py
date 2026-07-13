@@ -41,12 +41,12 @@ def repository(database: Database) -> PluginRepository:
 class TestPluginStatusManagement:
     """测试插件状态管理"""
 
-    def test_get_enabled_returns_true_by_default(self, repository: PluginRepository):
-        """测试默认启用状态"""
-        # 未设置过的插件默认启用
+    def test_get_enabled_returns_false_for_unknown_plugin(self, repository: PluginRepository):
+        """测试未知插件默认禁用"""
+        # 未设置过的插件默认禁用
         result = repository.get_enabled("new_plugin")
 
-        assert result is True
+        assert result is False
 
     def test_set_enabled_creates_plugin_if_not_exists(self, repository: PluginRepository):
         """测试设置状态时自动创建插件记录"""
@@ -348,7 +348,7 @@ class TestPluginRepositoryIntegration:
         plugin_name = "multi_op_plugin"
 
         # 初始状态
-        assert repository.get_enabled(plugin_name) is True
+        assert repository.get_enabled(plugin_name) is False
         assert repository.get_config(plugin_name) == {}
 
         # 设置配置

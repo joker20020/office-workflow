@@ -193,7 +193,7 @@ class TestGitUtilsGetRemoteUrl:
         url = GitUtils.get_remote_url(target_path)
 
         assert url is not None
-        assert str(source_path) in url
+        assert Path(url).resolve() == source_path.resolve()
 
     def test_get_remote_url_no_remote(self, tmp_path: Path):
         """测试没有远程时返回None"""

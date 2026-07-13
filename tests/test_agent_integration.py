@@ -2,7 +2,6 @@
 """AgentIntegration 单元测试"""
 
 import pytest
-from unittest.mock import MagicMock
 
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
@@ -41,11 +40,9 @@ def node_engine():
 
 @pytest.fixture
 def agent(api_key_manager, node_engine, skill_manager, mcp_manager):
-    workflow_tools = MagicMock()
     agent = AgentIntegration(
         api_key_manager=api_key_manager,
         node_engine=node_engine,
-        workflow_tools=workflow_tools,
         mcp_manager=mcp_manager,
         skill_manager=skill_manager,
     )
