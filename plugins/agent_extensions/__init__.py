@@ -12,6 +12,7 @@
 import asyncio
 import base64
 import json
+import math
 import os
 from typing import Any, Dict, List
 
@@ -58,6 +59,26 @@ def _make_response(content: str, success: bool = True) -> Any:
     return str(content)
 
 
+def _get_timeout_seconds(name: str, default: float) -> float:
+    """读取正数超时配置，无效值回退到默认值。"""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return float(default)
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = 0.0
+    if not math.isfinite(value) or value <= 0:
+        _logger.warning(
+            "%s 必须为正数，当前值为 %r；使用默认值 %s 秒",
+            name,
+            raw_value,
+            default,
+        )
+        return float(default)
+    return value
+
+
 def _run_async(coro):
     """在同步环境中运行异步协程（供tool函数使用）"""
     try:
@@ -76,11 +97,14 @@ def _run_async(coro):
 
         t = threading.Thread(target=_target)
         t.start()
-        t.join(timeout=310)
+        timeout = _get_timeout_seconds("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0)
+        t.join(timeout=timeout)
+        if t.is_alive():
+            return f"(执行超时：工具运行超过 {timeout:g} 秒)"
         if result[1]:
             raise result[1]
         if result[0] is None:
-            return "(执行超时或无返回结果)"
+            return "(工具执行完成但无返回结果)"
         return result[0]
     else:
         return asyncio.run(coro)
@@ -351,15 +375,40 @@ class _APIRequester:
             ) as response:
                 return await self._response_json(response, "删除 RAG 实体")
 
-    async def rag_get_asset(self, asset_path: str) -> bytes:
+    async def rag_get_asset(
+        self,
+        collection_name: str,
+        asset_path: str,
+    ) -> bytes:
         import aiohttp
+        from urllib.parse import quote
 
+        name = self._collection_name(collection_name)
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                f"{self.base_url}/rag/asset",
+                f"{self.base_url}/rag/collections/{name}/asset",
                 params={"path": asset_path},
             ) as response:
-                return await self._response_bytes(response, "获取 RAG 图片资源")
+                if response.status != 404:
+                    return await self._response_bytes(response, "获取 RAG 图片资源")
+
+            filename = os.path.basename(asset_path.replace("\\", "/"))
+            if not filename:
+                raise FileNotFoundError(
+                    f"RAG 图片资源不存在: {collection_name}/{asset_path}"
+                )
+
+            async with session.get(
+                f"{self.base_url}/images/{quote(filename, safe='')}"
+            ) as response:
+                if response.status == 404:
+                    raise FileNotFoundError(
+                        f"RAG 图片资源不存在: {collection_name}/{asset_path}"
+                    )
+                return await self._response_bytes(
+                    response,
+                    "获取历史 RAG 图片资源",
+                )
 
     async def query_embedding(self, text, embed_image_path=None):
         import aiohttp
@@ -462,7 +511,12 @@ class _APIRequester:
             async with session.post(
                     f"{self.base_url}/text-to-image",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=300),
+                    timeout=aiohttp.ClientTimeout(
+                        total=_get_timeout_seconds(
+                            "IMAGE_REQUEST_TIMEOUT_SECONDS",
+                            600.0,
+                        ),
+                    ),
             ) as response:
                 if response.status == 200:
                     image_data = await response.read()
@@ -519,17 +573,30 @@ class AgentExtensionTools:
             limit=limit,
         )
 
-    async def _cache_rag_asset(self, asset_path: str) -> str:
+    async def _cache_rag_asset(
+        self,
+        collection_name: str,
+        asset_path: str,
+    ) -> str:
         import hashlib
+        import re
 
         requester = self._get_requester()
-        image_data = await requester.rag_get_asset(asset_path)
+        image_data = await requester.rag_get_asset(collection_name, asset_path)
         basename = os.path.basename(asset_path.replace("\\", "/"))
         if not basename:
             raise RuntimeError(f"RAG 图片资源路径无效: {asset_path}")
-        namespace = hashlib.sha256(asset_path.encode("utf-8")).hexdigest()[:12]
-        filename = f"{namespace}_{basename}"
-        image_dir = os.path.join(self._get_requester().data_dir, "img")
+        safe_basename = re.sub(
+            r'[<>:"/\\|?*\x00-\x1f]',
+            "_",
+            basename,
+        ).rstrip(" .")
+        if not safe_basename:
+            safe_basename = "asset"
+        cache_key = f"{collection_name}\0{asset_path}"
+        namespace = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:12]
+        filename = f"{namespace}_{safe_basename}"
+        image_dir = os.path.join(requester.data_dir, "img")
         os.makedirs(image_dir, exist_ok=True)
         local_path = os.path.join(image_dir, filename)
         with open(local_path, "wb") as file_handle:
@@ -539,6 +606,7 @@ class AgentExtensionTools:
     async def _rerank_rag_candidates(
         self,
         task: str,
+        collection_name: str,
         candidates: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         requester = self._get_requester()
@@ -546,17 +614,40 @@ class AgentExtensionTools:
         for candidate in candidates:
             item = dict(candidate)
             rerank_kwargs = None
-            if item.get("type") == "image" and item.get("asset_path"):
-                image_path = await self._cache_rag_asset(item["asset_path"])
-                item["_local_asset_path"] = image_path
-                rerank_kwargs = {
-                    "query_type": "text",
-                    "query_text": task,
-                    "query_image_path": None,
-                    "doc_type": "image",
-                    "doc_text": None,
-                    "doc_image_path": image_path,
-                }
+            if item.get("type") == "image":
+                asset_path = item.get("asset_path") or item.get("path")
+                if not asset_path:
+                    item["_asset_error"] = "缺少可下载资源路径"
+                    _logger.warning(
+                        "RAG 图片候选缺少可下载资源路径，已仅保留文本描述: %s",
+                        item.get("id"),
+                    )
+                else:
+                    try:
+                        image_path = await self._cache_rag_asset(
+                            collection_name,
+                            asset_path,
+                        )
+                    except FileNotFoundError as exc:
+                        item["_asset_error"] = str(exc)
+                        _logger.warning(
+                            "RAG 图片下载失败，已仅保留文本描述: "
+                            "collection=%s, id=%s, path=%s, error=%s",
+                            collection_name,
+                            item.get("id"),
+                            asset_path,
+                            exc,
+                        )
+                    else:
+                        item["_local_asset_path"] = image_path
+                        rerank_kwargs = {
+                            "query_type": "text",
+                            "query_text": task,
+                            "query_image_path": None,
+                            "doc_type": "image",
+                            "doc_text": None,
+                            "doc_image_path": image_path,
+                        }
             elif item.get("type") == "text":
                 rerank_kwargs = {
                     "query_type": "text",
@@ -600,10 +691,11 @@ class AgentExtensionTools:
                 continue
             local_path = candidate.get("_local_asset_path")
             if not local_path:
-                _logger.warning(
-                    "RAG 图片候选缺少 asset_path，已仅保留文本描述: "
-                    f"{candidate.get('id')}"
-                )
+                if not candidate.get("_asset_error"):
+                    _logger.warning(
+                        "RAG 图片候选缺少可用本地缓存，已仅保留文本描述: %s",
+                        candidate.get("id"),
+                    )
                 continue
             image_data = image_loader(local_path)
             blocks.append(
@@ -653,10 +745,13 @@ class AgentExtensionTools:
 
         # 严格对应 main.py unity_agent_tool
         toolkit = Toolkit()
+        unity_timeout = _get_timeout_seconds("UNITY_MCP_TIMEOUT_SECONDS", 600.0)
         unity_mcp = HttpStatefulClient(
             name="unity_mcp",
             transport="streamable_http",
             url="http://localhost:8080/mcp",
+            timeout=unity_timeout,
+            sse_read_timeout=unity_timeout,
         )
 
         try:
@@ -883,7 +978,9 @@ class AgentExtensionTools:
             collection_name,
             limit,
         )
-        query_res = (await self._rerank_rag_candidates(task, candidates))[:limit]
+        query_res = (
+            await self._rerank_rag_candidates(task, collection_name, candidates)
+        )[:limit]
 
         # ---- 构建知识库结果消息 ----
         query_content_list = self._build_rag_content_blocks(query_res)

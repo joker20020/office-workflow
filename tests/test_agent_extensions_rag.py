@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """agent_extensions 的 ProcessGen RAG HTTP 契约测试。"""
 
+import asyncio
+import hashlib
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import aiohttp
 import pytest
@@ -232,15 +234,58 @@ async def test_rag_upload_and_entity_methods_match_backend_contract(
 
 
 @pytest.mark.asyncio
-async def test_rag_asset_returns_bytes(requester, fake_session):
+async def test_rag_asset_uses_collection_endpoint(requester, fake_session):
     fake_session.queue_bytes(b"image-data")
-    result = await requester.rag_get_asset("images/process/1.png")
+    result = await requester.rag_get_asset("工艺 库", "nested/1.png")
     assert result == b"image-data"
     assert fake_session.requests[-1] == (
         "GET",
-        "http://backend/api/v1/rag/asset",
-        {"params": {"path": "images/process/1.png"}},
+        "http://backend/api/v1/rag/collections/%E5%B7%A5%E8%89%BA%20%E5%BA%93/asset",
+        {"params": {"path": "nested/1.png"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_rag_asset_falls_back_to_general_image_on_404(
+    requester, fake_session
+):
+    fake_session.queue_bytes(b"", status=404, text="missing")
+    fake_session.queue_bytes(b"legacy-image")
+
+    result = await requester.rag_get_asset("process", "legacy/反推堵盖2.png")
+
+    assert result == b"legacy-image"
+    assert fake_session.requests == [
+        (
+            "GET",
+            "http://backend/api/v1/rag/collections/process/asset",
+            {"params": {"path": "legacy/反推堵盖2.png"}},
+        ),
+        (
+            "GET",
+            "http://backend/api/v1/images/%E5%8F%8D%E6%8E%A8%E5%A0%B5%E7%9B%962.png",
+            {},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rag_asset_does_not_fallback_on_non_404(requester, fake_session):
+    fake_session.queue_bytes(b"", status=500, text="backend failed")
+
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        await requester.rag_get_asset("process", "1.png")
+
+    assert len(fake_session.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_asset_double_404_is_not_found(requester, fake_session):
+    fake_session.queue_bytes(b"", status=404, text="collection missing")
+    fake_session.queue_bytes(b"", status=404, text="legacy missing")
+
+    with pytest.raises(FileNotFoundError, match=r"process.*missing\.png"):
+        await requester.rag_get_asset("process", "missing.png")
 
 
 @pytest.mark.asyncio
@@ -354,11 +399,11 @@ async def test_rerank_candidates_sorts_scores_and_uses_asset_path(monkeypatch):
         },
     ]
 
-    result = await tools._rerank_rag_candidates("问题", candidates)
+    result = await tools._rerank_rag_candidates("问题", "process", candidates)
 
     assert [item["id"] for item in result] == [2, 1]
     assert [item["score"] for item in result] == [0.9, 0.2]
-    cache.assert_awaited_once_with("images/process/part.png")
+    cache.assert_awaited_once_with("process", "images/process/part.png")
     tools._requester.query_rerank.assert_any_await(
         query_type="text",
         query_text="问题",
@@ -378,7 +423,7 @@ async def test_rerank_failure_keeps_original_rag_score():
         {"id": 1, "score": 0.42, "type": "text", "text": "内容"}
     ]
 
-    result = await tools._rerank_rag_candidates("问题", candidates)
+    result = await tools._rerank_rag_candidates("问题", "process", candidates)
 
     assert result[0]["score"] == 0.42
 
@@ -399,26 +444,126 @@ async def test_rerank_propagates_asset_fetch_failure(monkeypatch):
     ]
 
     with pytest.raises(RuntimeError, match="asset unavailable"):
-        await tools._rerank_rag_candidates("问题", candidates)
+        await tools._rerank_rag_candidates("问题", "process", candidates)
 
 
 @pytest.mark.asyncio
-async def test_asset_cache_names_include_path_namespace(tmp_path):
+async def test_rerank_image_uses_path_when_asset_path_is_missing(monkeypatch):
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    tools._requester.query_rerank.return_value = {"score": 0.9}
+    cache = AsyncMock(return_value="data/img/local.png")
+    monkeypatch.setattr(tools, "_cache_rag_asset", cache)
+
+    result = await tools._rerank_rag_candidates(
+        "问题",
+        "process",
+        [{"id": 1, "score": 0.2, "type": "image", "path": "1.png"}],
+    )
+
+    cache.assert_awaited_once_with("process", "1.png")
+    assert result[0]["_local_asset_path"] == "data/img/local.png"
+
+
+@pytest.mark.asyncio
+async def test_rerank_double_404_keeps_text_and_original_score(monkeypatch):
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    cache = AsyncMock(side_effect=FileNotFoundError("missing"))
+    monkeypatch.setattr(tools, "_cache_rag_asset", cache)
+
+    result = await tools._rerank_rag_candidates(
+        "问题",
+        "process",
+        [{"id": 1, "score": 0.42, "type": "image", "asset_path": "1.png"}],
+    )
+
+    assert result[0]["score"] == 0.42
+    assert result[0]["_asset_error"] == "missing"
+    tools._requester.query_rerank.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_agent_passes_collection_to_rerank(monkeypatch):
+    class StopAfterRerank(Exception):
+        pass
+
+    tools = AgentExtensionTools()
+    candidates = [{"id": 1, "type": "text", "text": "内容"}]
+    tools._search_rag_candidates = AsyncMock(return_value=candidates)
+    tools._rerank_rag_candidates = AsyncMock(side_effect=StopAfterRerank)
+    monkeypatch.setattr(agent_extensions, "AGENTSCOPE_AVAILABLE", True)
+
+    with pytest.raises(StopAfterRerank):
+        await tools._process_agent_async("任务", None, "process", 5)
+
+    tools._rerank_rag_candidates.assert_awaited_once_with(
+        "任务",
+        "process",
+        candidates,
+    )
+
+
+@pytest.mark.asyncio
+async def test_asset_cache_redownloads_and_overwrites_existing_file(tmp_path):
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    tools._requester.data_dir = str(tmp_path)
+    tools._requester.rag_get_asset.side_effect = [b"first", b"second"]
+
+    first = await tools._cache_rag_asset("process", "shared.png")
+    second = await tools._cache_rag_asset("process", "shared.png")
+
+    assert first == second
+    assert Path(second).read_bytes() == b"second"
+    assert tools._requester.rag_get_asset.await_args_list == [
+        call("process", "shared.png"),
+        call("process", "shared.png"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_asset_cache_names_include_collection_and_path(tmp_path):
     tools = AgentExtensionTools()
     tools._requester = AsyncMock()
     tools._requester.data_dir = str(tmp_path)
     tools._requester.rag_get_asset.return_value = b"image"
 
-    first = await tools._cache_rag_asset("images/one/shared.png")
-    second = await tools._cache_rag_asset("images/two/shared.png")
+    first = await tools._cache_rag_asset("one", "shared.png")
+    second = await tools._cache_rag_asset("two", "shared.png")
+
+    expected_namespace = hashlib.sha256(b"one\0shared.png").hexdigest()[:12]
 
     assert first != second
+    assert Path(first).name == f"{expected_namespace}_shared.png"
     assert Path(first).name.endswith("_shared.png")
     assert Path(second).name.endswith("_shared.png")
 
 
+@pytest.mark.asyncio
+async def test_asset_cache_sanitizes_remote_basename_for_local_file(tmp_path):
+    tools = AgentExtensionTools()
+    tools._requester = AsyncMock()
+    tools._requester.data_dir = str(tmp_path)
+    tools._requester.rag_get_asset.return_value = b"image"
+
+    local_path = await tools._cache_rag_asset(
+        "process",
+        "nested/bad:name?.png",
+    )
+
+    assert Path(local_path).read_bytes() == b"image"
+    assert Path(local_path).name.endswith("_bad_name_.png")
+
+
 def test_rag_content_blocks_preserve_webp_mime_and_skip_missing_asset():
     tools = AgentExtensionTools()
+    loaded = []
+
+    def image_loader(path):
+        loaded.append(path)
+        return b"webp"
+
     blocks = tools._build_rag_content_blocks(
         [
             {
@@ -433,14 +578,21 @@ def test_rag_content_blocks_preserve_webp_mime_and_skip_missing_asset():
                 "type": "image",
                 "text": "missing image",
                 "path": "/data/two.png",
+                "_asset_error": "not found",
             },
         ],
-        image_loader=lambda path: b"webp" if path.endswith("one.webp") else b"",
+        image_loader=image_loader,
     )
 
+    assert loaded == ["cached/one.webp"]
     assert len(blocks) == 3
     assert blocks[1]["source"]["media_type"] == "image/webp"
     assert blocks[2]["type"] == "text"
+
+
+def test_rag_content_blocks_do_not_use_misleading_asset_path_warning():
+    source = Path(agent_extensions.__file__).read_text(encoding="utf-8")
+    assert "RAG 图片候选缺少 asset_path，已仅保留文本描述" not in source
 
 
 @pytest.mark.asyncio
@@ -532,6 +684,93 @@ def test_main_assistant_sync_rag_tool_forwards_image_path(monkeypatch):
     )
 
     async_entry.assert_called_once_with("堵盖", "process", 3, "query.png")
+
+
+@pytest.mark.parametrize(
+    ("name", "default"),
+    [
+        ("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0),
+        ("IMAGE_REQUEST_TIMEOUT_SECONDS", 600.0),
+        ("UNITY_MCP_TIMEOUT_SECONDS", 600.0),
+    ],
+)
+def test_timeout_defaults(monkeypatch, name, default):
+    monkeypatch.delenv(name, raising=False)
+    assert agent_extensions._get_timeout_seconds(name, default) == default
+
+
+def test_timeout_environment_override(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "42.5")
+    assert agent_extensions._get_timeout_seconds(
+        "AGENT_TOOL_TIMEOUT_SECONDS", 1800.0
+    ) == 42.5
+
+
+@pytest.mark.parametrize("value", ["invalid", "0", "-1", "nan", "inf", "-inf"])
+def test_invalid_timeout_falls_back(monkeypatch, value):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", value)
+    assert agent_extensions._get_timeout_seconds(
+        "AGENT_TOOL_TIMEOUT_SECONDS", 1800.0
+    ) == 1800.0
+
+
+@pytest.mark.asyncio
+async def test_run_async_reports_real_thread_timeout(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+
+    async def slow_result():
+        await asyncio.sleep(0.05)
+        return "finished"
+
+    result = agent_extensions._run_async(slow_result())
+    await asyncio.sleep(0.06)
+
+    assert result == "(执行超时：工具运行超过 0.01 秒)"
+
+
+@pytest.mark.asyncio
+async def test_run_async_distinguishes_completed_none(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "1")
+
+    async def no_result():
+        return None
+
+    assert agent_extensions._run_async(no_result()) == "(工具执行完成但无返回结果)"
+
+
+@pytest.mark.asyncio
+async def test_text_to_image_uses_configured_timeout(
+    tmp_path, fake_session, monkeypatch
+):
+    requester = _APIRequester(data_dir=str(tmp_path), workflow_path=None)
+    fake_session.queue_bytes(b"png")
+    monkeypatch.setenv("IMAGE_REQUEST_TIMEOUT_SECONDS", "12.5")
+
+    assert await requester.text_to_image("prompt", "result.png") is True
+
+    timeout = fake_session.requests[0][2]["timeout"]
+    assert timeout.total == 12.5
+
+
+@pytest.mark.asyncio
+async def test_unity_client_uses_configured_timeouts(monkeypatch):
+    captured = {}
+
+    class FakeUnityClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def connect(self):
+            raise RuntimeError("stop after constructor")
+
+    monkeypatch.setenv("UNITY_MCP_TIMEOUT_SECONDS", "15")
+    monkeypatch.setattr(agent_extensions, "HttpStatefulClient", FakeUnityClient)
+
+    result = await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    assert "stop after constructor" in result
+    assert captured["timeout"] == 15.0
+    assert captured["sse_read_timeout"] == 15.0
 
 
 def _subagent_prompt_source(agent_name: str) -> str:

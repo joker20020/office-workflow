@@ -333,8 +333,10 @@ Content-Type: multipart/form-data
 **响应示例:**
 
 ```json
-{"status": "success", "collection_name": "capp", "chunks_inserted": 5, "saved_path": "/abs/data/text/capp/1234.md"}
+{"status": "success", "collection_name": "capp", "chunks_inserted": 5, "saved_path": "1234.md"}
 ```
+
+`saved_path` 会保存为相对 `data/text/{collection}/` 的路径；写入向量库的文本 `path` 使用同一相对路径。
 
 #### 添加图像
 
@@ -409,11 +411,13 @@ curl -X POST \
   "collection_name": "capp",
   "query_type": "mixed",
   "results": [
-    {"id": 1, "score": 0.82, "type": "text", "text": "...", "path": "/abs/...", "subject": "capp", "asset_path": null},
-    {"id": 2, "score": 0.71, "type": "image", "text": "描述", "path": "/abs/...", "subject": "capp", "asset_path": "images/capp/1_0.png"}
+    {"id": 1, "score": 0.82, "type": "text", "text": "...", "path": "1234.md", "subject": "capp", "asset_path": null},
+    {"id": 2, "score": 0.71, "type": "image", "text": "描述", "path": "1_0.png", "subject": "capp", "asset_path": "1_0.png"}
   ]
 }
 ```
+
+新写入的数据只在向量库中保存 collection 内相对路径。文本路径相对 `data/text/{collection}/`，图片路径相对 `data/images/{collection}/`；图片结果的 `asset_path` 可直接传给取图资源接口。
 
 #### 分页浏览实体
 
@@ -426,7 +430,7 @@ GET /api/v1/rag/collections/{name}/entities?offset=0&limit=20
 **响应示例:**
 
 ```json
-{"collection_name": "capp", "total": 12, "offset": 0, "limit": 20, "entities": [{"id": 1, "score": 0.0, "type": "text", "text": "...", "path": "/abs/...", "subject": "capp", "asset_path": null}]}
+{"collection_name": "capp", "total": 12, "offset": 0, "limit": 20, "entities": [{"id": 1, "score": 0.0, "type": "text", "text": "...", "path": "1234.md", "subject": "capp", "asset_path": null}]}
 ```
 
 #### 删除实体
@@ -446,10 +450,17 @@ DELETE /api/v1/rag/collections/{name}/entities/{entity_id}
 #### 取图资源
 
 ```http
-GET /api/v1/rag/asset?path=images/capp/1_0.png
+GET /api/v1/rag/collections/{name}/asset?path=1_0.png
 ```
 
-返回图像文件（`image/<ext>`），`path` 必须为相对 `data/` 的安全路径，越界返回 403。
+返回图像文件（`image/<ext>`）。`name` 为 collection 名，`path` 必须为相对 `data/images/{collection}/` 的安全路径，越界返回 403。
+
+**curl 示例:**
+
+```bash
+curl "http://localhost:8050/api/v1/rag/collections/capp/asset?path=1_0.png" \
+  --output 1_0.png
+```
 
 ---
 
@@ -567,12 +578,12 @@ curl -X POST "http://localhost:8050/api/v1/image-to-image" \
 项目包含完整的测试套件：
 
 ```bash
-# 运行所有测试 (需要服务器运行在 localhost:8050)
-uv run python test_api.py
+# 运行单元测试
+uv run pytest
 
-# 或者先启动服务器，再运行测试
+# 运行集成测试需要服务器运行在 localhost:8050
 uv run python run_api.py &
-uv run python test_api.py
+uv run python tests/integration/test_api.py
 ```
 
 测试覆盖:
@@ -590,17 +601,30 @@ uv run python test_api.py
 
 ```
 ProcessGenBackend/
-├── api.py              # FastAPI 应用和路由定义
+├── api.py              # 兼容入口，导出 src.api:app
 ├── run_api.py          # 服务启动入口
-├── config.py           # 配置管理 (Pydantic Settings)
-├── models.py           # 请求/响应模型定义
-├── embeddings.py       # 嵌入服务实现
-├── rerank.py           # 重排服务实现
-├── comfyui_service.py  # ComfyUI 集成服务
-├── rag_router.py       # /api/v1/rag/* 向量库端点
-├── milvus_service.py   # Milvus 单例服务
-├── text_processor.py   # Markdown/PDF 分块
-├── test_api.py         # 测试套件
+├── src/                # 后端源代码
+│   ├── api.py          # FastAPI 应用和主路由
+│   ├── config.py       # 配置管理 (Pydantic Settings)
+│   ├── models.py       # 请求/响应模型定义
+│   ├── routers/
+│   │   └── rag.py      # /api/v1/rag/* 向量库端点
+│   ├── services/
+│   │   ├── embeddings.py
+│   │   ├── rerank.py
+│   │   ├── comfyui.py
+│   │   ├── milvus.py
+│   │   └── text_processor.py
+│   └── utils/
+│       └── files.py    # 文件路径安全工具
+├── qt_tool/            # PySide6 桌面客户端
+├── tests/              # pytest 测试
+│   ├── backend/
+│   ├── qt/
+│   ├── docs/
+│   └── integration/
+├── reference/          # 参考实现和实验代码
+├── legacy/             # 历史备份代码
 ├── pyproject.toml      # 项目依赖配置
 ├── .env.example        # 环境变量模板
 └── data/               # 图像存储目录
