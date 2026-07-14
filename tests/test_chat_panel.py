@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """ChatPanel streaming tests"""
 
+import base64
+
 import pytest
 from unittest.mock import MagicMock, patch
 from typing import Any
@@ -10,15 +12,22 @@ from PySide6.QtWidgets import QWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
+    DataBlockEndEvent,
+    DataBlockStartEvent,
     TextBlockDeltaEvent,
+    TextBlockEndEvent,
     TextBlockStartEvent,
     ThinkingBlockDeltaEvent,
+    ThinkingBlockEndEvent,
     ThinkingBlockStartEvent,
     ToolCallDeltaEvent,
+    ToolCallEndEvent,
     ToolCallStartEvent,
     ToolResultStartEvent,
+    ToolResultEndEvent,
     ToolResultTextDeltaEvent,
 )
+from agentscope.message import ToolResultState
 
 import src.ui.chat.chat_panel as chat_panel
 
@@ -157,9 +166,24 @@ class TestChatPanelStreaming:
             state,
         )
 
-        assert first == {"type": "text", "text": "Hello"}
-        assert second == {"type": "text", "text": "Hello world"}
-        assert thinking == {"type": "thinking", "thinking": "reasoning"}
+        assert first == {
+            "type": "text",
+            "id": "text",
+            "text": "Hello",
+            "_new_block": True,
+        }
+        assert second == {
+            "type": "text",
+            "id": "text",
+            "text": "Hello world",
+            "_new_block": False,
+        }
+        assert thinking == {
+            "type": "thinking",
+            "id": "thinking",
+            "thinking": "reasoning",
+            "_new_block": True,
+        }
 
     def test_event_adapter_translates_tool_call_result_and_data_events(self):
         state = {}
@@ -185,7 +209,13 @@ class TestChatPanelStreaming:
             ToolResultTextDeltaEvent(reply_id="reply", tool_call_id="call", delta="found"),
             state,
         )
-        data = chat_panel._event_to_block_update(
+        chat_panel._event_to_block_update(
+            DataBlockStartEvent(
+                reply_id="reply", block_id="image", media_type="image/png"
+            ),
+            state,
+        )
+        data_delta = chat_panel._event_to_block_update(
             DataBlockDeltaEvent(
                 reply_id="reply",
                 block_id="image",
@@ -193,6 +223,9 @@ class TestChatPanelStreaming:
                 media_type="image/png",
             ),
             state,
+        )
+        data = chat_panel._event_to_block_update(
+            DataBlockEndEvent(reply_id="reply", block_id="image"), state
         )
 
         assert tool_start == {
@@ -204,11 +237,186 @@ class TestChatPanelStreaming:
         assert tool_delta["input"] == '{"q":"docs"}'
         assert result_start["type"] == "tool_result"
         assert result_delta["output"] == "found"
+        assert data_delta is None
         assert data == {
             "type": "image",
+            "id": "image",
+            "_new_block": True,
             "source": {
                 "type": "base64",
                 "data": "aW1hZ2U=",
                 "media_type": "image/png",
             },
         }
+
+    def test_data_deltas_decode_independent_base64_and_emit_only_on_end(self):
+        state = {}
+        first_bytes = b"first chunk"
+        second_bytes = b"second chunk"
+        chat_panel._event_to_block_update(
+            DataBlockStartEvent(
+                reply_id="reply", block_id="image", media_type="image/png"
+            ),
+            state,
+        )
+
+        first = chat_panel._event_to_block_update(
+            DataBlockDeltaEvent(
+                reply_id="reply",
+                block_id="image",
+                data=base64.b64encode(first_bytes).decode(),
+                media_type="image/png",
+            ),
+            state,
+        )
+        second = chat_panel._event_to_block_update(
+            DataBlockDeltaEvent(
+                reply_id="reply",
+                block_id="image",
+                data=base64.b64encode(second_bytes).decode(),
+                media_type="image/png",
+            ),
+            state,
+        )
+        completed = chat_panel._event_to_block_update(
+            DataBlockEndEvent(reply_id="reply", block_id="image"), state
+        )
+
+        assert first is None
+        assert second is None
+        assert base64.b64decode(completed["source"]["data"]) == (
+            first_bytes + second_bytes
+        )
+        assert completed["_new_block"] is True
+        assert completed["id"] == "image"
+
+    @pytest.mark.parametrize(
+        ("start_factory", "delta_factory", "end_factory", "content_key"),
+        [
+            (TextBlockStartEvent, TextBlockDeltaEvent, TextBlockEndEvent, "text"),
+            (
+                ThinkingBlockStartEvent,
+                ThinkingBlockDeltaEvent,
+                ThinkingBlockEndEvent,
+                "thinking",
+            ),
+        ],
+    )
+    def test_consecutive_same_type_blocks_have_explicit_boundaries(
+        self, start_factory, delta_factory, end_factory, content_key
+    ):
+        state = {}
+        updates = []
+        for block_id, delta in (("one", "first"), ("two", "second")):
+            chat_panel._event_to_block_update(
+                start_factory(reply_id="reply", block_id=block_id), state
+            )
+            updates.append(
+                chat_panel._event_to_block_update(
+                    delta_factory(
+                        reply_id="reply", block_id=block_id, delta=delta
+                    ),
+                    state,
+                )
+            )
+            boundary = chat_panel._event_to_block_update(
+                end_factory(reply_id="reply", block_id=block_id), state
+            )
+            assert boundary == {
+                "type": "_stream_end",
+                "block_type": content_key,
+                "id": block_id,
+            }
+
+        assert [update[content_key] for update in updates] == ["first", "second"]
+        assert [update["id"] for update in updates] == ["one", "two"]
+        assert all(update["_new_block"] for update in updates)
+
+    def test_consecutive_data_blocks_keep_distinct_boundaries(self):
+        state = {}
+        completed = []
+        for block_id, raw in (("one", b"first"), ("two", b"second")):
+            chat_panel._event_to_block_update(
+                DataBlockStartEvent(
+                    reply_id="reply", block_id=block_id, media_type="image/png"
+                ),
+                state,
+            )
+            chat_panel._event_to_block_update(
+                DataBlockDeltaEvent(
+                    reply_id="reply",
+                    block_id=block_id,
+                    data=base64.b64encode(raw).decode(),
+                    media_type="image/png",
+                ),
+                state,
+            )
+            completed.append(
+                chat_panel._event_to_block_update(
+                    DataBlockEndEvent(reply_id="reply", block_id=block_id), state
+                )
+            )
+
+        assert [block["id"] for block in completed] == ["one", "two"]
+        assert all(block["_new_block"] for block in completed)
+        assert [
+            base64.b64decode(block["source"]["data"]) for block in completed
+        ] == [b"first", b"second"]
+
+    def test_completed_media_boundary_forces_a_fresh_widget(self):
+        streaming_message = MagicMock()
+        streaming_message.block_count.return_value = 1
+        streaming_message._blocks = []
+        panel = MagicMock()
+        panel._streaming_message = streaming_message
+        panel._streaming_blocks = []
+        panel._current_block_type = "image"
+        block = {
+            "type": "image",
+            "id": "second",
+            "_new_block": True,
+            "source": {
+                "type": "base64",
+                "data": base64.b64encode(b"complete").decode(),
+                "media_type": "image/png",
+            },
+        }
+
+        with patch.object(chat_panel.QTimer, "singleShot"):
+            chat_panel.ChatPanel._on_block_update(panel, [block])
+
+        rendered = block.copy()
+        rendered.pop("_new_block")
+        streaming_message._add_block_widget.assert_called_once_with(rendered)
+        assert streaming_message._blocks == [rendered]
+        streaming_message.add_or_update_block.assert_not_called()
+
+    def test_tool_end_events_preserve_completion_and_result_state(self):
+        state = {}
+        chat_panel._event_to_block_update(
+            ToolCallStartEvent(
+                reply_id="reply", tool_call_id="call", tool_call_name="search"
+            ),
+            state,
+        )
+        tool_end = chat_panel._event_to_block_update(
+            ToolCallEndEvent(reply_id="reply", tool_call_id="call"), state
+        )
+        chat_panel._event_to_block_update(
+            ToolResultStartEvent(
+                reply_id="reply", tool_call_id="call", tool_call_name="search"
+            ),
+            state,
+        )
+        result_end = chat_panel._event_to_block_update(
+            ToolResultEndEvent(
+                reply_id="reply",
+                tool_call_id="call",
+                state=ToolResultState.ERROR,
+            ),
+            state,
+        )
+
+        assert tool_end["finished"] is True
+        assert result_end["finished"] is True
+        assert result_end["state"] == "error"

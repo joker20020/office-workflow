@@ -2,7 +2,7 @@
 """AgentScope 2.0 event-stream reconstruction contracts."""
 
 from types import SimpleNamespace
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, get_args
 from unittest.mock import Mock
 
 import pytest
@@ -142,6 +142,16 @@ def test_notify_stream_event_preserves_events_order_and_callback_shape() -> None
         assert output is original_event
 
 
+def test_streaming_callback_annotation_matches_three_argument_protocol() -> None:
+    callback_annotation = AgentIntegration.register_streaming_callback.__annotations__[
+        "callback"
+    ]
+    callback_args, return_type = get_args(callback_annotation)
+
+    assert callback_args == [Any, dict[str, Any], Any]
+    assert return_type is type(None)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("finished_reason", "expected_interrupted"),
@@ -209,6 +219,44 @@ async def test_chat_async_persists_one_user_and_one_reconstructed_assistant_mess
     assert integration._agent.received_inputs is user_msg
     assert assistant_msg.role == "assistant"
     assert assistant_msg.id == "reply-1"
+
+
+class _FailingStreamingAgent(_FakeStreamingAgent):
+    async def reply_stream(self, *, inputs: Msg) -> AsyncGenerator[AgentEvent, None]:
+        self.received_inputs = inputs
+        for event in self.events:
+            yield event
+        raise RuntimeError("stream exploded")
+
+
+@pytest.mark.asyncio
+async def test_chat_async_resets_interrupted_and_persists_partial_reply_on_stream_error() -> None:
+    partial_events = _reply_events()[:3]
+    integration = _chat_integration([])
+    integration._agent = _FailingStreamingAgent(partial_events)
+    integration._last_response_interrupted = True
+
+    result = await integration.chat_async("question")
+
+    assert result == "错误: stream exploded"
+    assert integration._last_response_interrupted is False
+    assert integration._history.add_message.call_count == 2
+    partial_reply = integration._history.add_message.call_args_list[1].kwargs["msg"]
+    assert partial_reply.get_text_content() == "Hello"
+    assert integration._agent.received_inputs is integration._history.add_message.call_args_list[0].kwargs["msg"]
+
+
+def test_chat_persists_partial_reply_once_on_stream_error() -> None:
+    partial_events = _reply_events()[:3]
+    integration = _chat_integration([])
+    integration._agent = _FailingStreamingAgent(partial_events)
+
+    result = integration.chat("question")
+
+    assert result == "错误: stream exploded"
+    assert integration._history.add_message.call_count == 2
+    partial_reply = integration._history.add_message.call_args_list[1].kwargs["msg"]
+    assert partial_reply.get_text_content() == "Hello"
 
 
 class _OrderMiddleware(MiddlewareBase):

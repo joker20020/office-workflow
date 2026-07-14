@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING, Any, Callable, Optional, List, Dict
 
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QUrl, QSize
@@ -26,14 +27,19 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
+    DataBlockEndEvent,
     DataBlockStartEvent,
     TextBlockDeltaEvent,
+    TextBlockEndEvent,
     TextBlockStartEvent,
     ThinkingBlockDeltaEvent,
+    ThinkingBlockEndEvent,
     ThinkingBlockStartEvent,
     ToolCallDeltaEvent,
+    ToolCallEndEvent,
     ToolCallStartEvent,
     ToolResultDataDeltaEvent,
+    ToolResultEndEvent,
     ToolResultStartEvent,
     ToolResultTextDeltaEvent,
 )
@@ -63,17 +69,43 @@ def _media_block_type(media_type: str) -> str:
 def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[str, Any]]:
     """Translate one original AgentScope event into the widget block payload."""
     if isinstance(event, TextBlockStartEvent):
-        state[("text", event.block_id)] = ""
+        state[("text", event.block_id)] = {"content": "", "emitted": False}
     elif isinstance(event, TextBlockDeltaEvent):
         key = ("text", event.block_id)
-        state[key] = state.get(key, "") + event.delta
-        return {"type": "text", "text": state[key]}
+        current = state.setdefault(key, {"content": "", "emitted": False})
+        is_new = not current["emitted"]
+        current["emitted"] = True
+        current["content"] += event.delta
+        return {
+            "type": "text",
+            "id": event.block_id,
+            "text": current["content"],
+            "_new_block": is_new,
+        }
+    elif isinstance(event, TextBlockEndEvent):
+        state.pop(("text", event.block_id), None)
+        return {"type": "_stream_end", "block_type": "text", "id": event.block_id}
     elif isinstance(event, ThinkingBlockStartEvent):
-        state[("thinking", event.block_id)] = ""
+        state[("thinking", event.block_id)] = {"content": "", "emitted": False}
     elif isinstance(event, ThinkingBlockDeltaEvent):
         key = ("thinking", event.block_id)
-        state[key] = state.get(key, "") + event.delta
-        return {"type": "thinking", "thinking": state[key]}
+        current = state.setdefault(key, {"content": "", "emitted": False})
+        is_new = not current["emitted"]
+        current["emitted"] = True
+        current["content"] += event.delta
+        return {
+            "type": "thinking",
+            "id": event.block_id,
+            "thinking": current["content"],
+            "_new_block": is_new,
+        }
+    elif isinstance(event, ThinkingBlockEndEvent):
+        state.pop(("thinking", event.block_id), None)
+        return {
+            "type": "_stream_end",
+            "block_type": "thinking",
+            "id": event.block_id,
+        }
     elif isinstance(event, ToolCallStartEvent):
         key = ("tool_use", event.tool_call_id)
         state[key] = {"name": event.tool_call_name, "input": ""}
@@ -92,6 +124,16 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
             "id": event.tool_call_id,
             "name": current["name"],
             "input": current["input"],
+        }
+    elif isinstance(event, ToolCallEndEvent):
+        key = ("tool_use", event.tool_call_id)
+        current = state.pop(key, {"name": "", "input": ""})
+        return {
+            "type": "tool_use",
+            "id": event.tool_call_id,
+            "name": current["name"],
+            "input": current["input"],
+            "finished": True,
         }
     elif isinstance(event, ToolResultStartEvent):
         key = ("tool_result", event.tool_call_id)
@@ -112,22 +154,39 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
             "name": current["name"],
             "output": current["output"],
         }
+    elif isinstance(event, ToolResultEndEvent):
+        key = ("tool_result", event.tool_call_id)
+        current = state.pop(key, {"name": "", "output": ""})
+        return {
+            "type": "tool_result",
+            "id": event.tool_call_id,
+            "name": current["name"],
+            "output": current["output"],
+            "state": getattr(event.state, "value", event.state),
+            "finished": True,
+        }
     elif isinstance(event, DataBlockStartEvent):
         state[("data", event.block_id)] = {
             "media_type": event.media_type,
-            "data": "",
+            "data": bytearray(),
         }
     elif isinstance(event, DataBlockDeltaEvent):
         key = ("data", event.block_id)
         current = state.setdefault(
-            key, {"media_type": event.media_type, "data": ""}
+            key, {"media_type": event.media_type, "data": bytearray()}
         )
-        current["data"] += event.data
+        current["data"].extend(base64.b64decode(event.data, validate=True))
+    elif isinstance(event, DataBlockEndEvent):
+        current = state.pop(
+            ("data", event.block_id), {"media_type": "application/octet-stream", "data": b""}
+        )
         return {
             "type": _media_block_type(current["media_type"]),
+            "id": event.block_id,
+            "_new_block": True,
             "source": {
                 "type": "base64",
-                "data": current["data"],
+                "data": base64.b64encode(bytes(current["data"])).decode(),
                 "media_type": current["media_type"],
             },
         }
@@ -1304,6 +1363,12 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
     def _on_block_update(self, block_datas: List[Dict[str, Any]]) -> None:
         block_data = block_datas[-1]
+        if block_data.get("type") == "_stream_end":
+            self._current_block_type = None
+            return
+
+        block_data = block_data.copy()
+        is_new_block = bool(block_data.pop("_new_block", False))
         _logger.info(f"Block update: {block_data.get('type', 'unknown')}")
         block_type = block_data.get("type", "text")
 
@@ -1314,6 +1379,13 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._streaming_blocks = []
 
         self._streaming_blocks.append(block_data)
+
+        if is_new_block and self._streaming_message.block_count() > 0:
+            self._streaming_message._add_block_widget(block_data)
+            self._streaming_message._blocks.append(block_data)
+            self._current_block_type = block_type
+            QTimer.singleShot(100, self._scroll_to_bottom)
+            return
 
         if block_type == "thinking":
             thinking_content = block_data.get("thinking", "")

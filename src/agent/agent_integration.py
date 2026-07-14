@@ -82,6 +82,15 @@ if TYPE_CHECKING:
 
 _logger = get_logger(__name__)
 
+StreamingCallback = Callable[[Any, dict[str, Any], Any], None]
+
+
+class _ReplyStreamError(Exception):
+    def __init__(self, cause: Exception, reply: Msg) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.reply = reply
+
 
 class AgentIntegration:
     """
@@ -117,7 +126,7 @@ class AgentIntegration:
         self._toolkit: Optional[Any] = None
         self._mcp_clients: List[Any] = []
         self._api_key: str = ""
-        self._streaming_callbacks: List[Callable] = []
+        self._streaming_callbacks: List[StreamingCallback] = []
         self._initialized: bool = False
         self._provider: str = ""
         self._model_name: str = ""
@@ -153,10 +162,10 @@ class AgentIntegration:
         _logger.info("AgentIntegration 初始化完成")
         _logger.info("=" * 50)
 
-    def register_streaming_callback(self, callback: Callable[[str], None]) -> None:
+    def register_streaming_callback(self, callback: StreamingCallback) -> None:
         self._streaming_callbacks.append(callback)
 
-    def unregister_streaming_callback(self, callback: Callable[[str], None]) -> None:
+    def unregister_streaming_callback(self, callback: StreamingCallback) -> None:
         if callback in self._streaming_callbacks:
             self._streaming_callbacks.remove(callback)
 
@@ -168,18 +177,22 @@ class AgentIntegration:
                 _logger.error(f"Streaming callback error: {e}")
 
     async def _consume_reply_stream(self, inputs: Msg) -> Msg:
+        self._last_response_interrupted = False
         provisional_id = getattr(getattr(self._agent, "state", None), "reply_id", None)
         reply = AssistantMsg(name="Assistant", content=[], id=provisional_id)
 
-        async for event in self._agent.reply_stream(inputs=inputs):
-            if isinstance(event, ReplyStartEvent):
-                reply.id = event.reply_id
-            reply.append_event(event)
-            self._notify_stream_event(event)
-            if isinstance(event, ReplyEndEvent):
-                self._last_response_interrupted = (
-                    event.finished_reason == ReplyEndReason.INTERRUPTED
-                )
+        try:
+            async for event in self._agent.reply_stream(inputs=inputs):
+                if isinstance(event, ReplyStartEvent):
+                    reply.id = event.reply_id
+                reply.append_event(event)
+                self._notify_stream_event(event)
+                if isinstance(event, ReplyEndEvent):
+                    self._last_response_interrupted = (
+                        event.finished_reason == ReplyEndReason.INTERRUPTED
+                    )
+        except Exception as error:
+            raise _ReplyStreamError(error, reply) from error
 
         return reply
 
@@ -441,6 +454,14 @@ class AgentIntegration:
             _logger.error(f"对话超时，耗时: {elapsed:.2f}秒")
             _logger.error("=" * 50)
             return f"请求超时（{elapsed:.1f}秒），请检查网络连接或API配置"
+        except _ReplyStreamError as error:
+            self._history.add_message(msg=error.reply)
+            elapsed = time.time() - start_time
+            if isinstance(error.cause, asyncio.TimeoutError):
+                _logger.error(f"对话超时，耗时: {elapsed:.2f}秒")
+                return f"请求超时（{elapsed:.1f}秒），请检查网络连接或API配置"
+            _logger.error(f"Agent对话失败: {error.cause}", exc_info=True)
+            return f"错误: {error.cause}"
         except Exception as e:
             elapsed = time.time() - start_time
             _logger.error(f"Agent对话失败: {e}", exc_info=True)
@@ -474,6 +495,11 @@ class AgentIntegration:
             _logger.info(f"[异步] 对话处理完成，耗时: {elapsed:.2f}秒")
             return result
 
+        except _ReplyStreamError as error:
+            self._history.add_message(msg=error.reply)
+            elapsed = time.time() - start_time
+            _logger.error(f"[异步] Agent对话失败: {error.cause}", exc_info=True)
+            return f"错误: {error.cause}"
         except Exception as e:
             elapsed = time.time() - start_time
             _logger.error(f"[异步] Agent对话失败: {e}", exc_info=True)
