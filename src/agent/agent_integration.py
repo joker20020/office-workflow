@@ -2,6 +2,7 @@
 """AgentScope框架集成层"""
 
 import asyncio
+import concurrent.futures
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
@@ -78,6 +79,7 @@ except ImportError:
     MCPClient = Any
 
 from src.agent.api_key_manager import ApiKeyManager
+from src.agent.async_runtime import AgentAsyncRuntime
 from src.agent.chat_history import ChatHistory, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
 from src.engine.node_engine import NodeEngine
@@ -140,6 +142,7 @@ class AgentIntegration:
         self._provider: str = ""
         self._model_name: str = ""
         self._base_url: str = ""
+        self._async_runtime = AgentAsyncRuntime()
         self._current_loop: Optional[asyncio.AbstractEventLoop] = None
         self._active_reply_task: Optional[asyncio.Task[Any]] = None
         self._active_reply_cancel_requests: set[asyncio.Task[Any]] = set()
@@ -148,9 +151,7 @@ class AgentIntegration:
             tuple[asyncio.Task[Any], asyncio.AbstractEventLoop]
         ] = []
         self._parked_reply_id: Optional[str] = None
-        self._parked_reply_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._parked_reply_loop_thread: Optional[threading.Thread] = None
-        self._parked_cleanup_future: Optional[Any] = None
+        self._parked_cleanup_future: Optional[concurrent.futures.Future[Any]] = None
         self._last_response_interrupted: bool = False
 
         if history_repository:
@@ -210,7 +211,6 @@ class AgentIntegration:
                 ):
                     with self._reply_ownership_lock:
                         self._parked_reply_id = event.reply_id
-                        self._parked_reply_loop = asyncio.get_running_loop()
                 reply.append_event(event)
                 self._notify_stream_event(event)
                 if isinstance(event, ReplyEndEvent):
@@ -220,7 +220,6 @@ class AgentIntegration:
                     with self._reply_ownership_lock:
                         if getattr(self, "_parked_reply_id", None) == event.reply_id:
                             self._parked_reply_id = None
-                            self._parked_reply_loop = None
         except Exception as error:
             raise _ReplyStreamError(error, reply) from error
 
@@ -257,41 +256,9 @@ class AgentIntegration:
                         self._active_reply_task = None
                         self._current_loop = None
 
-    def _retain_sync_parked_loop(
-        self,
-        loop: asyncio.AbstractEventLoop,
-    ) -> bool:
-        ready = threading.Event()
-
-        def run_parked_loop() -> None:
-            asyncio.set_event_loop(loop)
-            loop.call_soon(ready.set)
-            try:
-                loop.run_forever()
-            finally:
-                loop.close()
-
-        thread = threading.Thread(
-            target=run_parked_loop,
-            name="agent-parked-reply-loop",
-            daemon=True,
-        )
-        with self._reply_ownership_lock:
-            if (
-                self._parked_reply_id is None
-                or self._parked_reply_loop is not loop
-            ):
-                return False
-            self._parked_reply_loop_thread = thread
-            thread.start()
-        ready.wait()
-        return True
-
     def _finish_parked_cleanup(
         self,
-        cleanup: Any,
-        loop: asyncio.AbstractEventLoop,
-        thread: Optional[threading.Thread],
+        cleanup: concurrent.futures.Future[Any],
     ) -> None:
         unsuccessful = cleanup.cancelled()
         if not unsuccessful:
@@ -300,48 +267,49 @@ class AgentIntegration:
             if self._parked_cleanup_future is not cleanup:
                 return
             self._parked_cleanup_future = None
-            if unsuccessful:
-                return
-            self._parked_reply_id = None
-            self._parked_reply_loop = None
-            retained_loop = None
-            if thread is not None and self._parked_reply_loop_thread is thread:
-                self._parked_reply_loop_thread = None
-                retained_loop = loop
-        if retained_loop is not None:
-            retained_loop.call_soon_threadsafe(retained_loop.stop)
+            if not unsuccessful:
+                self._parked_reply_id = None
 
     async def _cleanup_parked_reply(self, reply_id: str) -> None:
         await self._agent.reply(inputs=UserInterruptEvent(reply_id=reply_id))
         self._last_response_interrupted = True
-        with self._reply_ownership_lock:
-            if (
-                self._parked_cleanup_future is None
-                and self._parked_reply_id == reply_id
-            ):
-                self._parked_reply_id = None
-                self._parked_reply_loop = None
 
-    def _dispose_parked_reply_runtime(self) -> None:
+    async def _settle_reply_work(self) -> None:
+        current = asyncio.current_task()
         with self._reply_ownership_lock:
+            active = [
+                task
+                for task, _loop in self._active_reply_owners
+                if task is not current and not task.done()
+            ]
             cleanup = self._parked_cleanup_future
-            parked_loop = self._parked_reply_loop
-            parked_thread = self._parked_reply_loop_thread
-            self._parked_reply_id = None
-            self._parked_reply_loop = None
-            self._parked_reply_loop_thread = None
+            parked_reply_id = self._parked_reply_id
             self._parked_cleanup_future = None
 
+        for task in active:
+            task.cancel()
+        if active:
+            await asyncio.gather(*active, return_exceptions=True)
+
+        had_cleanup = cleanup is not None
         if cleanup is not None and not cleanup.done():
             cleanup.cancel()
-        if (
-            parked_loop is not None
-            and parked_thread is not None
-            and parked_thread.is_alive()
-        ):
-            parked_loop.call_soon_threadsafe(parked_loop.stop)
-            if threading.current_thread() is not parked_thread:
-                parked_thread.join(timeout=2)
+        if cleanup is not None:
+            try:
+                await asyncio.wrap_future(cleanup)
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if parked_reply_id is not None and not had_cleanup and self._agent is not None:
+            try:
+                await self._cleanup_parked_reply(parked_reply_id)
+            except Exception as error:
+                _logger.warning(f"清理暂停回复失败 ({parked_reply_id}): {error}")
+
+        with self._reply_ownership_lock:
+            self._parked_cleanup_future = None
+            self._parked_reply_id = None
+            self._active_reply_cancel_requests.clear()
 
     def _create_model(
         self,
@@ -393,36 +361,58 @@ class AgentIntegration:
         if not AGENTSCOPE_AVAILABLE:
             _logger.error("AgentScope框架未安装，无法初始化")
             return False
+        if provider not in {"openai", "deepseek", "dashscope"}:
+            _logger.error(f"不支持的 provider: {provider}")
+            return False
 
         try:
-            self._close_mcp_clients()
             api_key = self._api_manager.get_key(provider, model_name)
             if not api_key:
                 _logger.error(f"未找到 {provider} 的API密钥")
                 return False
-
-            self._api_key = api_key[:10] + "..." if len(api_key) > 10 else api_key
-            _logger.info(f"获取到API密钥: {self._api_key}")
-
             config = self._api_manager.get_config(provider)
             if config:
-                _logger.info(f"获取到配置: {config}")
                 model_name = model_name or config.get("model_name", "")
                 base_url = base_url or config.get("base_url", "")
+        except Exception as error:
+            _logger.error(f"Agent初始化校验失败: {error}", exc_info=True)
+            return False
 
-            self._provider = provider
-            self._model_name = model_name
-            self._base_url = base_url
+        try:
+            return self._async_runtime.run(
+                self._initialize_impl(
+                    provider=provider,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                ),
+            )
+        except Exception as error:
+            _logger.error(f"Agent初始化失败: {error}", exc_info=True)
+            _logger.error("=" * 50)
+            return False
 
+    async def _initialize_impl(
+        self,
+        *,
+        provider: str,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+    ) -> bool:
+        await self._settle_reply_work()
+        await self._close_mcp_clients()
+        self._agent = None
+        self._toolkit = None
+        self._mcp_clients = []
+        self._initialized = False
+
+        local_clients: list[MCPClient] = []
+        try:
             function_tools = self._build_registry_function_tools()
-            mcp_clients = self._connect_mcp_clients()
-            self._mcp_clients = mcp_clients
-            self._toolkit = Toolkit(tools=function_tools, mcps=mcp_clients)
-            _logger.info("Toolkit创建成功")
-
+            local_clients = await self._connect_mcp_clients()
+            toolkit = Toolkit(tools=function_tools, mcps=local_clients)
             model = self._create_model(provider, model_name, base_url, api_key)
-
-            _logger.info("模型创建成功")
             system_prompt = self.config.get(
                 "system_prompt",
                 """
@@ -436,37 +426,39 @@ class AgentIntegration:
 
                             请用自然语言与用户交流。使用工具完成工作流设计。""",
             )
-
-            self._register_skills()
-            
-            _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
-
-            _logger.info("创建Agent...")
+            self._register_skills(toolkit)
             state = AgentState(context=self._history.get_messages())
             react_config = ReActConfig(
                 max_iters=50,
                 interruption_raise_cancelled_error=False,
             )
-            self._agent = Agent(
+            constructed_agent = Agent(
                 name="WorkflowAssistant",
                 system_prompt=system_prompt,
                 model=model,
-                toolkit=self._toolkit,
+                toolkit=toolkit,
                 state=state,
                 react_config=react_config,
             )
-            _logger.info("Agent创建成功")
+        except Exception:
+            await self._close_mcp_clients(local_clients)
+            self._agent = None
+            self._toolkit = None
+            self._mcp_clients = []
+            self._initialized = False
+            raise
 
-            self._initialized = True
-            _logger.info(f"Agent初始化成功: provider={provider}, model={self._model_name}")
-            _logger.info("=" * 50)
-            return True
-
-        except Exception as e:
-            self._close_mcp_clients()
-            _logger.error(f"Agent初始化失败: {e}", exc_info=True)
-            _logger.error("=" * 50)
-            return False
+        self._api_key = api_key[:10] + "..." if len(api_key) > 10 else api_key
+        self._provider = provider
+        self._model_name = model_name
+        self._base_url = base_url
+        self._toolkit = toolkit
+        self._agent = constructed_agent
+        self._mcp_clients = local_clients
+        self._initialized = True
+        _logger.info(f"Agent初始化成功: provider={provider}, model={model_name}")
+        _logger.info("=" * 50)
+        return True
 
     def _build_registry_function_tools(self) -> List[Any]:
         """Wrap unique registry callables for Toolkit construction."""
@@ -490,63 +482,58 @@ class AgentIntegration:
             _logger.info("注册中心无工具可加载")
         return function_tools
 
-    @staticmethod
-    def _run_mcp_awaitable(awaitable: Any) -> Any:
-        """Run one MCP lifecycle awaitable without retaining its event loop."""
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(awaitable)
-        finally:
-            loop.close()
-
-    def _connect_mcp_clients(self) -> list[MCPClient]:
-        """Prepare enabled MCP clients in manager order, isolating failures."""
+    async def _connect_mcp_clients(self) -> list[MCPClient]:
+        """Prepare enabled MCP clients in manager order, isolating named failures."""
         if not self._mcp_manager or not AGENTSCOPE_AVAILABLE:
             return []
 
         clients: list[MCPClient] = []
-        for server in self._mcp_manager.list_servers():
-            if not server.get("enabled"):
-                continue
-
-            server_name = server["name"]
-            client: Optional[MCPClient] = None
-            try:
-                client = self._mcp_manager.create_agentscope_client(server_name)
-                if client is None:
-                    _logger.warning(f"MCP客户端创建失败 ({server_name}): factory returned None")
+        try:
+            servers = self._mcp_manager.list_servers()
+            for server in servers:
+                if not server.get("enabled"):
                     continue
 
-                if client.is_stateful is True:
-                    self._run_mcp_awaitable(client.connect())
-                clients.append(client)
-                _logger.info(f"MCP客户端已准备: {server_name}")
-            except Exception as error:
-                client_name = getattr(client, "name", server_name)
-                _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
-                if client is not None and client.is_stateful is True:
-                    try:
-                        self._run_mcp_awaitable(client.close())
-                    except Exception as close_error:
+                server_name = server["name"]
+                client: Optional[MCPClient] = None
+                try:
+                    client = self._mcp_manager.create_agentscope_client(server_name)
+                    if client is None:
                         _logger.warning(
-                            f"清理失败MCP客户端失败 ({client_name}): {close_error}",
+                            f"MCP客户端创建失败 ({server_name}): factory returned None"
                         )
+                        continue
+                    if client.is_stateful is True:
+                        await client.connect()
+                    clients.append(client)
+                    _logger.info(f"MCP客户端已准备: {server_name}")
+                except Exception as error:
+                    client_name = getattr(client, "name", server_name)
+                    _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
+                    if client is not None and client.is_stateful is True:
+                        await self._close_mcp_clients([client])
+            return clients
+        except Exception:
+            await self._close_mcp_clients(clients)
+            raise
 
-        return clients
-
-    def _close_mcp_clients(self) -> None:
-        """Close and release every owned stateful MCP client exactly once."""
-        clients, self._mcp_clients = self._mcp_clients, []
+    async def _close_mcp_clients(
+        self,
+        clients: Optional[list[MCPClient]] = None,
+    ) -> None:
+        """Close every stateful client in the exact owned list at most once."""
+        if clients is None:
+            clients, self._mcp_clients = self._mcp_clients, []
         for client in clients:
             if client.is_stateful is not True:
                 continue
             client_name = getattr(client, "name", type(client).__name__)
             try:
-                self._run_mcp_awaitable(client.close())
+                await client.close()
             except Exception as error:
                 _logger.warning(f"关闭MCP客户端失败 ({client_name}): {error}")
 
-    def _register_skills(self) -> None:
+    def _register_skills(self, toolkit: Any) -> None:
         if not self._skill_manager or not AGENTSCOPE_AVAILABLE:
             return
 
@@ -556,119 +543,100 @@ class AgentIntegration:
             try:
                 skill_path = skill.get("path")
                 if skill_path:
-                    self._toolkit.register_agent_skill(skill_path)
+                    toolkit.register_agent_skill(skill_path)
                     _logger.info(f"注册Skill: {skill['name']}")
             except Exception as e:
                 _logger.error(f"注册Skill失败: {e}")
 
     def chat(self, message: str | List[Dict[str, Any]]) -> str:
-        """Send message to agent and get response.
-
-        Args:
-            message: Either a text string or list of content blocks.
-                     Content blocks format:
-                     - {"type": "text", "text": "..."}
-                     - {"type": "image", "url": "file:///path/to/image.jpg"}
-                     - {"type": "audio", "url": "file:///path/to/audio.mp3"}
-                     - {"type": "video", "url": "file:///path/to/video.mp4"}
-
-        Returns:
-            Agent response text
-        """
+        """Send a message through the shared async runtime."""
         _logger.info("=" * 50)
-        if isinstance(message, str):
-            _logger.info(f"开始处理对话: message='{message[:50]}...' (长度: {len(message)})")
-        else:
-            _logger.info(f"开始处理多模态对话: {len(message)} 个内容块")
-
         if not self._initialized:
             _logger.error("Agent未初始化")
             return "Agent未初始化，请先配置API密钥"
-
         if not self._agent:
             _logger.error("Agent对象为空")
             return "Agent对象为空，请重新初始化"
 
-        start_time = time.time()
-
         try:
-            if AGENTSCOPE_AVAILABLE and Msg is not None:
-                msg = self._create_user_message(message)
-                self._history.add_message(msg=msg)
-
-                loop = asyncio.new_event_loop()
-                try:
-                    response_msg = loop.run_until_complete(self._run_owned_reply_stream(msg))
-                finally:
-                    if not self._retain_sync_parked_loop(loop):
-                        loop.close()
-
-                self._history.add_message(msg=response_msg)
-                result = (response_msg.get_text_content() or "").strip()
-            else:
-                result = "AgentScope框架未安装"
-                _logger.error(result)
-
-            elapsed = time.time() - start_time
-            _logger.info(f"对话处理完成，耗时: {elapsed:.2f}秒")
-            _logger.info("=" * 50)
-            return result
-
+            runtime = self._ensure_async_runtime()
+            return runtime.run(
+                self._chat_impl(message, timeout_as_request_timeout=True),
+            )
         except asyncio.TimeoutError:
-            elapsed = time.time() - start_time
-            _logger.error(f"对话超时，耗时: {elapsed:.2f}秒")
-            _logger.error("=" * 50)
-            return f"请求超时（{elapsed:.1f}秒），请检查网络连接或API配置"
-        except _ReplyStreamError as error:
-            self._history.add_message(msg=error.reply)
-            elapsed = time.time() - start_time
-            if isinstance(error.cause, asyncio.TimeoutError):
-                _logger.error(f"对话超时，耗时: {elapsed:.2f}秒")
-                return f"请求超时（{elapsed:.1f}秒），请检查网络连接或API配置"
-            _logger.error(f"Agent对话失败: {error.cause}", exc_info=True)
-            return f"错误: {error.cause}"
-        except Exception as e:
-            elapsed = time.time() - start_time
-            _logger.error(f"Agent对话失败: {e}", exc_info=True)
-            _logger.error(f"耗时: {elapsed:.2f}秒")
-            _logger.error("=" * 50)
-            return f"错误: {e}"
+            return "请求超时，请检查网络连接或API配置"
+        except Exception as error:
+            _logger.error(f"Agent对话失败: {error}", exc_info=True)
+            return f"错误: {error}"
 
     async def chat_async(self, message: str | List[Dict[str, Any]]) -> str:
-        """Async implementation of chat with multimodal support."""
-        if isinstance(message, str):
-            _logger.info(f"[异步] 开始处理对话: {message[:50]}...")
-        else:
-            _logger.info(f"[异步] 开始处理多模态对话: {len(message)} 个内容块")
-
+        """Await a chat running on the shared async runtime."""
         if not self._initialized or not self._agent:
             return "Agent未初始化，请先配置API密钥"
 
-        start_time = time.time()
+        try:
+            runtime = self._ensure_async_runtime()
+            return await runtime.run_async(
+                self._chat_impl(message, timeout_as_request_timeout=False),
+            )
+        except asyncio.CancelledError:
+            self._last_response_interrupted = True
+            return ""
+        except Exception as error:
+            _logger.error(f"[异步] Agent对话失败: {error}", exc_info=True)
+            return f"错误: {error}"
 
+    def _ensure_async_runtime(self) -> AgentAsyncRuntime:
+        """Support legacy instances manually allocated without ``__init__``."""
+        runtime = getattr(self, "_async_runtime", None)
+        if runtime is None:
+            runtime = AgentAsyncRuntime()
+            self._async_runtime = runtime
+        return runtime
+
+    async def _chat_impl(
+        self,
+        message: str | List[Dict[str, Any]],
+        *,
+        timeout_as_request_timeout: bool,
+    ) -> str:
+        start_time = time.time()
         try:
             if AGENTSCOPE_AVAILABLE and Msg is not None:
                 msg = self._create_user_message(message)
                 self._history.add_message(msg=msg)
                 response_msg = await self._run_owned_reply_stream(msg)
                 self._history.add_message(msg=response_msg)
-                result = (response_msg.get_text_content() or "").strip()
-            else:
-                result = "AgentScope框架未安装"
-
-            elapsed = time.time() - start_time
-            _logger.info(f"[异步] 对话处理完成，耗时: {elapsed:.2f}秒")
-            return result
-
+                return (response_msg.get_text_content() or "").strip()
+            _logger.error("AgentScope框架未安装")
+            return "AgentScope框架未安装"
+        except asyncio.CancelledError:
+            self._last_response_interrupted = True
+            return ""
         except _ReplyStreamError as error:
             self._history.add_message(msg=error.reply)
-            elapsed = time.time() - start_time
-            _logger.error(f"[异步] Agent对话失败: {error.cause}", exc_info=True)
+            if timeout_as_request_timeout and isinstance(
+                error.cause,
+                asyncio.TimeoutError,
+            ):
+                elapsed = time.time() - start_time
+                return (
+                    f"请求超时（{elapsed:.1f}秒），"
+                    "请检查网络连接或API配置"
+                )
+            _logger.error(f"Agent对话失败: {error.cause}", exc_info=True)
             return f"错误: {error.cause}"
-        except Exception as e:
-            elapsed = time.time() - start_time
-            _logger.error(f"[异步] Agent对话失败: {e}", exc_info=True)
-            return f"错误: {e}"
+        except asyncio.TimeoutError:
+            if timeout_as_request_timeout:
+                elapsed = time.time() - start_time
+                return (
+                    f"请求超时（{elapsed:.1f}秒），"
+                    "请检查网络连接或API配置"
+                )
+            return "错误: "
+        except Exception as error:
+            _logger.error(f"Agent对话失败: {error}", exc_info=True)
+            return f"错误: {error}"
 
     def _create_user_message(self, message: str | List[Dict[str, Any]]) -> Msg:
         if isinstance(message, str):
@@ -703,10 +671,7 @@ class AgentIntegration:
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """Thread-safely cancel active work or clean up a parked reply."""
-        callback_args: Optional[
-            tuple[Any, asyncio.AbstractEventLoop, Optional[threading.Thread]]
-        ] = None
-        parked_scheduled = False
+        cleanup: Optional[concurrent.futures.Future[Any]] = None
         try:
             with self._reply_ownership_lock:
                 task = self._active_reply_task
@@ -728,42 +693,21 @@ class AgentIntegration:
                     _logger.info(f"已调度中断: {reason}")
                     return True
 
-                parked_reply_id = self._parked_reply_id
-                parked_loop = self._parked_reply_loop or self._current_loop
-                cleanup = self._parked_cleanup_future
                 if (
-                    parked_reply_id is not None
-                    and parked_loop is not None
-                    and parked_loop.is_running()
-                    and cleanup is None
+                    self._parked_reply_id is not None
+                    and self._parked_cleanup_future is None
                 ):
-                    retained_thread = self._parked_reply_loop_thread
-                    coroutine = self._cleanup_parked_reply(parked_reply_id)
-                    try:
-                        cleanup = asyncio.run_coroutine_threadsafe(
-                            coroutine,
-                            parked_loop,
-                        )
-                    except Exception:
-                        coroutine.close()
-                        raise
+                    cleanup = self._async_runtime.submit(
+                        self._cleanup_parked_reply(self._parked_reply_id),
+                    )
                     self._parked_cleanup_future = cleanup
-                    parked_scheduled = True
-                    callback_args = (cleanup, parked_loop, retained_thread)
-            if callback_args is not None:
-                cleanup, parked_loop, retained_thread = callback_args
-                cleanup.add_done_callback(
-                    lambda done: self._finish_parked_cleanup(
-                        done,
-                        parked_loop,
-                        retained_thread,
-                    ),
-                )
-            if parked_scheduled:
+
+            if cleanup is not None:
+                cleanup.add_done_callback(self._finish_parked_cleanup)
                 _logger.info(f"已调度中断: {reason}")
                 return True
-        except Exception as e:
-            _logger.error(f"中断 Agent 失败: {e}")
+        except Exception as error:
+            _logger.error(f"中断 Agent 失败: {error}")
         return False
 
     @property
@@ -779,14 +723,24 @@ class AgentIntegration:
 
     def reset(self) -> None:
         _logger.info("重置Agent...")
-        self._close_mcp_clients()
+        try:
+            self._async_runtime.run(self._reset_impl())
+        except Exception as error:
+            _logger.warning(f"重置Agent运行时失败: {error}")
+            self._agent = None
+            self._toolkit = None
+            self._mcp_clients = []
+            self._initialized = False
         self._history.clear()
-        self._dispose_parked_reply_runtime()
-
-        if self._agent and AGENTSCOPE_AVAILABLE:
-            self._agent.state = AgentState(context=[])
-
         _logger.info("Agent已重置")
+
+    async def _reset_impl(self) -> None:
+        await self._settle_reply_work()
+        await self._close_mcp_clients()
+        self._agent = None
+        self._toolkit = None
+        self._mcp_clients = []
+        self._initialized = False
 
     def get_history(self) -> List[Dict]:
         if self._history_repository:
@@ -832,13 +786,29 @@ class AgentIntegration:
             _logger.warning("未启用数据库持久化，无法切换会会")
             return False
 
+        previous_session_id = self._history.session_id
+        previous_messages = self._history.get_messages()
         success = self._history.set_session(session_id)
         if success:
+            try:
+                self._sync_history_to_memory()
+            except Exception as error:
+                if previous_session_id is not None:
+                    self._history.set_session(previous_session_id)
+                else:
+                    with self._history._lock:
+                        self._history._session_id = None
+                        self._history._is_new_session = True
+                        self._history._messages = list(previous_messages)
+                _logger.error(f"切换会话状态发布失败: {error}")
+                return False
             _logger.info(f"切换到会话: {session_id}")
-            self._sync_history_to_memory()
         return success
 
     def _sync_history_to_memory(self) -> None:
+        self._async_runtime.run(self._sync_history_to_memory_impl())
+
+    async def _sync_history_to_memory_impl(self) -> None:
         if not self._agent or not hasattr(self._agent, "state"):
             _logger.warning("Agent或state不存在")
             return
@@ -891,8 +861,21 @@ class AgentIntegration:
 
     def shutdown(self) -> None:
         _logger.info("关闭Agent...")
-        self._dispose_parked_reply_runtime()
-        self._close_mcp_clients()
-        self._agent = None
-        self._initialized = False
+        try:
+            self._async_runtime.stop(cleanup_awaitable=self._shutdown_impl())
+        except Exception as error:
+            _logger.warning(f"关闭Agent运行时失败: {error}")
+        finally:
+            self._agent = None
+            self._toolkit = None
+            self._mcp_clients = []
+            self._initialized = False
         _logger.info("Agent已关闭")
+
+    async def _shutdown_impl(self) -> None:
+        await self._settle_reply_work()
+        await self._close_mcp_clients()
+        self._agent = None
+        self._toolkit = None
+        self._mcp_clients = []
+        self._initialized = False

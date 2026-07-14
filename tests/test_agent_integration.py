@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """AgentIntegration 单元测试"""
 
+import asyncio
 import builtins
 import importlib.util
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
@@ -32,18 +33,32 @@ class _LifecycleClient:
         self.close_error = close_error
         self.connect_calls = 0
         self.close_calls = 0
+        self.loop_observations = []
+
+    def _record_loop(self, operation):
+        loop = asyncio.get_running_loop()
+        self.loop_observations.append((operation, loop, loop.is_closed()))
 
     async def connect(self):
+        self._record_loop("connect")
         self.connect_calls += 1
         self.events.append(f"connect:{self.name}")
         if self.connect_error:
             raise self.connect_error
 
     async def close(self):
+        self._record_loop("close")
         self.close_calls += 1
         self.events.append(f"close:{self.name}")
         if self.close_error:
             raise self.close_error
+
+    async def operate(self, operation):
+        self._record_loop(operation)
+
+
+async def _current_loop():
+    return asyncio.get_running_loop()
 
 
 def _configure_successful_initialize(agent, monkeypatch, *, toolkit_factory=None):
@@ -56,6 +71,7 @@ def _configure_successful_initialize(agent, monkeypatch, *, toolkit_factory=None
     )
     monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
     monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_register_skills", Mock())
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
     monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
@@ -97,7 +113,8 @@ def agent(api_key_manager, node_engine, skill_manager, mcp_manager):
         mcp_manager=mcp_manager,
         skill_manager=skill_manager,
     )
-    return agent
+    yield agent
+    agent.shutdown()
 
 
 class TestAgentIntegration:
@@ -125,8 +142,9 @@ class TestAgentIntegration:
 
         history = agent.get_history()
         assert len(history) == 0
-        assert agent._agent.state.context == []
-        assert agent._agent.state is not previous_state
+        assert agent._agent is None
+        assert agent._toolkit is None
+        assert agent._initialized is False
 
     def test_reset_without_agent_still_clears_history(self, agent):
         agent._history.add_message("user", "test message")
@@ -297,7 +315,7 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
     monkeypatch.setattr(
         agent,
         "_connect_mcp_clients",
-        Mock(return_value=prepared_clients),
+        AsyncMock(return_value=prepared_clients),
     )
     monkeypatch.setattr(agent, "_register_skills", Mock())
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
@@ -338,7 +356,7 @@ def test_connect_mcp_clients_prepares_enabled_clients_in_manager_order(agent, mo
     )
     monkeypatch.setattr(agent._mcp_manager, "create_agentscope_client", factory)
 
-    clients = agent._connect_mcp_clients()
+    clients = agent._async_runtime.run(agent._connect_mcp_clients())
 
     assert clients == [stateful, stateless]
     assert events == ["connect:stdio"]
@@ -385,7 +403,7 @@ def test_connect_mcp_clients_excludes_named_failures_and_keeps_successes(
     monkeypatch.setattr(agent_integration._logger, "warning", warning)
     monkeypatch.setattr(agent_integration._logger, "error", error)
 
-    clients = agent._connect_mcp_clients()
+    clients = agent._async_runtime.run(agent._connect_mcp_clients())
 
     assert clients == [first, last]
     assert broken.close_calls == 1
@@ -410,7 +428,7 @@ def test_initialize_failure_closes_owned_stateful_clients(agent, monkeypatch):
     monkeypatch.setattr(
         agent,
         "_connect_mcp_clients",
-        Mock(return_value=[stateful, stateless]),
+        AsyncMock(return_value=[stateful, stateless]),
     )
     _configure_successful_initialize(
         agent,
@@ -472,7 +490,7 @@ def test_reinitialize_closes_previous_clients_before_connecting_new_ones(
     replacement = _LifecycleClient("replacement", stateful=False, events=events)
     agent._mcp_clients = [previous]
 
-    def connect_replacement():
+    async def connect_replacement():
         events.append("prepare:replacement")
         return [replacement]
 
@@ -484,6 +502,170 @@ def test_reinitialize_closes_previous_clients_before_connecting_new_ones(
     assert events == ["close:previous", "prepare:replacement"]
     assert agent._mcp_clients == [replacement]
     toolkit_factory.assert_called_once_with(tools=[], mcps=[replacement])
+
+
+def test_validation_failure_preserves_working_runtime_state(agent, monkeypatch):
+    previous_agent = object()
+    previous_toolkit = object()
+    previous_client = _LifecycleClient("previous", stateful=True, events=[])
+    agent._agent = previous_agent
+    agent._toolkit = previous_toolkit
+    agent._mcp_clients = [previous_client]
+    agent._initialized = True
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value=""))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+
+    assert agent._agent is previous_agent
+    assert agent._toolkit is previous_toolkit
+    assert agent._mcp_clients == [previous_client]
+    assert agent._initialized is True
+    assert previous_client.close_calls == 0
+
+
+def test_config_validation_exception_preserves_working_runtime_state(
+    agent,
+    monkeypatch,
+):
+    previous_agent = object()
+    previous_toolkit = object()
+    previous_client = _LifecycleClient("previous", stateful=True, events=[])
+    agent._agent = previous_agent
+    agent._toolkit = previous_toolkit
+    agent._mcp_clients = [previous_client]
+    agent._initialized = True
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(
+        agent._api_manager,
+        "get_config",
+        Mock(side_effect=RuntimeError("config invalid")),
+    )
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+    assert agent._agent is previous_agent
+    assert agent._toolkit is previous_toolkit
+    assert agent._mcp_clients == [previous_client]
+    assert agent._initialized is True
+    assert previous_client.close_calls == 0
+
+
+@pytest.mark.parametrize("failure_stage", ["toolkit", "model", "agent"])
+def test_replacement_construction_failure_publishes_exact_empty_state(
+    agent,
+    monkeypatch,
+    failure_stage,
+):
+    client = _LifecycleClient("new", stateful=True, events=[])
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        AsyncMock(return_value=[client]),
+    )
+    toolkit_factory = (
+        Mock(side_effect=RuntimeError("toolkit boom"))
+        if failure_stage == "toolkit"
+        else None
+    )
+    _configure_successful_initialize(agent, monkeypatch, toolkit_factory=toolkit_factory)
+    if failure_stage == "model":
+        monkeypatch.setattr(
+            agent,
+            "_create_model",
+            Mock(side_effect=RuntimeError("model boom")),
+        )
+    if failure_stage == "agent":
+        monkeypatch.setattr(
+            agent_integration,
+            "Agent",
+            Mock(side_effect=RuntimeError("agent boom")),
+        )
+    agent._agent = object()
+    agent._toolkit = object()
+    agent._initialized = True
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+
+    assert client.close_calls == 1
+    assert agent._initialized is False
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+
+
+def test_function_level_server_record_failure_closes_local_successes(
+    agent,
+    monkeypatch,
+):
+    first = _LifecycleClient("first", stateful=True, events=[])
+    records = iter([
+        {"name": "first", "enabled": True},
+        {"enabled": True},
+    ])
+    monkeypatch.setattr(agent._mcp_manager, "list_servers", Mock(return_value=records))
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(return_value=first),
+    )
+
+    with pytest.raises(KeyError):
+        agent._async_runtime.run(agent._connect_mcp_clients())
+
+    assert first.close_calls == 1
+
+
+def test_sync_and_async_chat_share_stateful_mcp_runtime_loop(agent, monkeypatch):
+    client = _LifecycleClient("stateful", stateful=True, events=[])
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(return_value=[{"name": "stateful", "enabled": True}]),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(return_value=client),
+    )
+    monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent, "_register_skills", Mock())
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="prompt"))
+    monkeypatch.setattr(agent_integration, "Toolkit", Mock(return_value=object()))
+
+    class LoopUsingAgent:
+        def __init__(self, **kwargs):
+            self.state = kwargs["state"]
+
+        async def reply_stream(self, *, inputs):
+            operation = inputs.get_text_content()
+            await client.operate(operation)
+            from agentscope.event import ReplyEndEvent, ReplyStartEvent
+
+            yield ReplyStartEvent(
+                session_id="session",
+                reply_id=f"reply-{operation}",
+                name="Assistant",
+            )
+            yield ReplyEndEvent(session_id="session", reply_id=f"reply-{operation}")
+
+    monkeypatch.setattr(agent_integration, "Agent", LoopUsingAgent)
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+    runtime_loop = agent._async_runtime.run(_current_loop())
+    assert agent.chat("sync-chat") == ""
+    asyncio.run(agent.chat_async("async-chat"))
+    agent.reset()
+
+    assert [item[0] for item in client.loop_observations] == [
+        "connect",
+        "sync-chat",
+        "async-chat",
+        "close",
+    ]
+    assert all(loop is runtime_loop for _, loop, _ in client.loop_observations)
+    assert all(closed is False for _, _, closed in client.loop_observations)
 
 
 def test_stable_core_imports_keep_agentscope_available(monkeypatch):
@@ -561,6 +743,50 @@ def test_switch_session_failure_leaves_state_unchanged(agent, monkeypatch):
     monkeypatch.setattr(agent._history, "set_session", Mock(return_value=False))
 
     assert agent.switch_session("missing-session") is False
+    assert agent._agent.state is previous_state
+
+
+def test_switch_session_state_publication_failure_rolls_back_empty_selection(
+    agent,
+    monkeypatch,
+):
+    previous_messages = [AssistantMsg(name="Assistant", content="previous")]
+    previous_state = AgentState(context=previous_messages)
+    agent._agent = SimpleNamespace(state=previous_state)
+    agent._history_repository = object()
+
+    class SwitchingHistory:
+        def __init__(self):
+            import threading
+
+            self._lock = threading.Lock()
+            self._session_id = None
+            self._is_new_session = True
+            self._messages = list(previous_messages)
+
+        @property
+        def session_id(self):
+            return self._session_id
+
+        def set_session(self, session_id):
+            self._session_id = session_id
+            self._messages = [UserMsg(name="User", content="selected")]
+            return True
+
+        def get_messages(self):
+            return list(self._messages)
+
+    history = SwitchingHistory()
+    agent._history = history
+    monkeypatch.setattr(
+        agent,
+        "_sync_history_to_memory",
+        Mock(side_effect=RuntimeError("publish failed")),
+    )
+
+    assert agent.switch_session("selected-session") is False
+    assert history.session_id is None
+    assert history._messages == previous_messages
     assert agent._agent.state is previous_state
 
 
