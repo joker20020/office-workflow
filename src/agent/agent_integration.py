@@ -287,25 +287,35 @@ class AgentIntegration:
         ready.wait()
         return True
 
-    def _stop_retained_parked_loop(
+    def _finish_parked_cleanup(
         self,
         cleanup: Any,
         loop: asyncio.AbstractEventLoop,
-        thread: threading.Thread,
+        thread: Optional[threading.Thread],
     ) -> None:
         if cleanup.cancelled() or cleanup.exception() is not None:
             return
         with self._reply_ownership_lock:
-            if self._parked_reply_loop_thread is not thread:
+            if self._parked_cleanup_future is not cleanup:
                 return
-            self._parked_reply_loop_thread = None
-        loop.call_soon_threadsafe(loop.stop)
+            self._parked_cleanup_future = None
+            self._parked_reply_id = None
+            self._parked_reply_loop = None
+            retained_loop = None
+            if thread is not None and self._parked_reply_loop_thread is thread:
+                self._parked_reply_loop_thread = None
+                retained_loop = loop
+        if retained_loop is not None:
+            retained_loop.call_soon_threadsafe(retained_loop.stop)
 
     async def _cleanup_parked_reply(self, reply_id: str) -> None:
         await self._agent.reply(inputs=UserInterruptEvent(reply_id=reply_id))
         self._last_response_interrupted = True
         with self._reply_ownership_lock:
-            if self._parked_reply_id == reply_id:
+            if (
+                self._parked_cleanup_future is None
+                and self._parked_reply_id == reply_id
+            ):
                 self._parked_reply_id = None
                 self._parked_reply_loop = None
 
@@ -671,7 +681,9 @@ class AgentIntegration:
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """Thread-safely cancel active work or clean up a parked reply."""
-        callback_args: Optional[tuple[Any, Any, threading.Thread]] = None
+        callback_args: Optional[
+            tuple[Any, asyncio.AbstractEventLoop, Optional[threading.Thread]]
+        ] = None
         parked_scheduled = False
         try:
             with self._reply_ownership_lock:
@@ -715,12 +727,11 @@ class AgentIntegration:
                         raise
                     self._parked_cleanup_future = cleanup
                     parked_scheduled = True
-                    if retained_thread is not None:
-                        callback_args = (cleanup, parked_loop, retained_thread)
+                    callback_args = (cleanup, parked_loop, retained_thread)
             if callback_args is not None:
                 cleanup, parked_loop, retained_thread = callback_args
                 cleanup.add_done_callback(
-                    lambda done: self._stop_retained_parked_loop(
+                    lambda done: self._finish_parked_cleanup(
                         done,
                         parked_loop,
                         retained_thread,

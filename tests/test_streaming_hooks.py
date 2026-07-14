@@ -259,12 +259,11 @@ def test_interrupt_cleans_up_sync_parked_reply_on_retained_loop() -> None:
     assert parked_loop.is_running()
 
     assert integration.interrupt("stop parked") is True
-    integration._parked_cleanup_future.result(timeout=2)
+    parked_thread.join(timeout=2)
 
     assert isinstance(integration._agent.interrupt_input, UserInterruptEvent)
     assert integration._agent.interrupt_input.reply_id == "sync-parked"
     assert integration._parked_reply_id is None
-    parked_thread.join(timeout=2)
     assert not parked_thread.is_alive()
     assert parked_loop.is_closed()
 
@@ -363,7 +362,7 @@ def test_cancelled_cleanup_callback_does_not_touch_retained_loop() -> None:
     loop = Mock()
     thread = Mock()
 
-    integration._stop_retained_parked_loop(cleanup, loop, thread)
+    integration._finish_parked_cleanup(cleanup, loop, thread)
 
     loop.call_soon_threadsafe.assert_not_called()
 
@@ -441,6 +440,52 @@ def test_cleanup_callback_registration_does_not_block_reset(
     assert not interrupt_thread.is_alive()
     assert not reset_thread.is_alive()
     assert integration._parked_cleanup_future is None
+
+
+@pytest.mark.parametrize("lifecycle_method", ["reset", "shutdown"])
+def test_lifecycle_disposal_owns_retained_loop_when_cleanup_callback_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle_method: str,
+) -> None:
+    integration = _chat_integration([])
+    integration._agent = _ParkedSyncAgent()
+    integration._mcp_clients = []
+    integration.chat("question")
+    parked_loop = integration._parked_reply_loop
+    parked_thread = integration._parked_reply_loop_thread
+    assert parked_loop is not None
+    assert parked_thread is not None
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+    original_stop = integration._finish_parked_cleanup
+
+    def gated_stop(cleanup: Any, loop: Any, thread: Any) -> None:
+        callback_entered.set()
+        release_callback.wait(timeout=2)
+        original_stop(cleanup, loop, thread)
+
+    monkeypatch.setattr(integration, "_finish_parked_cleanup", gated_stop)
+    assert integration.interrupt("cleanup") is True
+    assert callback_entered.wait(timeout=1)
+
+    getattr(integration, lifecycle_method)()
+    release_callback.set()
+    parked_thread.join(timeout=0.5)
+    thread_still_alive = parked_thread.is_alive()
+    loop_still_open = not parked_loop.is_closed()
+    state_cleared = (
+        integration._parked_reply_id is None
+        and integration._parked_reply_loop is None
+        and integration._parked_reply_loop_thread is None
+        and integration._parked_cleanup_future is None
+    )
+    if thread_still_alive:
+        parked_loop.call_soon_threadsafe(parked_loop.stop)
+        parked_thread.join(timeout=2)
+
+    assert state_cleared is True
+    assert thread_still_alive is False
+    assert loop_still_open is False
 
 
 @pytest.mark.parametrize("lifecycle_method", ["reset", "shutdown"])
