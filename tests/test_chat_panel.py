@@ -23,6 +23,7 @@ from agentscope.event import (
     ToolCallDeltaEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
+    ToolResultDataDeltaEvent,
     ToolResultStartEvent,
     ToolResultEndEvent,
     ToolResultTextDeltaEvent,
@@ -30,6 +31,7 @@ from agentscope.event import (
 from agentscope.message import ToolResultState
 
 import src.ui.chat.chat_panel as chat_panel
+from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
 class MockStreamingWidget:
@@ -387,9 +389,49 @@ class TestChatPanelStreaming:
 
         rendered = block.copy()
         rendered.pop("_new_block")
-        streaming_message._add_block_widget.assert_called_once_with(rendered)
-        assert streaming_message._blocks == [rendered]
+        streaming_message.append_block.assert_called_once_with(rendered)
         streaming_message.add_or_update_block.assert_not_called()
+
+    def test_tool_result_data_events_are_independent_fresh_media_blocks(self):
+        state = {}
+        events = [
+            ToolResultDataDeltaEvent(
+                reply_id="reply",
+                tool_call_id="call",
+                block_id=block_id,
+                media_type="image/png",
+                data=data,
+            )
+            for block_id, data in (("one", "b25l"), ("two", "dHdv"))
+        ]
+
+        updates = [chat_panel._event_to_block_update(event, state) for event in events]
+
+        assert [update["id"] for update in updates] == ["one", "two"]
+        assert all(update["_new_block"] for update in updates)
+        assert [update["source"]["data"] for update in updates] == ["b25l", "dHdv"]
+
+        streaming_message = MagicMock()
+        streaming_message.block_count.return_value = 1
+        panel = MagicMock()
+        panel._streaming_message = streaming_message
+        panel._streaming_blocks = []
+        panel._current_block_type = "image"
+        with patch.object(chat_panel.QTimer, "singleShot"):
+            for update in updates:
+                chat_panel.ChatPanel._on_block_update(panel, [update])
+
+        assert streaming_message.append_block.call_count == 2
+
+    def test_composite_message_widget_append_block_updates_widget_and_model(self):
+        widget = MagicMock()
+        widget._blocks = []
+        block = {"type": "text", "text": "new block"}
+
+        CompositeMessageWidget.append_block(widget, block)
+
+        widget._add_block_widget.assert_called_once_with(block)
+        assert widget._blocks == [block]
 
     def test_tool_end_events_preserve_completion_and_result_state(self):
         state = {}

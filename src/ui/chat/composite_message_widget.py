@@ -60,6 +60,11 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
     def _on_block_height_changed(self) -> None:
         pass
 
+    def append_block(self, block_data: Dict[str, Any]) -> None:
+        """Append a distinct block to both the widget tree and block model."""
+        self._add_block_widget(block_data)
+        self._blocks.append(block_data)
+
     def get_role(self) -> str:
         return self._role
 

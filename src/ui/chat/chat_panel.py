@@ -198,7 +198,12 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
         source["data" if event.data is not None else "url"] = (
             event.data if event.data is not None else event.url
         )
-        return {"type": _media_block_type(event.media_type), "source": source}
+        return {
+            "type": _media_block_type(event.media_type),
+            "id": event.block_id,
+            "_new_block": True,
+            "source": source,
+        }
     return None
 
 
@@ -1381,8 +1386,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._streaming_blocks.append(block_data)
 
         if is_new_block and self._streaming_message.block_count() > 0:
-            self._streaming_message._add_block_widget(block_data)
-            self._streaming_message._blocks.append(block_data)
+            self._streaming_message.append_block(block_data)
             self._current_block_type = block_type
             QTimer.singleShot(100, self._scroll_to_bottom)
             return
@@ -1418,8 +1422,6 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._set_status(_("chat.ready") if self._current_provider else _("chat.please_select_api_key"))
 
         if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
-            if self._streaming_blocks:
-                self._streaming_message._blocks = self._streaming_blocks.copy()
             self._streaming_message = None
             self._streaming_blocks = []
             self._streaming_text = ""
@@ -1478,7 +1480,6 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
                     "type": "text",
                     "text": "\n\n--- *" + _("chat.response_interrupted") + "* ---",
                 })
-                self._streaming_message._blocks = self._streaming_blocks.copy()
             self._streaming_message = None
             self._streaming_blocks = []
             self._streaming_text = ""
