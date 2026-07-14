@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """权限管理模块测试"""
 
+from unittest.mock import Mock, call
+
 import pytest
 
 from src.core.permission_manager import (
@@ -322,6 +324,80 @@ class TestPermissionManager:
 
         # 不应抛出异常
         pm.require("test_plugin", Permission.FILE_READ)
+
+    def test_change_notifications_cover_mutations_noops_and_unsubscribe(self):
+        repository = Mock()
+        pm = PermissionManager(repository=repository)
+        events = []
+        token = pm.subscribe_changes(
+            lambda event: events.append((event.source, event.action, event.name))
+        )
+
+        pm.grant("plugin", Permission.FILE_READ)
+        pm.grant("plugin", Permission.FILE_READ)
+        pm.grant_all("plugin", {Permission.FILE_READ, Permission.FILE_WRITE})
+        pm.grant_all("plugin", {Permission.FILE_READ, Permission.FILE_WRITE})
+        pm.grant_all("empty", set())
+        pm.revoke_all("empty")
+        assert pm.revoke("plugin", Permission.NETWORK) is False
+        assert pm.revoke("plugin", Permission.FILE_READ) is True
+        pm.revoke_all("plugin")
+        pm.revoke_all("plugin")
+        pm.unsubscribe_changes(token)
+        pm.grant("after-unsubscribe", Permission.NETWORK)
+
+        assert events == [
+            ("permissions", "granted", "plugin"),
+            ("permissions", "granted", "plugin"),
+            ("permissions", "revoked", "plugin"),
+            ("permissions", "revoked", "plugin"),
+        ]
+        assert repository.grant_permission.call_args_list == [
+            call("plugin", Permission.FILE_READ),
+            call("plugin", Permission.FILE_READ),
+            call("after-unsubscribe", Permission.NETWORK),
+        ]
+        assert repository.grant_permissions.call_args_list == [
+            call("plugin", {Permission.FILE_READ, Permission.FILE_WRITE}),
+            call("plugin", {Permission.FILE_READ, Permission.FILE_WRITE}),
+            call("empty", set()),
+        ]
+        repository.revoke_permission.assert_called_once_with(
+            "plugin", Permission.FILE_READ
+        )
+        repository.revoke_all_permissions.assert_not_called()
+        assert pm.get_granted_permissions("plugin") == set()
+
+    def test_change_listener_observes_permission_state_after_mutation(self):
+        pm = PermissionManager()
+        observations = []
+        pm.subscribe_changes(
+            lambda event: observations.append(
+                (event.action, pm.get_granted_permissions(event.name))
+            )
+        )
+
+        pm.grant("plugin", Permission.FILE_READ)
+        pm.revoke("plugin", Permission.FILE_READ)
+
+        assert observations == [
+            ("granted", {Permission.FILE_READ}),
+            ("revoked", set()),
+        ]
+
+    def test_loading_permissions_does_not_notify_changes(self):
+        repository = Mock()
+        repository.get_all_plugins.return_value = [
+            {"name": "plugin", "permissions": {Permission.FILE_READ}}
+        ]
+        pm = PermissionManager(repository=repository)
+        events = []
+        pm.subscribe_changes(events.append)
+
+        pm.load_permissions()
+
+        assert events == []
+        assert pm.check("plugin", Permission.FILE_READ)
 
 
 class TestPermissionDeniedError:

@@ -22,6 +22,7 @@ except ImportError:
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.change_notifier import ChangeCallback, ChangeNotifier
 from src.storage.database import Database
 from src.storage.models import McpServerRecord
 from src.utils.logger import get_logger
@@ -51,8 +52,15 @@ class McpServerManager:
             db = Database(db_path)
 
         self._db = db
+        self._change_notifier = ChangeNotifier("mcp")
         self._db.create_tables()
         _logger.info("MCP服务管理器初始化完成")
+
+    def subscribe_changes(self, callback: ChangeCallback) -> int:
+        return self._change_notifier.subscribe(callback)
+
+    def unsubscribe_changes(self, token: int) -> None:
+        self._change_notifier.unsubscribe(token)
 
     def add_stdio_server(
         self,
@@ -83,6 +91,7 @@ class McpServerManager:
             session.add(record)
             session.commit()
             _logger.info(f"添加stdio MCP服务器: {name}")
+        self._change_notifier.notify(action="added", name=name)
 
     def add_http_server(
         self,
@@ -109,6 +118,7 @@ class McpServerManager:
             session.add(record)
             session.commit()
             _logger.info(f"添加http MCP服务器: {name}")
+        self._change_notifier.notify(action="added", name=name)
 
     def get_server(self, name: str) -> Optional[dict]:
         """获取MCP服务器配置"""
@@ -136,7 +146,8 @@ class McpServerManager:
             session.delete(record)
             session.commit()
             _logger.info(f"删除MCP服务器: {name}")
-            return True
+        self._change_notifier.notify(action="deleted", name=name)
+        return True
 
     def set_enabled(self, name: str, enabled: bool) -> bool:
         """启用/禁用MCP服务器"""
@@ -149,11 +160,17 @@ class McpServerManager:
                 _logger.warning(f"未找到MCP服务器: {name}")
                 return False
 
+            if record.enabled == enabled:
+                return True
+
             record.enabled = enabled
             session.commit()
             status = "启用" if enabled else "禁用"
             _logger.info(f"{status}MCP服务器: {name}")
-            return True
+        self._change_notifier.notify(
+            action="enabled" if enabled else "disabled", name=name
+        )
+        return True
 
     def update_stdio_server(
         self,
@@ -177,18 +194,27 @@ class McpServerManager:
                 _logger.warning(f"MCP服务器类型不是stdio: {name}")
                 return False
 
+            changed = False
             if command is not None:
+                changed = changed or record.command != command
                 record.command = command
             if args is not None:
-                record.args = json.dumps(args)
+                serialized_args = json.dumps(args)
+                changed = changed or record.args != serialized_args
+                record.args = serialized_args
             if env is not None:
-                record.env = json.dumps(env)
+                serialized_env = json.dumps(env)
+                changed = changed or record.env != serialized_env
+                record.env = serialized_env
             if timeout is not None:
+                changed = changed or record.timeout != timeout
                 record.timeout = timeout
 
             session.commit()
             _logger.info(f"更新stdio MCP服务器: {name}")
-            return True
+        if changed:
+            self._change_notifier.notify(action="updated", name=name)
+        return True
 
     def update_http_server(
         self,
@@ -210,14 +236,19 @@ class McpServerManager:
                 _logger.warning(f"MCP服务器类型不是http: {name}")
                 return False
 
+            changed = False
             if url is not None:
+                changed = changed or record.url != url
                 record.url = url
             if transport is not None:
+                changed = changed or record.transport != transport
                 record.transport = transport
 
             session.commit()
             _logger.info(f"更新http MCP服务器: {name}")
-            return True
+        if changed:
+            self._change_notifier.notify(action="updated", name=name)
+        return True
 
     def list_servers(self) -> List[dict]:
         """列出所有MCP服务器"""

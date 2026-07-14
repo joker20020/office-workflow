@@ -1514,6 +1514,55 @@ class TestSkillManager:
         assert len(enabled) == 1
         assert enabled[0]["name"] == "enabled_skill"
 
+    def test_change_notifications_cover_skill_mutations_and_noops(
+        self, skill_manager, tmp_path
+    ):
+        events = []
+        observations = []
+
+        def listener(event):
+            events.append((event.source, event.action, event.name))
+            observations.append(skill_manager.get_skill(event.name))
+
+        token = skill_manager.subscribe_changes(listener)
+        skill_manager.add_skill("writer", "/skills/writer", "first")
+        with pytest.raises(ValueError):
+            skill_manager.add_skill("writer", "/duplicate")
+        assert skill_manager.update_skill("missing", path="/missing") is False
+        assert skill_manager.update_skill("writer", description="second") is True
+        assert skill_manager.set_enabled("writer", True) is True
+        assert skill_manager.set_enabled("missing", False) is False
+        assert skill_manager.set_enabled("writer", False) is True
+        assert skill_manager.set_enabled("writer", True) is True
+        assert skill_manager.delete_skill("missing") is False
+        assert skill_manager.delete_skill("writer") is True
+
+        discovered = tmp_path / "skills"
+        child = discovered / "discovered"
+        child.mkdir(parents=True)
+        (child / "SKILL.md").write_text(
+            "---\ndescription: discovered\n---\n", encoding="utf-8"
+        )
+        assert skill_manager.discover_and_register(discovered) == 1
+        assert skill_manager.discover_and_register(discovered) == 0
+        skill_manager.unsubscribe_changes(token)
+        skill_manager.delete_skill("discovered")
+
+        assert events == [
+            ("skills", "added", "writer"),
+            ("skills", "updated", "writer"),
+            ("skills", "disabled", "writer"),
+            ("skills", "enabled", "writer"),
+            ("skills", "deleted", "writer"),
+            ("skills", "added", "discovered"),
+        ]
+        assert observations[0]["description"] == "first"
+        assert observations[1]["description"] == "second"
+        assert observations[2]["enabled"] is False
+        assert observations[3]["enabled"] is True
+        assert observations[4] is None
+        assert observations[5]["name"] == "discovered"
+
     def test_get_enabled_skill_paths_filters_invalid_entries_in_manager_order(
         self,
         skill_manager,
@@ -1637,6 +1686,51 @@ class TestMcpServerManager:
         mcp_manager.set_enabled("test_server", True)
         server = mcp_manager.get_server("test_server")
         assert server["enabled"] is True
+
+    def test_change_notifications_cover_mcp_mutations_and_noops(self, mcp_manager):
+        events = []
+        observations = []
+
+        def listener(event):
+            events.append((event.source, event.action, event.name))
+            observations.append(mcp_manager.get_server(event.name))
+
+        mcp_manager.subscribe_changes(listener)
+        mcp_manager.add_stdio_server("stdio", "python")
+        with pytest.raises(ValueError):
+            mcp_manager.add_stdio_server("stdio", "other")
+        assert mcp_manager.update_stdio_server("missing", command="x") is False
+        assert mcp_manager.update_http_server("stdio", url="https://wrong") is False
+        assert mcp_manager.update_stdio_server("stdio", command="python3") is True
+        assert mcp_manager.set_enabled("stdio", True) is True
+        assert mcp_manager.set_enabled("missing", False) is False
+        assert mcp_manager.set_enabled("stdio", False) is True
+        assert mcp_manager.set_enabled("stdio", True) is True
+        assert mcp_manager.delete_server("missing") is False
+        assert mcp_manager.delete_server("stdio") is True
+        mcp_manager.add_http_server("http", "https://first")
+        assert mcp_manager.update_stdio_server("http", command="wrong") is False
+        assert mcp_manager.update_http_server("http", url="https://second") is True
+        assert mcp_manager.delete_server("http") is True
+
+        assert events == [
+            ("mcp", "added", "stdio"),
+            ("mcp", "updated", "stdio"),
+            ("mcp", "disabled", "stdio"),
+            ("mcp", "enabled", "stdio"),
+            ("mcp", "deleted", "stdio"),
+            ("mcp", "added", "http"),
+            ("mcp", "updated", "http"),
+            ("mcp", "deleted", "http"),
+        ]
+        assert observations[0]["command"] == "python"
+        assert observations[1]["command"] == "python3"
+        assert observations[2]["enabled"] is False
+        assert observations[3]["enabled"] is True
+        assert observations[4] is None
+        assert observations[5]["url"] == "https://first"
+        assert observations[6]["url"] == "https://second"
+        assert observations[7] is None
 
     def test_get_agentscope_config_stdio(self, mcp_manager):
         mcp_manager.add_stdio_server(

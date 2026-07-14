@@ -21,6 +21,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, Set, Union, Optional
 
+from src.core.change_notifier import ChangeCallback, ChangeNotifier
 from src.utils.logger import get_logger
 
 # 模块日志记录器
@@ -262,8 +263,15 @@ class PermissionManager:
 
         # 持久化存储库（可选）
         self._repository = repository
+        self._change_notifier = ChangeNotifier("permissions")
 
         _logger.debug("权限管理器初始化完成")
+
+    def subscribe_changes(self, callback: ChangeCallback) -> int:
+        return self._change_notifier.subscribe(callback)
+
+    def unsubscribe_changes(self, token: int) -> None:
+        self._change_notifier.unsubscribe(token)
 
     def load_permissions(self) -> None:
         """
@@ -305,6 +313,7 @@ class PermissionManager:
         Example:
             pm.grant("my_plugin", Permission.FILE_READ)
         """
+        already_granted = permission in self._granted.get(plugin_name, set())
         if plugin_name not in self._granted:
             self._granted[plugin_name] = set()
 
@@ -315,6 +324,8 @@ class PermissionManager:
             self._repository.grant_permission(plugin_name, permission)
 
         _logger.info(f"授权: 插件 '{plugin_name}' 获得权限 '{permission.value}'")
+        if not already_granted:
+            self._change_notifier.notify(action="granted", name=plugin_name)
 
     def grant_all(self, plugin_name: str, permissions: Set[Permission]) -> None:
         """
@@ -324,6 +335,7 @@ class PermissionManager:
             plugin_name: 插件名称
             permissions: 要授权的权限集合
         """
+        new_permissions = permissions - self._granted.get(plugin_name, set())
         if plugin_name not in self._granted:
             self._granted[plugin_name] = set()
 
@@ -335,6 +347,8 @@ class PermissionManager:
 
         perm_values = [p.value for p in permissions]
         _logger.info(f"批量授权: 插件 '{plugin_name}' 获得权限: {perm_values}")
+        if new_permissions:
+            self._change_notifier.notify(action="granted", name=plugin_name)
 
     def revoke(self, plugin_name: str, permission: Permission) -> bool:
         """
@@ -358,6 +372,7 @@ class PermissionManager:
                 self._repository.revoke_permission(plugin_name, permission)
 
             _logger.info(f"撤销: 插件 '{plugin_name}' 失去权限 '{permission.value}'")
+            self._change_notifier.notify(action="revoked", name=plugin_name)
             return True
 
         return False
@@ -369,9 +384,12 @@ class PermissionManager:
         Args:
             plugin_name: 插件名称
         """
+        had_permissions = bool(self._granted.get(plugin_name))
         if plugin_name in self._granted:
             del self._granted[plugin_name]
             _logger.info(f"撤销: 插件 '{plugin_name}' 的所有权限")
+        if had_permissions:
+            self._change_notifier.notify(action="revoked", name=plugin_name)
 
     def check(self, plugin_name: str, permission: Permission) -> bool:
         """

@@ -16,6 +16,7 @@ from typing import Optional, List
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.change_notifier import ChangeCallback, ChangeNotifier
 from src.storage.database import Database
 from src.storage.models import SkillRecord
 from src.utils.logger import get_logger
@@ -51,8 +52,15 @@ class SkillManager:
             db = Database(db_path)
 
         self._db = db
+        self._change_notifier = ChangeNotifier("skills")
         self._db.create_tables()
         _logger.info("Skill管理器初始化完成")
+
+    def subscribe_changes(self, callback: ChangeCallback) -> int:
+        return self._change_notifier.subscribe(callback)
+
+    def unsubscribe_changes(self, token: int) -> None:
+        self._change_notifier.unsubscribe(token)
 
     def add_skill(self, name: str, path: str, description: Optional[str] = None) -> None:
         """
@@ -80,6 +88,7 @@ class SkillManager:
             session.add(record)
             session.commit()
             _logger.info(f"添加Skill: {name}")
+        self._change_notifier.notify(action="added", name=name)
 
     def delete_skill(self, name: str) -> bool:
         """
@@ -103,7 +112,8 @@ class SkillManager:
             session.delete(record)
             session.commit()
             _logger.info(f"删除Skill: {name}")
-            return True
+        self._change_notifier.notify(action="deleted", name=name)
+        return True
 
     def set_enabled(self, name: str, enabled: bool) -> bool:
         """
@@ -125,11 +135,17 @@ class SkillManager:
                 _logger.warning(f"未找到Skill: {name}")
                 return False
 
+            if record.enabled == enabled:
+                return True
+
             record.enabled = enabled
             session.commit()
             status = "启用" if enabled else "禁用"
             _logger.info(f"{status}Skill: {name}")
-            return True
+        self._change_notifier.notify(
+            action="enabled" if enabled else "disabled", name=name
+        )
+        return True
 
     def update_skill(
         self,
@@ -157,14 +173,19 @@ class SkillManager:
                 _logger.warning(f"未找到Skill: {name}")
                 return False
 
+            changed = False
             if path is not None:
+                changed = changed or record.path != path
                 record.path = path
             if description is not None:
+                changed = changed or record.description != description
                 record.description = description
 
             session.commit()
             _logger.info(f"更新Skill: {name}")
-            return True
+        if changed:
+            self._change_notifier.notify(action="updated", name=name)
+        return True
 
     def list_skills(self) -> List[dict]:
         """
