@@ -2,6 +2,7 @@
 """AgentScope框架集成层"""
 
 import asyncio
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -31,12 +32,18 @@ try:
         Base64Source,
         DataBlock,
         Msg,
-        SystemMsg,
         TextBlock,
         URLSource,
         UserMsg,
     )
-    from agentscope.event import ReplyEndEvent, ReplyEndReason, ReplyStartEvent
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyEndReason,
+        ReplyStartEvent,
+        RequireExternalExecutionEvent,
+        RequireUserConfirmEvent,
+        UserInterruptEvent,
+    )
     from agentscope.state import AgentState
     from agentscope.tool import Toolkit
 
@@ -50,7 +57,6 @@ except ImportError as e:
     AgentState = None
     AssistantMsg = None
     Msg = None
-    SystemMsg = None
     TextBlock = None
     UserMsg = None
     URLSource = None
@@ -60,6 +66,9 @@ except ImportError as e:
     ReplyEndEvent = None
     ReplyEndReason = None
     ReplyStartEvent = None
+    RequireExternalExecutionEvent = None
+    RequireUserConfirmEvent = None
+    UserInterruptEvent = None
     _logger_agent = None
 
 try:
@@ -132,6 +141,15 @@ class AgentIntegration:
         self._model_name: str = ""
         self._base_url: str = ""
         self._current_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._active_reply_task: Optional[asyncio.Task[Any]] = None
+        self._reply_ownership_lock = threading.Lock()
+        self._active_reply_owners: List[
+            tuple[asyncio.Task[Any], asyncio.AbstractEventLoop]
+        ] = []
+        self._parked_reply_id: Optional[str] = None
+        self._parked_reply_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._parked_reply_loop_thread: Optional[threading.Thread] = None
+        self._parked_cleanup_future: Optional[Any] = None
         self._last_response_interrupted: bool = False
 
         if history_repository:
@@ -185,16 +203,120 @@ class AgentIntegration:
             async for event in self._agent.reply_stream(inputs=inputs):
                 if isinstance(event, ReplyStartEvent):
                     reply.id = event.reply_id
+                if isinstance(
+                    event,
+                    (RequireUserConfirmEvent, RequireExternalExecutionEvent),
+                ):
+                    with self._reply_ownership_lock:
+                        self._parked_reply_id = event.reply_id
+                        self._parked_reply_loop = asyncio.get_running_loop()
                 reply.append_event(event)
                 self._notify_stream_event(event)
                 if isinstance(event, ReplyEndEvent):
                     self._last_response_interrupted = (
                         event.finished_reason == ReplyEndReason.INTERRUPTED
                     )
+                    with self._reply_ownership_lock:
+                        if getattr(self, "_parked_reply_id", None) == event.reply_id:
+                            self._parked_reply_id = None
+                            self._parked_reply_loop = None
         except Exception as error:
             raise _ReplyStreamError(error, reply) from error
 
         return reply
+
+    async def _run_owned_reply_stream(self, inputs: Msg) -> Msg:
+        task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        if not hasattr(self, "_reply_ownership_lock"):
+            self._reply_ownership_lock = threading.Lock()
+            self._active_reply_owners = []
+        with self._reply_ownership_lock:
+            self._active_reply_owners.append((task, loop))
+            self._active_reply_task = task
+            self._current_loop = loop
+        try:
+            return await self._consume_reply_stream(inputs)
+        finally:
+            with self._reply_ownership_lock:
+                self._active_reply_owners[:] = [
+                    owner
+                    for owner in self._active_reply_owners
+                    if owner[0] is not task
+                ]
+                if self._active_reply_task is task:
+                    if self._active_reply_owners:
+                        (
+                            self._active_reply_task,
+                            self._current_loop,
+                        ) = self._active_reply_owners[-1]
+                    else:
+                        self._active_reply_task = None
+                        self._current_loop = None
+
+    def _retain_sync_parked_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        ready = threading.Event()
+
+        def run_parked_loop() -> None:
+            asyncio.set_event_loop(loop)
+            loop.call_soon(ready.set)
+            try:
+                loop.run_forever()
+            finally:
+                loop.close()
+
+        thread = threading.Thread(
+            target=run_parked_loop,
+            name="agent-parked-reply-loop",
+            daemon=True,
+        )
+        self._parked_reply_loop_thread = thread
+        thread.start()
+        ready.wait()
+
+    def _stop_retained_parked_loop(
+        self,
+        cleanup: Any,
+        loop: asyncio.AbstractEventLoop,
+        thread: threading.Thread,
+    ) -> None:
+        if not cleanup.cancelled() and cleanup.exception() is None:
+            loop.call_soon_threadsafe(loop.stop)
+            with self._reply_ownership_lock:
+                if self._parked_reply_loop_thread is thread:
+                    self._parked_reply_loop_thread = None
+
+    async def _cleanup_parked_reply(self, reply_id: str) -> None:
+        await self._agent.reply(inputs=UserInterruptEvent(reply_id=reply_id))
+        self._last_response_interrupted = True
+        with self._reply_ownership_lock:
+            if self._parked_reply_id == reply_id:
+                self._parked_reply_id = None
+                self._parked_reply_loop = None
+
+    def _dispose_parked_reply_runtime(self) -> None:
+        with self._reply_ownership_lock:
+            cleanup = self._parked_cleanup_future
+            parked_loop = self._parked_reply_loop
+            parked_thread = self._parked_reply_loop_thread
+            self._parked_reply_id = None
+            self._parked_reply_loop = None
+            self._parked_reply_loop_thread = None
+            self._parked_cleanup_future = None
+
+        if cleanup is not None and not cleanup.done():
+            cleanup.cancel()
+        if (
+            parked_loop is not None
+            and parked_thread is not None
+            and parked_thread.is_alive()
+        ):
+            parked_loop.call_soon_threadsafe(parked_loop.stop)
+            if threading.current_thread() is not parked_thread:
+                parked_thread.join(timeout=2)
 
     def _create_model(
         self,
@@ -430,13 +552,21 @@ class AgentIntegration:
                 msg = self._create_user_message(message)
                 self._history.add_message(msg=msg)
 
-                self._current_loop = asyncio.new_event_loop()
-                loop = self._current_loop
+                loop = asyncio.new_event_loop()
                 try:
-                    response_msg = loop.run_until_complete(self._consume_reply_stream(msg))
+                    response_msg = loop.run_until_complete(self._run_owned_reply_stream(msg))
                 finally:
-                    self._current_loop = None
-                    loop.close()
+                    if self._current_loop is loop:
+                        self._current_loop = None
+                    with self._reply_ownership_lock:
+                        retain_parked_loop = (
+                            self._parked_reply_id is not None
+                            and self._parked_reply_loop is loop
+                        )
+                    if retain_parked_loop:
+                        self._retain_sync_parked_loop(loop)
+                    else:
+                        loop.close()
 
                 self._history.add_message(msg=response_msg)
                 result = (response_msg.get_text_content() or "").strip()
@@ -485,7 +615,7 @@ class AgentIntegration:
             if AGENTSCOPE_AVAILABLE and Msg is not None:
                 msg = self._create_user_message(message)
                 self._history.add_message(msg=msg)
-                response_msg = await self._consume_reply_stream(msg)
+                response_msg = await self._run_owned_reply_stream(msg)
                 self._history.add_message(msg=response_msg)
                 result = (response_msg.get_text_content() or "").strip()
             else:
@@ -537,41 +667,70 @@ class AgentIntegration:
         return DataBlock(source=source, name=media_kind)
 
     def interrupt(self, reason: str = "用户中断") -> bool:
-        """中断当前 Agent 执行
-
-        通过 asyncio.run_coroutine_threadsafe 将 agent.interrupt()
-        调度到正在运行的事件循环中，线程安全。
-
-        Args:
-            reason: 中断原因
-
-        Returns:
-            是否成功调度中断
-        """
-        if not self._agent or not self._current_loop:
-            _logger.warning("无法中断: Agent 未运行")
-            return False
-
+        """Thread-safely cancel active work or clean up a parked reply."""
         try:
-            interrupt_msg = SystemMsg(name="system", content=reason)
-            asyncio.run_coroutine_threadsafe(
-                self._agent.interrupt(interrupt_msg),
-                self._current_loop,
-            )
-            _logger.info(f"已调度中断: {reason}")
-            return True
+            with self._reply_ownership_lock:
+                task = self._active_reply_task
+                loop = self._current_loop
+                if (
+                    task is not None
+                    and not task.done()
+                    and loop is not None
+                    and loop.is_running()
+                ):
+                    loop.call_soon_threadsafe(task.cancel)
+                    _logger.info(f"已调度中断: {reason}")
+                    return True
+
+                parked_reply_id = self._parked_reply_id
+                parked_loop = self._parked_reply_loop or self._current_loop
+                cleanup = self._parked_cleanup_future
+                if (
+                    parked_reply_id is not None
+                    and parked_loop is not None
+                    and parked_loop.is_running()
+                    and (cleanup is None or cleanup.done())
+                ):
+                    retained_thread = self._parked_reply_loop_thread
+                    coroutine = self._cleanup_parked_reply(parked_reply_id)
+                    try:
+                        cleanup = asyncio.run_coroutine_threadsafe(
+                            coroutine,
+                            parked_loop,
+                        )
+                    except Exception:
+                        coroutine.close()
+                        raise
+                    self._parked_cleanup_future = cleanup
+                    if retained_thread is not None:
+                        cleanup.add_done_callback(
+                            lambda done: self._stop_retained_parked_loop(
+                                done,
+                                parked_loop,
+                                retained_thread,
+                            ),
+                        )
+                    _logger.info(f"已调度中断: {reason}")
+                    return True
         except Exception as e:
             _logger.error(f"中断 Agent 失败: {e}")
-            return False
+        return False
 
     @property
     def is_running(self) -> bool:
         """Agent 是否正在处理请求"""
-        return self._current_loop is not None
+        with self._reply_ownership_lock:
+            task = self._active_reply_task
+            cleanup = self._parked_cleanup_future
+        return bool(
+            (task is not None and not task.done())
+            or (cleanup is not None and not cleanup.done())
+        )
 
     def reset(self) -> None:
         _logger.info("重置Agent...")
         self._history.clear()
+        self._dispose_parked_reply_runtime()
 
         if self._agent and AGENTSCOPE_AVAILABLE:
             self._agent.state = AgentState(context=[])
@@ -681,6 +840,7 @@ class AgentIntegration:
 
     def shutdown(self) -> None:
         _logger.info("关闭Agent...")
+        self._dispose_parked_reply_runtime()
         for client in self._mcp_clients:
             try:
                 if hasattr(client, "close"):
