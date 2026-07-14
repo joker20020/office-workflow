@@ -5,6 +5,7 @@ import asyncio
 import builtins
 import concurrent.futures
 import importlib.util
+from pathlib import Path
 import threading
 import time
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from agentscope.tool import FunctionTool
 
 import src.agent.agent_integration as agent_integration
 import src.agent.mcp_server_manager as mcp_server_manager
+import src.agent.skill_manager as skill_manager_module
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.skill_manager import SkillManager
@@ -114,7 +116,13 @@ async def _current_loop():
     return asyncio.get_running_loop()
 
 
-def _configure_successful_initialize(agent, monkeypatch, *, toolkit_factory=None):
+def _configure_successful_initialize(
+    agent,
+    monkeypatch,
+    *,
+    toolkit_factory=None,
+    mock_skill_paths=True,
+):
     toolkit_factory = toolkit_factory or Mock(return_value=SimpleNamespace())
     monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
     monkeypatch.setattr(
@@ -124,7 +132,13 @@ def _configure_successful_initialize(agent, monkeypatch, *, toolkit_factory=None
     )
     monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
     monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
-    monkeypatch.setattr(agent, "_register_skills", Mock())
+    if agent._skill_manager is not None and mock_skill_paths:
+        monkeypatch.setattr(
+            agent._skill_manager,
+            "get_enabled_skill_paths",
+            Mock(return_value=[]),
+            raising=False,
+        )
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
     monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
@@ -373,14 +387,27 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
         "_connect_mcp_clients",
         AsyncMock(return_value=prepared_clients),
     )
-    monkeypatch.setattr(agent, "_register_skills", Mock())
+    skill_paths = ["C:\\skills\\first", "C:\\skills\\second"]
+    get_skill_paths = Mock(return_value=skill_paths)
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        get_skill_paths,
+        raising=False,
+    )
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
     monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
 
     assert agent.initialize("openai", "model", "https://example.test/v1") is True
 
-    toolkit_factory.assert_called_once_with(tools=wrapped_tools, mcps=prepared_clients)
+    get_skill_paths.assert_called_once_with()
+    toolkit_factory.assert_called_once_with(
+        tools=wrapped_tools,
+        mcps=prepared_clients,
+        skills_or_loaders=skill_paths,
+    )
+    assert toolkit_factory.call_args.kwargs["skills_or_loaders"] is skill_paths
     assert agent._mcp_clients is prepared_clients
     toolkit.register_tool_function.assert_not_called()
     kwargs = agent_factory.call_args.kwargs
@@ -392,6 +419,75 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
     assert kwargs["state"].context == history_messages
     assert kwargs["react_config"].max_iters == 50
     assert kwargs["react_config"].interruption_raise_cancelled_error is False
+
+
+def test_initialize_without_skill_manager_uses_empty_constructor_skills(
+    api_key_manager,
+    node_engine,
+    monkeypatch,
+):
+    agent = AgentIntegration(
+        api_key_manager=api_key_manager,
+        node_engine=node_engine,
+        skill_manager=None,
+    )
+    try:
+        toolkit_factory = _configure_successful_initialize(agent, monkeypatch)
+
+        assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+        toolkit_factory.assert_called_once_with(
+            tools=[],
+            mcps=[],
+            skills_or_loaders=[],
+        )
+    finally:
+        agent.shutdown()
+
+
+def test_initialize_filters_invalid_skill_before_toolkit_construction(
+    agent,
+    monkeypatch,
+    tmp_path,
+):
+    valid_dir = tmp_path / "valid-skill"
+    valid_dir.mkdir()
+    (valid_dir / "SKILL.md").write_text(
+        "---\nname: valid-skill\ndescription: A test skill.\n---\n\n# Valid\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skills",
+        Mock(
+            return_value=[
+                {
+                    "name": "missing-skill",
+                    "path": str(tmp_path / "missing"),
+                    "description": None,
+                },
+                {
+                    "name": "valid-skill",
+                    "path": str(valid_dir),
+                    "description": None,
+                },
+            ],
+        ),
+    )
+    monkeypatch.setattr(agent, "_connect_mcp_clients", AsyncMock(return_value=[]))
+    toolkit_factory = _configure_successful_initialize(
+        agent,
+        monkeypatch,
+        mock_skill_paths=False,
+    )
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+    toolkit_factory.assert_called_once_with(
+        tools=[],
+        mcps=[],
+        skills_or_loaders=[str(valid_dir.resolve())],
+    )
 
 
 def test_connect_mcp_clients_prepares_enabled_clients_in_manager_order(agent, monkeypatch):
@@ -557,7 +653,11 @@ def test_reinitialize_closes_previous_clients_before_connecting_new_ones(
 
     assert events == ["close:previous", "prepare:replacement"]
     assert agent._mcp_clients == [replacement]
-    toolkit_factory.assert_called_once_with(tools=[], mcps=[replacement])
+    toolkit_factory.assert_called_once_with(
+        tools=[],
+        mcps=[replacement],
+        skills_or_loaders=[],
+    )
 
 
 def test_validation_failure_preserves_working_runtime_state(agent, monkeypatch):
@@ -648,6 +748,43 @@ def test_replacement_construction_failure_publishes_exact_empty_state(
     assert agent._mcp_clients == []
 
 
+def test_toolkit_rejection_of_validated_skill_closes_connected_mcp_and_clears_state(
+    agent,
+    monkeypatch,
+):
+    client = _LifecycleClient("new", stateful=True, events=[])
+    skill_paths = ["C:\\skills\\malformed-metadata"]
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        AsyncMock(return_value=[client]),
+    )
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        Mock(return_value=skill_paths),
+        raising=False,
+    )
+    toolkit_factory = Mock(side_effect=ValueError("invalid skill metadata"))
+    monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
+    monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+
+    toolkit_factory.assert_called_once_with(
+        tools=[],
+        mcps=[client],
+        skills_or_loaders=skill_paths,
+    )
+    assert client.close_calls == 1
+    assert agent._initialized is False
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+
+
 def test_function_level_server_record_failure_closes_local_successes(
     agent,
     monkeypatch,
@@ -684,7 +821,12 @@ def test_sync_and_async_chat_share_stateful_mcp_runtime_loop(agent, monkeypatch)
     )
     monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
     monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
-    monkeypatch.setattr(agent, "_register_skills", Mock())
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        Mock(return_value=[]),
+        raising=False,
+    )
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
     monkeypatch.setattr(agent.config, "get", Mock(return_value="prompt"))
@@ -1371,6 +1513,98 @@ class TestSkillManager:
         enabled = skill_manager.get_enabled_skills()
         assert len(enabled) == 1
         assert enabled[0]["name"] == "enabled_skill"
+
+    def test_get_enabled_skill_paths_filters_invalid_entries_in_manager_order(
+        self,
+        skill_manager,
+        tmp_path,
+        monkeypatch,
+    ):
+        warning = Mock()
+        monkeypatch.setattr(skill_manager_module._logger, "warning", warning)
+
+        def write_skill(directory, name):
+            directory.mkdir()
+            (directory / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: A test skill.\n---\n\n"
+                f"# {name}\n\nFollow these instructions.\n",
+                encoding="utf-8",
+            )
+
+        first_valid = tmp_path / "first-valid"
+        disabled_valid = tmp_path / "disabled-valid"
+        missing_manifest = tmp_path / "missing-manifest"
+        file_path = tmp_path / "not-a-directory"
+        undecodable = tmp_path / "undecodable"
+        later_valid = tmp_path / "later-valid"
+        write_skill(first_valid, "first-valid")
+        write_skill(disabled_valid, "disabled-valid")
+        missing_manifest.mkdir()
+        file_path.write_text("not a directory", encoding="utf-8")
+        undecodable.mkdir()
+        (undecodable / "SKILL.md").write_bytes(b"\xff\xfe")
+        write_skill(later_valid, "later-valid")
+
+        records = [
+            ("first-valid", first_valid, True),
+            ("disabled-valid", disabled_valid, False),
+            ("missing-manifest", missing_manifest, True),
+            ("missing-path", tmp_path / "does-not-exist", True),
+            ("file-path", file_path, True),
+            ("undecodable", undecodable, True),
+            ("later-valid", later_valid, True),
+        ]
+        for name, path, enabled in records:
+            skill_manager.add_skill(name, str(path))
+            if not enabled:
+                skill_manager.set_enabled(name, False)
+
+        assert hasattr(skill_manager, "get_enabled_skill_paths"), (
+            "SkillManager must expose validated enabled Skill paths"
+        )
+        paths = skill_manager.get_enabled_skill_paths()
+
+        assert paths == [str(first_valid.resolve()), str(later_valid.resolve())]
+        warning_text = "\n".join(item.args[0] for item in warning.call_args_list)
+        for name, path, enabled in records:
+            if enabled and name not in {"first-valid", "later-valid"}:
+                assert name in warning_text
+                assert str(path) in warning_text
+        assert "disabled-valid" not in warning_text
+        assert str(disabled_valid) not in warning_text
+
+    def test_get_enabled_skill_paths_rejects_empty_and_non_string_paths(
+        self,
+        skill_manager,
+        monkeypatch,
+    ):
+        warning = Mock()
+        monkeypatch.setattr(skill_manager_module._logger, "warning", warning)
+        enabled_records = [
+            {"name": "missing-path", "path": None, "description": None},
+            {"name": "empty-path", "path": "", "description": None},
+            {"name": "non-string-path", "path": 42, "description": None},
+        ]
+        get_enabled = Mock(return_value=enabled_records)
+        monkeypatch.setattr(skill_manager, "get_enabled_skills", get_enabled)
+
+        assert hasattr(skill_manager, "get_enabled_skill_paths"), (
+            "SkillManager must expose validated enabled Skill paths"
+        )
+        assert skill_manager.get_enabled_skill_paths() == []
+
+        get_enabled.assert_called_once_with()
+        warning_text = "\n".join(item.args[0] for item in warning.call_args_list)
+        for record in enabled_records:
+            assert record["name"] in warning_text
+            assert str(record["path"]) in warning_text
+
+
+def test_agent_runtime_source_has_no_skill_mutation_api_references():
+    source = Path("src/agent/agent_integration.py").read_text(encoding="utf-8")
+
+    assert "_register_skills" not in source
+    assert "register_agent_skill" not in source
 
 
 class TestMcpServerManager:

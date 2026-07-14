@@ -439,7 +439,16 @@ class AgentIntegration:
         try:
             function_tools = self._build_registry_function_tools()
             local_clients = await self._connect_mcp_clients()
-            toolkit = Toolkit(tools=function_tools, mcps=local_clients)
+            skill_paths = (
+                self._skill_manager.get_enabled_skill_paths()
+                if self._skill_manager is not None
+                else []
+            )
+            toolkit = Toolkit(
+                tools=function_tools,
+                mcps=local_clients,
+                skills_or_loaders=skill_paths,
+            )
             model = self._create_model(provider, model_name, base_url, api_key)
             system_prompt = self.config.get(
                 "system_prompt",
@@ -454,7 +463,6 @@ class AgentIntegration:
 
                             请用自然语言与用户交流。使用工具完成工作流设计。""",
             )
-            self._register_skills(toolkit)
             state = AgentState(context=self._history.get_messages())
             react_config = ReActConfig(
                 max_iters=50,
@@ -605,21 +613,6 @@ class AgentIntegration:
         for error in errors:
             if not isinstance(error, Exception):
                 raise error
-
-    def _register_skills(self, toolkit: Any) -> None:
-        if not self._skill_manager or not AGENTSCOPE_AVAILABLE:
-            return
-
-        enabled_skills = self._skill_manager.get_enabled_skills()
-
-        for skill in enabled_skills:
-            try:
-                skill_path = skill.get("path")
-                if skill_path:
-                    toolkit.register_agent_skill(skill_path)
-                    _logger.info(f"注册Skill: {skill['name']}")
-            except Exception as e:
-                _logger.error(f"注册Skill失败: {e}")
 
     def chat(self, message: str | List[Dict[str, Any]]) -> str:
         """Send a message through the shared async runtime."""

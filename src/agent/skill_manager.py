@@ -234,6 +234,40 @@ class SkillManager:
                 for record in records
             ]
 
+    def get_enabled_skill_paths(self) -> list[str]:
+        """Return validated AgentScope Skill directories in manager order."""
+        paths: list[str] = []
+        for skill in self.get_enabled_skills():
+            name = skill.get("name")
+            configured_path = skill.get("path")
+            warning_prefix = f"跳过无效Skill: name={name}, path={configured_path}"
+
+            if not isinstance(configured_path, str) or not configured_path.strip():
+                _logger.warning(f"{warning_prefix}: 路径必须是非空字符串")
+                continue
+
+            try:
+                resolved_path = Path(configured_path).expanduser().resolve()
+                if not resolved_path.exists():
+                    _logger.warning(f"{warning_prefix}: 路径不存在")
+                    continue
+                if not resolved_path.is_dir():
+                    _logger.warning(f"{warning_prefix}: 路径不是目录")
+                    continue
+
+                skill_file = resolved_path / "SKILL.md"
+                if not skill_file.is_file():
+                    _logger.warning(f"{warning_prefix}: SKILL.md不存在或不是文件")
+                    continue
+                skill_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeError, RuntimeError) as error:
+                _logger.warning(f"{warning_prefix}: SKILL.md不可读: {error}")
+                continue
+
+            paths.append(str(resolved_path))
+
+        return paths
+
     def discover_skills(self, directory: Path) -> List[dict]:
         """
         扫描目录发现Skill包
