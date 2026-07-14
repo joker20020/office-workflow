@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """AgentIntegration 单元测试"""
 
+import builtins
+import importlib.util
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -227,19 +229,38 @@ def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
 
 
 def test_stable_core_imports_keep_agentscope_available(monkeypatch):
-    monkeypatch.setattr(agent_integration, "HttpStatelessClient", None)
-    monkeypatch.setattr(agent_integration, "StdIOStatefulClient", None)
+    module_path = agent_integration.__file__
+    spec = importlib.util.spec_from_file_location(
+        "isolated_agent_integration_mcp_failure",
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    isolated_module = importlib.util.module_from_spec(spec)
+    real_import = builtins.__import__
+    blocked_imports = []
 
-    assert agent_integration.AGENTSCOPE_AVAILABLE is True
-    assert agent_integration.Agent is not None
-    assert agent_integration.ReActConfig is not None
-    assert agent_integration.AgentState is not None
-    assert agent_integration.Toolkit is not None
-    assert not hasattr(agent_integration, "ReAct" + "Agent")
-    assert not hasattr(agent_integration, "InMemory" + "Memory")
-    assert not hasattr(agent_integration, "DashScopeChatFormatter")
-    assert not hasattr(agent_integration, "DeepSeekChatFormatter")
-    assert not hasattr(agent_integration, "OpenAIChatFormatter")
+    def controlled_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "agentscope.mcp":
+            blocked_imports.append(name)
+            raise ImportError("simulated missing MCP integration")
+        return real_import(name, globals, locals, fromlist, level)
+
+    with monkeypatch.context() as import_patch:
+        import_patch.setattr(builtins, "__import__", controlled_import)
+        spec.loader.exec_module(isolated_module)
+
+    assert blocked_imports == ["agentscope.mcp"]
+    assert isolated_module.AGENTSCOPE_AVAILABLE is True
+    assert isolated_module.Agent is not None
+    assert isolated_module.ReActConfig is not None
+    assert isolated_module.AgentState is not None
+    assert isolated_module.Toolkit is not None
+    assert not hasattr(isolated_module, "ReAct" + "Agent")
+    assert not hasattr(isolated_module, "InMemory" + "Memory")
+    assert not hasattr(isolated_module, "DashScopeChatFormatter")
+    assert not hasattr(isolated_module, "DeepSeekChatFormatter")
+    assert not hasattr(isolated_module, "OpenAIChatFormatter")
 
 
 def test_sync_history_assigns_fresh_agent_state(agent):
