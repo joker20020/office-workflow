@@ -80,6 +80,28 @@ class _GatedConnectClient(_LifecycleClient):
         self.close_finished.set()
 
 
+class _GatedCloseAfterConnectErrorClient(_LifecycleClient):
+    def __init__(self, name, *, events):
+        super().__init__(
+            name,
+            stateful=True,
+            events=events,
+            connect_error=RuntimeError("connect boom"),
+        )
+        self.close_started = threading.Event()
+        self.release_close = threading.Event()
+        self.close_finished = threading.Event()
+
+    async def close(self):
+        self._record_loop("close")
+        self.close_calls += 1
+        self.events.append(f"close:{self.name}")
+        self.close_started.set()
+        while not self.release_close.is_set():
+            await asyncio.sleep(0.001)
+        self.close_finished.set()
+
+
 class _CleanupAbort(BaseException):
     pass
 
@@ -832,6 +854,65 @@ def test_connect_error_is_not_replaced_by_cleanup_fatal(agent, monkeypatch):
     assert agent._async_runtime.run(agent._connect_mcp_clients()) == []
     assert client.close_calls == 1
     assert "connect boom" in str(error.call_args.args[0])
+
+
+def test_cancel_during_isolated_connect_failure_cleanup_stops_initialize(
+    agent,
+    monkeypatch,
+):
+    failed = _GatedCloseAfterConnectErrorClient("failed", events=[])
+    later = _LifecycleClient("later", stateful=False, events=[])
+    created_servers = []
+
+    def create_client(server_name):
+        created_servers.append(server_name)
+        return {"failed": failed, "later": later}[server_name]
+
+    _configure_successful_initialize(agent, monkeypatch)
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(
+            return_value=[
+                {"name": "failed", "enabled": True},
+                {"name": "later", "enabled": True},
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(side_effect=create_client),
+    )
+    initialize_finished = threading.Event()
+
+    async def initialize_with_completion_signal():
+        try:
+            return await agent._initialize_impl(
+                provider="openai",
+                model_name="model",
+                base_url="https://example.test/v1",
+                api_key="secret",
+            )
+        finally:
+            initialize_finished.set()
+
+    future = agent._async_runtime.submit(initialize_with_completion_signal())
+    assert failed.close_started.wait(timeout=1)
+
+    assert future.cancel() is True
+    failed.release_close.set()
+
+    assert failed.close_finished.wait(timeout=1)
+    assert initialize_finished.wait(timeout=1)
+    with pytest.raises(concurrent.futures.CancelledError):
+        future.result(timeout=1)
+    assert created_servers == ["failed"]
+    assert failed.close_calls == 1
+    assert agent._initialized is False
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
 
 
 @pytest.mark.parametrize("competing_lifecycle", ["reset", "shutdown"])

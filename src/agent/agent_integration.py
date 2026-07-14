@@ -543,7 +543,11 @@ class AgentIntegration:
                         raise
                     _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
                     if client is not None and client.is_stateful is True:
-                        await self._close_mcp_clients_cancellation_safe([client])
+                        _, parent_cancellation = (
+                            await self._close_mcp_clients_cancellation_safe([client])
+                        )
+                        if parent_cancellation is not None:
+                            raise parent_cancellation
             return clients
         except BaseException:
             await self._close_mcp_clients_cancellation_safe(clients)
@@ -582,9 +586,8 @@ class AgentIntegration:
     async def _close_mcp_clients_cancellation_safe(
         self,
         clients: list[MCPClient],
-    ) -> list[BaseException]:
-        errors, _parent_cancellation = await self._await_mcp_client_drain(clients)
-        return errors
+    ) -> tuple[list[BaseException], Optional[asyncio.CancelledError]]:
+        return await self._await_mcp_client_drain(clients)
 
     def _detach_published_runtime_state(self) -> list[MCPClient]:
         clients = self._mcp_clients
