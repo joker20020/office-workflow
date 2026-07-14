@@ -142,6 +142,7 @@ class AgentIntegration:
         self._base_url: str = ""
         self._current_loop: Optional[asyncio.AbstractEventLoop] = None
         self._active_reply_task: Optional[asyncio.Task[Any]] = None
+        self._active_reply_cancel_requests: set[asyncio.Task[Any]] = set()
         self._reply_ownership_lock = threading.Lock()
         self._active_reply_owners: List[
             tuple[asyncio.Task[Any], asyncio.AbstractEventLoop]
@@ -231,6 +232,7 @@ class AgentIntegration:
         if not hasattr(self, "_reply_ownership_lock"):
             self._reply_ownership_lock = threading.Lock()
             self._active_reply_owners = []
+            self._active_reply_cancel_requests = set()
         with self._reply_ownership_lock:
             self._active_reply_owners.append((task, loop))
             self._active_reply_task = task
@@ -239,6 +241,7 @@ class AgentIntegration:
             return await self._consume_reply_stream(inputs)
         finally:
             with self._reply_ownership_lock:
+                self._active_reply_cancel_requests.discard(task)
                 self._active_reply_owners[:] = [
                     owner
                     for owner in self._active_reply_owners
@@ -257,7 +260,7 @@ class AgentIntegration:
     def _retain_sync_parked_loop(
         self,
         loop: asyncio.AbstractEventLoop,
-    ) -> None:
+    ) -> bool:
         ready = threading.Event()
 
         def run_parked_loop() -> None:
@@ -273,9 +276,16 @@ class AgentIntegration:
             name="agent-parked-reply-loop",
             daemon=True,
         )
-        self._parked_reply_loop_thread = thread
-        thread.start()
+        with self._reply_ownership_lock:
+            if (
+                self._parked_reply_id is None
+                or self._parked_reply_loop is not loop
+            ):
+                return False
+            self._parked_reply_loop_thread = thread
+            thread.start()
         ready.wait()
+        return True
 
     def _stop_retained_parked_loop(
         self,
@@ -283,11 +293,13 @@ class AgentIntegration:
         loop: asyncio.AbstractEventLoop,
         thread: threading.Thread,
     ) -> None:
-        if not cleanup.cancelled() and cleanup.exception() is None:
-            loop.call_soon_threadsafe(loop.stop)
-            with self._reply_ownership_lock:
-                if self._parked_reply_loop_thread is thread:
-                    self._parked_reply_loop_thread = None
+        if cleanup.cancelled() or cleanup.exception() is not None:
+            return
+        with self._reply_ownership_lock:
+            if self._parked_reply_loop_thread is not thread:
+                return
+            self._parked_reply_loop_thread = None
+        loop.call_soon_threadsafe(loop.stop)
 
     async def _cleanup_parked_reply(self, reply_id: str) -> None:
         await self._agent.reply(inputs=UserInterruptEvent(reply_id=reply_id))
@@ -556,16 +568,7 @@ class AgentIntegration:
                 try:
                     response_msg = loop.run_until_complete(self._run_owned_reply_stream(msg))
                 finally:
-                    if self._current_loop is loop:
-                        self._current_loop = None
-                    with self._reply_ownership_lock:
-                        retain_parked_loop = (
-                            self._parked_reply_id is not None
-                            and self._parked_reply_loop is loop
-                        )
-                    if retain_parked_loop:
-                        self._retain_sync_parked_loop(loop)
-                    else:
+                    if not self._retain_sync_parked_loop(loop):
                         loop.close()
 
                 self._history.add_message(msg=response_msg)
@@ -668,6 +671,8 @@ class AgentIntegration:
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """Thread-safely cancel active work or clean up a parked reply."""
+        callback_args: Optional[tuple[Any, Any, threading.Thread]] = None
+        parked_scheduled = False
         try:
             with self._reply_ownership_lock:
                 task = self._active_reply_task
@@ -678,7 +683,14 @@ class AgentIntegration:
                     and loop is not None
                     and loop.is_running()
                 ):
-                    loop.call_soon_threadsafe(task.cancel)
+                    if task in self._active_reply_cancel_requests:
+                        return False
+                    self._active_reply_cancel_requests.add(task)
+                    try:
+                        loop.call_soon_threadsafe(task.cancel)
+                    except Exception:
+                        self._active_reply_cancel_requests.discard(task)
+                        raise
                     _logger.info(f"已调度中断: {reason}")
                     return True
 
@@ -702,16 +714,21 @@ class AgentIntegration:
                         coroutine.close()
                         raise
                     self._parked_cleanup_future = cleanup
+                    parked_scheduled = True
                     if retained_thread is not None:
-                        cleanup.add_done_callback(
-                            lambda done: self._stop_retained_parked_loop(
-                                done,
-                                parked_loop,
-                                retained_thread,
-                            ),
-                        )
-                    _logger.info(f"已调度中断: {reason}")
-                    return True
+                        callback_args = (cleanup, parked_loop, retained_thread)
+            if callback_args is not None:
+                cleanup, parked_loop, retained_thread = callback_args
+                cleanup.add_done_callback(
+                    lambda done: self._stop_retained_parked_loop(
+                        done,
+                        parked_loop,
+                        retained_thread,
+                    ),
+                )
+            if parked_scheduled:
+                _logger.info(f"已调度中断: {reason}")
+                return True
         except Exception as e:
             _logger.error(f"中断 Agent 失败: {e}")
         return False

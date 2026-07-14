@@ -93,6 +93,7 @@ def _integration_with(events: list[AgentEvent]) -> AgentIntegration:
     integration._streaming_callbacks = []
     integration._last_response_interrupted = False
     integration._active_reply_task = None
+    integration._active_reply_cancel_requests = set()
     integration._reply_ownership_lock = threading.Lock()
     integration._active_reply_owners = []
     integration._current_loop = None
@@ -367,6 +368,118 @@ def test_cancelled_cleanup_callback_does_not_touch_retained_loop() -> None:
     loop.call_soon_threadsafe.assert_not_called()
 
 
+def test_completed_cleanup_future_callback_runs_without_ownership_deadlock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    integration = _chat_integration([])
+    loop = Mock()
+    loop.is_running.return_value = True
+    retained_thread = Mock()
+    integration._parked_reply_id = "parked-reply"
+    integration._parked_reply_loop = loop
+    integration._parked_reply_loop_thread = retained_thread
+
+    def completed_schedule(coroutine: Any, scheduled_loop: Any) -> Future[None]:
+        coroutine.close()
+        future: Future[None] = Future()
+        future.set_result(None)
+        return future
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", completed_schedule)
+    result: list[bool] = []
+    worker = threading.Thread(
+        target=lambda: result.append(integration.interrupt()),
+        daemon=True,
+    )
+
+    worker.start()
+    worker.join(timeout=1)
+
+    assert not worker.is_alive()
+    assert result == [True]
+    loop.call_soon_threadsafe.assert_called_once_with(loop.stop)
+
+
+def test_cleanup_callback_registration_does_not_block_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    integration = _chat_integration([])
+    integration._agent = _ParkedSyncAgent()
+    integration.chat("question")
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+
+    class BlockingCallbackFuture(Future[None]):
+        def add_done_callback(self, fn: Any) -> None:
+            callback_entered.set()
+            release_callback.wait(timeout=1)
+            super().add_done_callback(fn)
+
+    cleanup: Future[None] = BlockingCallbackFuture()
+
+    def pending_schedule(coroutine: Any, loop: Any) -> Future[None]:
+        coroutine.close()
+        return cleanup
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", pending_schedule)
+    interrupt_thread = threading.Thread(target=integration.interrupt, daemon=True)
+    reset_done = threading.Event()
+    reset_thread = threading.Thread(
+        target=lambda: (integration.reset(), reset_done.set()),
+        daemon=True,
+    )
+
+    interrupt_thread.start()
+    assert callback_entered.wait(timeout=1)
+    reset_thread.start()
+    reset_completed_before_callback_release = reset_done.wait(timeout=0.3)
+    release_callback.set()
+    interrupt_thread.join(timeout=2)
+    reset_thread.join(timeout=2)
+
+    assert reset_completed_before_callback_release is True
+    assert not interrupt_thread.is_alive()
+    assert not reset_thread.is_alive()
+    assert integration._parked_cleanup_future is None
+
+
+@pytest.mark.parametrize("lifecycle_method", ["reset", "shutdown"])
+def test_sync_parked_retain_handoff_is_atomic_with_lifecycle_disposal(
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle_method: str,
+) -> None:
+    integration = _chat_integration([])
+    integration._agent = _ParkedSyncAgent()
+    integration._mcp_clients = []
+    retain_entered = threading.Event()
+    release_retain = threading.Event()
+    original_retain = integration._retain_sync_parked_loop
+
+    def gated_retain(loop: Any) -> Any:
+        retain_entered.set()
+        release_retain.wait(timeout=1)
+        return original_retain(loop)
+
+    monkeypatch.setattr(integration, "_retain_sync_parked_loop", gated_retain)
+    chat_thread = threading.Thread(target=lambda: integration.chat("question"))
+    chat_thread.start()
+    assert retain_entered.wait(timeout=1)
+
+    getattr(integration, lifecycle_method)()
+    release_retain.set()
+    chat_thread.join(timeout=2)
+
+    leaked_thread = integration._parked_reply_loop_thread
+    leaked_loop = integration._parked_reply_loop
+    leaked_thread_alive = leaked_thread is not None and leaked_thread.is_alive()
+    leaked_loop_open = leaked_loop is not None and not leaked_loop.is_closed()
+    integration._dispose_parked_reply_runtime()
+
+    assert not chat_thread.is_alive()
+    assert leaked_thread_alive is False
+    assert leaked_loop_open is False
+
+
 def _chat_integration(events: list[AgentEvent]) -> AgentIntegration:
     integration = _integration_with(events)
     integration._initialized = True
@@ -392,6 +505,52 @@ def test_interrupt_cancels_owned_active_task_thread_safely_without_legacy_call()
 
     loop.call_soon_threadsafe.assert_called_once_with(task.cancel)
     integration._agent.interrupt.assert_not_called()
+
+
+def test_repeated_active_interrupt_schedules_cancel_only_once() -> None:
+    integration = _chat_integration([])
+    task = Mock()
+    task.done.return_value = False
+    loop = Mock()
+    loop.is_running.return_value = True
+    integration._active_reply_task = task
+    integration._current_loop = loop
+
+    assert integration.interrupt("first") is True
+    assert integration.interrupt("second") is False
+
+    loop.call_soon_threadsafe.assert_called_once_with(task.cancel)
+
+
+def test_concurrent_active_interrupt_schedules_cancel_only_once() -> None:
+    integration = _chat_integration([])
+    task = Mock()
+    task.done.return_value = False
+    loop = Mock()
+    loop.is_running.return_value = True
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_schedule(callback: Any) -> None:
+        entered.set()
+        release.wait(timeout=1)
+
+    loop.call_soon_threadsafe.side_effect = blocking_schedule
+    integration._active_reply_task = task
+    integration._current_loop = loop
+    results: list[bool] = []
+    first = threading.Thread(target=lambda: results.append(integration.interrupt()))
+    second = threading.Thread(target=lambda: results.append(integration.interrupt()))
+
+    first.start()
+    assert entered.wait(timeout=1)
+    second.start()
+    release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert sorted(results) == [False, True]
+    loop.call_soon_threadsafe.assert_called_once_with(task.cancel)
 
 
 def test_interrupt_without_active_or_parked_work_returns_false() -> None:
@@ -514,6 +673,81 @@ async def test_overlapping_reply_promotes_older_owner_when_newer_finishes_first(
     streaming_agent.release["A"].set()
     await task_a
     assert integration.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_overlapping_reply_keeps_newer_owner_when_older_finishes_first() -> None:
+    integration = _chat_integration([])
+    streaming_agent = _GatedStreamingAgent()
+    integration._agent = streaming_agent
+
+    task_a = asyncio.create_task(integration.chat_async("A"))
+    await streaming_agent.started["A"].wait()
+    task_b = asyncio.create_task(integration.chat_async("B"))
+    await streaming_agent.started["B"].wait()
+
+    streaming_agent.release["A"].set()
+    await task_a
+
+    assert integration._active_reply_task is task_b
+    assert integration._current_loop is asyncio.get_running_loop()
+    assert integration.is_running is True
+
+    streaming_agent.release["B"].set()
+    await task_b
+    assert integration.is_running is False
+
+
+class _CancellationCleanupStreamingAgent:
+    def __init__(self) -> None:
+        self.state = SimpleNamespace(reply_id="cancel-reply")
+        self.started = asyncio.Event()
+        self.cancelled_count = 0
+
+    async def reply_stream(self, *, inputs: Msg) -> AsyncGenerator[AgentEvent, None]:
+        yield ReplyStartEvent(
+            session_id="session-1",
+            reply_id="cancel-reply",
+            name="Assistant",
+        )
+        yield TextBlockStartEvent(reply_id="cancel-reply", block_id="text-1")
+        yield TextBlockDeltaEvent(
+            reply_id="cancel-reply",
+            block_id="text-1",
+            delta="partial",
+        )
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled_count += 1
+            yield TextBlockEndEvent(reply_id="cancel-reply", block_id="text-1")
+            yield ReplyEndEvent(
+                session_id="session-1",
+                reply_id="cancel-reply",
+                finished_reason=ReplyEndReason.INTERRUPTED,
+            )
+
+
+@pytest.mark.asyncio
+async def test_real_task_cancel_persists_partial_interrupted_reply_once() -> None:
+    integration = _chat_integration([])
+    streaming_agent = _CancellationCleanupStreamingAgent()
+    integration._agent = streaming_agent
+    chat_task = asyncio.create_task(integration.chat_async("question"))
+    await streaming_agent.started.wait()
+
+    assert integration.interrupt("first") is True
+    assert integration.interrupt("duplicate") is False
+    result = await chat_task
+
+    assert result == "partial"
+    assert streaming_agent.cancelled_count == 1
+    assert integration._last_response_interrupted is True
+    assert integration._history.add_message.call_count == 2
+    persisted_reply = integration._history.add_message.call_args_list[1].kwargs["msg"]
+    assert persisted_reply.get_text_content() == "partial"
+    assert integration._active_reply_cancel_requests == set()
 
 
 def test_chat_clears_sync_reply_ownership_after_completion() -> None:
