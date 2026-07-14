@@ -84,6 +84,14 @@ class TestAgentIntegration:
         assert agent._agent.state.context == []
         assert agent._agent.state is not previous_state
 
+    def test_reset_without_agent_still_clears_history(self, agent):
+        agent._history.add_message("user", "test message")
+        agent._agent = None
+
+        agent.reset()
+
+        assert agent.get_history() == []
+
     def test_get_history(self, agent):
         agent._history.add_message("user", "Hello")
         agent._history.add_message("assistant", "Hi there!")
@@ -218,13 +226,20 @@ def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
     assert kwargs["react_config"].interruption_raise_cancelled_error is False
 
 
-def test_stable_core_imports_keep_agentscope_available():
+def test_stable_core_imports_keep_agentscope_available(monkeypatch):
+    monkeypatch.setattr(agent_integration, "HttpStatelessClient", None)
+    monkeypatch.setattr(agent_integration, "StdIOStatefulClient", None)
+
     assert agent_integration.AGENTSCOPE_AVAILABLE is True
     assert agent_integration.Agent is not None
     assert agent_integration.ReActConfig is not None
     assert agent_integration.AgentState is not None
+    assert agent_integration.Toolkit is not None
     assert not hasattr(agent_integration, "ReAct" + "Agent")
     assert not hasattr(agent_integration, "InMemory" + "Memory")
+    assert not hasattr(agent_integration, "DashScopeChatFormatter")
+    assert not hasattr(agent_integration, "DeepSeekChatFormatter")
+    assert not hasattr(agent_integration, "OpenAIChatFormatter")
 
 
 def test_sync_history_assigns_fresh_agent_state(agent):
