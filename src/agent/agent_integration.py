@@ -293,12 +293,15 @@ class AgentIntegration:
         loop: asyncio.AbstractEventLoop,
         thread: Optional[threading.Thread],
     ) -> None:
-        if cleanup.cancelled() or cleanup.exception() is not None:
-            return
+        unsuccessful = cleanup.cancelled()
+        if not unsuccessful:
+            unsuccessful = cleanup.exception() is not None
         with self._reply_ownership_lock:
             if self._parked_cleanup_future is not cleanup:
                 return
             self._parked_cleanup_future = None
+            if unsuccessful:
+                return
             self._parked_reply_id = None
             self._parked_reply_loop = None
             retained_loop = None
@@ -713,7 +716,7 @@ class AgentIntegration:
                     parked_reply_id is not None
                     and parked_loop is not None
                     and parked_loop.is_running()
-                    and (cleanup is None or cleanup.done())
+                    and cleanup is None
                 ):
                     retained_thread = self._parked_reply_loop_thread
                     coroutine = self._cleanup_parked_reply(parked_reply_id)

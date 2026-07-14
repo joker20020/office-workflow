@@ -241,8 +241,10 @@ class _ParkedSyncAgent(_FakeStreamingAgent):
             ],
         )
         self.interrupt_input: UserInterruptEvent | None = None
+        self.reply_count = 0
 
     async def reply(self, *, inputs: UserInterruptEvent) -> AssistantMsg:
+        self.reply_count += 1
         self.interrupt_input = inputs
         return AssistantMsg(name="Assistant", content=[], id=inputs.reply_id)
 
@@ -486,6 +488,144 @@ def test_lifecycle_disposal_owns_retained_loop_when_cleanup_callback_is_pending(
     assert state_cleared is True
     assert thread_still_alive is False
     assert loop_still_open is False
+
+
+def test_successful_done_future_blocks_duplicate_cleanup_until_callback_claims() -> None:
+    integration = _chat_integration([])
+    integration._agent = _ParkedSyncAgent()
+    integration.chat("question")
+    parked_thread = integration._parked_reply_loop_thread
+    assert parked_thread is not None
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+    original_finish = integration._finish_parked_cleanup
+
+    def gated_finish(cleanup: Any, loop: Any, thread: Any) -> None:
+        callback_entered.set()
+        release_callback.wait(timeout=2)
+        original_finish(cleanup, loop, thread)
+
+    integration._finish_parked_cleanup = gated_finish
+    assert integration.interrupt("first") is True
+    assert callback_entered.wait(timeout=1)
+    with integration._reply_ownership_lock:
+        first_future = integration._parked_cleanup_future
+    assert first_future is not None
+    assert first_future.done()
+
+    duplicate_result = integration.interrupt("duplicate")
+    release_callback.set()
+    parked_thread.join(timeout=2)
+    if parked_thread.is_alive():
+        integration._dispose_parked_reply_runtime()
+
+    assert duplicate_result is False
+    assert integration._agent.reply_count == 1
+    assert not parked_thread.is_alive()
+
+
+class _FailThenSucceedParkedAgent(_ParkedSyncAgent):
+    async def reply(self, *, inputs: UserInterruptEvent) -> AssistantMsg:
+        self.reply_count += 1
+        if self.reply_count == 1:
+            raise RuntimeError("cleanup failed")
+        self.interrupt_input = inputs
+        return AssistantMsg(name="Assistant", content=[], id=inputs.reply_id)
+
+
+def test_failed_cleanup_releases_reservation_and_allows_retry() -> None:
+    integration = _chat_integration([])
+    integration._agent = _FailThenSucceedParkedAgent()
+    integration.chat("question")
+    parked_loop = integration._parked_reply_loop
+    parked_thread = integration._parked_reply_loop_thread
+    assert parked_loop is not None
+    assert parked_thread is not None
+    first_callback_finished = threading.Event()
+    original_finish = integration._finish_parked_cleanup
+
+    def notifying_finish(cleanup: Any, loop: Any, thread: Any) -> None:
+        original_finish(cleanup, loop, thread)
+        first_callback_finished.set()
+
+    integration._finish_parked_cleanup = notifying_finish
+    assert integration.interrupt("first") is True
+    assert first_callback_finished.wait(timeout=1)
+    reservation_released = integration._parked_cleanup_future is None
+    parked_state_retained = (
+        integration._parked_reply_id == "sync-parked"
+        and integration._parked_reply_loop is parked_loop
+        and integration._parked_reply_loop_thread is parked_thread
+        and parked_loop.is_running()
+    )
+
+    retry_result = integration.interrupt("retry")
+    parked_thread.join(timeout=2)
+    if parked_thread.is_alive():
+        integration._dispose_parked_reply_runtime()
+
+    assert reservation_released is True
+    assert parked_state_retained is True
+    assert retry_result is True
+    assert integration._agent.reply_count == 2
+    assert not parked_thread.is_alive()
+
+
+class _CancelThenSucceedParkedAgent(_ParkedSyncAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_started = threading.Event()
+
+    async def reply(self, *, inputs: UserInterruptEvent) -> AssistantMsg:
+        self.reply_count += 1
+        if self.reply_count == 1:
+            self.first_started.set()
+            await asyncio.Event().wait()
+        self.interrupt_input = inputs
+        return AssistantMsg(name="Assistant", content=[], id=inputs.reply_id)
+
+
+def test_cancelled_cleanup_releases_reservation_and_allows_retry() -> None:
+    integration = _chat_integration([])
+    integration._agent = _CancelThenSucceedParkedAgent()
+    integration.chat("question")
+    parked_loop = integration._parked_reply_loop
+    parked_thread = integration._parked_reply_loop_thread
+    assert parked_loop is not None
+    assert parked_thread is not None
+    callback_finished = threading.Event()
+    original_finish = integration._finish_parked_cleanup
+
+    def notifying_finish(cleanup: Any, loop: Any, thread: Any) -> None:
+        original_finish(cleanup, loop, thread)
+        callback_finished.set()
+
+    integration._finish_parked_cleanup = notifying_finish
+    assert integration.interrupt("first") is True
+    assert integration._agent.first_started.wait(timeout=1)
+    with integration._reply_ownership_lock:
+        first_future = integration._parked_cleanup_future
+    assert first_future is not None
+    assert first_future.cancel() is True
+    assert callback_finished.wait(timeout=1)
+    reservation_released = integration._parked_cleanup_future is None
+    parked_state_retained = (
+        integration._parked_reply_id == "sync-parked"
+        and integration._parked_reply_loop is parked_loop
+        and integration._parked_reply_loop_thread is parked_thread
+        and parked_loop.is_running()
+    )
+
+    retry_result = integration.interrupt("retry")
+    parked_thread.join(timeout=2)
+    if parked_thread.is_alive():
+        integration._dispose_parked_reply_runtime()
+
+    assert reservation_released is True
+    assert parked_state_retained is True
+    assert retry_result is True
+    assert integration._agent.reply_count == 2
+    assert not parked_thread.is_alive()
 
 
 @pytest.mark.parametrize("lifecycle_method", ["reset", "shutdown"])
