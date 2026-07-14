@@ -10,6 +10,7 @@ import pytest
 
 from agentscope.message import AssistantMsg, SystemMsg, UserMsg
 from agentscope.state import AgentState
+from agentscope.tool import FunctionTool
 
 import src.agent.agent_integration as agent_integration
 from src.agent.agent_integration import AgentIntegration
@@ -193,7 +194,35 @@ def test_create_model_rejects_unsupported_provider(agent):
         agent._create_model("unknown", "", "", "key")
 
 
-def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
+def test_registry_callables_are_wrapped_once_in_order(agent, monkeypatch):
+    def first_tool():
+        """First tool docs."""
+
+    def second_tool():
+        """Second tool docs."""
+
+    monkeypatch.setattr(
+        agent_integration.AgentToolRegistry.instance(),
+        "get_all_tools",
+        Mock(return_value=[first_tool, second_tool, first_tool]),
+    )
+
+    tools = agent._build_registry_function_tools()
+
+    assert all(isinstance(tool, FunctionTool) for tool in tools)
+    assert [tool._func for tool in tools] == [first_tool, second_tool]
+    assert [tool.name for tool in tools] == ["first_tool", "second_tool"]
+    assert [tool.description for tool in tools] == [
+        "First tool docs.",
+        "Second tool docs.",
+    ]
+    assert [tool.is_concurrency_safe for tool in tools] == [False, False]
+
+
+def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
+    agent,
+    monkeypatch,
+):
     history_messages = [
         UserMsg(name="User", content="question", metadata={"turn": 1}),
         AssistantMsg(name="Assistant", content="answer", metadata={"turn": 2}),
@@ -204,11 +233,17 @@ def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
     constructed_agent = SimpleNamespace(state=None)
     agent_factory = Mock(return_value=constructed_agent)
     toolkit = object()
+    toolkit_factory = Mock(return_value=toolkit)
     model = object()
     monkeypatch.setattr(agent_integration, "Agent", agent_factory)
-    monkeypatch.setattr(agent_integration, "Toolkit", Mock(return_value=toolkit))
+    monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
     monkeypatch.setattr(agent, "_create_model", Mock(return_value=model))
-    monkeypatch.setattr(agent, "_register_registry_tools", Mock())
+    wrapped_tools = [object(), object()]
+    monkeypatch.setattr(
+        agent,
+        "_build_registry_function_tools",
+        Mock(return_value=wrapped_tools),
+    )
     monkeypatch.setattr(agent, "_register_mcp_tools", Mock())
     monkeypatch.setattr(agent, "_register_skills", Mock())
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
@@ -217,6 +252,7 @@ def test_initialize_constructs_agent_with_history_state(agent, monkeypatch):
 
     assert agent.initialize("openai", "model", "https://example.test/v1") is True
 
+    toolkit_factory.assert_called_once_with(tools=wrapped_tools)
     kwargs = agent_factory.call_args.kwargs
     assert kwargs["name"] == "WorkflowAssistant"
     assert kwargs["system_prompt"] == "configured prompt"

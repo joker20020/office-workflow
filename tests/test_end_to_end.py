@@ -16,12 +16,44 @@ from src.storage.database import Database
 from src.storage.repositories import ChatHistoryRepository
 
 try:
+    from agentscope.message import TextBlock, ToolResultState
     from agentscope.tool import ToolResponse
 
     AGENTSCOPE_AVAILABLE = True
 except ImportError:
     AGENTSCOPE_AVAILABLE = False
     ToolResponse = None
+
+
+@pytest.mark.skipif(not AGENTSCOPE_AVAILABLE, reason="AgentScope not installed")
+def test_make_response_uses_text_block_and_success_state():
+    from src.agent.workflow_tools import _make_response
+
+    response = _make_response("ok", True)
+
+    assert isinstance(response, ToolResponse)
+    assert len(response.content) == 1
+    assert isinstance(response.content[0], TextBlock)
+    assert response.content[0].text == "ok"
+    assert response.state is ToolResultState.SUCCESS
+    assert response.metadata == {"success": True}
+
+
+@pytest.mark.skipif(not AGENTSCOPE_AVAILABLE, reason="AgentScope not installed")
+def test_make_response_failure_uses_error_state_and_preserves_metadata():
+    from src.agent.workflow_tools import _make_response
+
+    response = _make_response(
+        {"message": "failed"},
+        False,
+        {"request_id": "request-1"},
+    )
+
+    assert len(response.content) == 1
+    assert isinstance(response.content[0], TextBlock)
+    assert response.content[0].text == '{"message": "failed"}'
+    assert response.state is ToolResultState.ERROR
+    assert response.metadata == {"success": False, "request_id": "request-1"}
 
 
 def _extract_result(response):

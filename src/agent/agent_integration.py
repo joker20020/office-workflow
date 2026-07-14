@@ -45,7 +45,7 @@ try:
         UserInterruptEvent,
     )
     from agentscope.state import AgentState
-    from agentscope.tool import Toolkit
+    from agentscope.tool import FunctionTool, Toolkit
 
     AGENTSCOPE_AVAILABLE = True
     _logger_agent = __import__("src.utils.logger", fromlist=["get_logger"]).get_logger(__name__)
@@ -63,6 +63,7 @@ except ImportError as e:
     Base64Source = None
     DataBlock = None
     Toolkit = None
+    FunctionTool = None
     ReplyEndEvent = None
     ReplyEndReason = None
     ReplyStartEvent = None
@@ -413,7 +414,8 @@ class AgentIntegration:
             self._model_name = model_name
             self._base_url = base_url
 
-            self._toolkit = Toolkit()
+            function_tools = self._build_registry_function_tools()
+            self._toolkit = Toolkit(tools=function_tools)
             _logger.info("Toolkit创建成功")
 
             model = self._create_model(provider, model_name, base_url, api_key)
@@ -433,7 +435,6 @@ class AgentIntegration:
                             请用自然语言与用户交流。使用工具完成工作流设计。""",
             )
 
-            self._register_registry_tools()
             self._register_mcp_tools()
             self._register_skills()
             
@@ -465,20 +466,27 @@ class AgentIntegration:
             _logger.error("=" * 50)
             return False
 
-    def _register_registry_tools(self) -> None:
-        """从 AgentToolRegistry 注册所有已注册的工具函数"""
+    def _build_registry_function_tools(self) -> List[Any]:
+        """Wrap unique registry callables for Toolkit construction."""
         if not AGENTSCOPE_AVAILABLE:
-            return
+            return []
 
-        tools = AgentToolRegistry.instance().get_all_tools()
-        
-        for tool_func in tools:
-            self._toolkit.register_tool_function(tool_func)
+        function_tools = []
+        seen_ids = set()
+        for tool_func in AgentToolRegistry.instance().get_all_tools():
+            tool_id = id(tool_func)
+            if tool_id in seen_ids:
+                continue
+            seen_ids.add(tool_id)
+            function_tools.append(
+                FunctionTool(func=tool_func, is_concurrency_safe=False),
+            )
 
-        if tools:
-            _logger.info(f"已从注册中心加载 {len(tools)} 个工具")
+        if function_tools:
+            _logger.info(f"已从注册中心加载 {len(function_tools)} 个工具")
         else:
             _logger.info("注册中心无工具可加载")
+        return function_tools
 
     def _register_mcp_tools(self) -> None:
         if not self._mcp_manager or not AGENTSCOPE_AVAILABLE:

@@ -13,11 +13,14 @@ from src.engine.node_graph import NodeGraph, NodeState
 from src.utils.logger import get_logger
 
 try:
+    from agentscope.message import TextBlock, ToolResultState
     from agentscope.tool import ToolResponse
 
     AGENTSCOPE_AVAILABLE = True
 except ImportError:
     AGENTSCOPE_AVAILABLE = False
+    TextBlock = None
+    ToolResultState = None
     ToolResponse = None
 
 _logger = get_logger(__name__)
@@ -29,7 +32,8 @@ def _make_response(content: Any, success: bool = True, metadata: Optional[Dict] 
             json.dumps(content, ensure_ascii=False) if isinstance(content, dict) else str(content)
         )
         return ToolResponse(
-            content=[{"type": "text", "text": content_str}],
+            content=[TextBlock(text=content_str)],
+            state=ToolResultState.SUCCESS if success else ToolResultState.ERROR,
             metadata={"success": success, **(metadata or {})},
         )
     return content
