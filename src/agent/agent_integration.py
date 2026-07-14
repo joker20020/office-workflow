@@ -433,11 +433,7 @@ class AgentIntegration:
         api_key: str,
     ) -> bool:
         await self._settle_reply_work()
-        await self._close_mcp_clients()
-        self._agent = None
-        self._toolkit = None
-        self._mcp_clients = []
-        self._initialized = False
+        await self._close_published_mcp_clients()
 
         local_clients: list[MCPClient] = []
         try:
@@ -547,40 +543,65 @@ class AgentIntegration:
                         raise
                     _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
                     if client is not None and client.is_stateful is True:
-                        await self._close_mcp_clients([client])
+                        await self._close_mcp_clients_cancellation_safe([client])
             return clients
         except BaseException:
             await self._close_mcp_clients_cancellation_safe(clients)
             raise
 
-    async def _close_mcp_clients_cancellation_safe(
+    async def _drain_mcp_clients(
         self,
         clients: list[MCPClient],
-    ) -> None:
-        cleanup_task = asyncio.create_task(self._close_mcp_clients(clients))
-        while not cleanup_task.done():
-            try:
-                await asyncio.shield(cleanup_task)
-            except asyncio.CancelledError:
-                continue
-        if not cleanup_task.cancelled():
-            cleanup_task.result()
-
-    async def _close_mcp_clients(
-        self,
-        clients: Optional[list[MCPClient]] = None,
-    ) -> None:
-        """Close every stateful client in the exact owned list at most once."""
-        if clients is None:
-            clients, self._mcp_clients = self._mcp_clients, []
+    ) -> list[BaseException]:
+        errors: list[BaseException] = []
         for client in clients:
             if client.is_stateful is not True:
                 continue
             client_name = getattr(client, "name", type(client).__name__)
             try:
                 await client.close()
-            except Exception as error:
+            except BaseException as error:
+                errors.append(error)
                 _logger.warning(f"关闭MCP客户端失败 ({client_name}): {error}")
+        return errors
+
+    async def _await_mcp_client_drain(
+        self,
+        clients: list[MCPClient],
+    ) -> tuple[list[BaseException], Optional[asyncio.CancelledError]]:
+        cleanup_task = asyncio.create_task(self._drain_mcp_clients(clients))
+        parent_cancellation: Optional[asyncio.CancelledError] = None
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as error:
+                if parent_cancellation is None:
+                    parent_cancellation = error
+        return cleanup_task.result(), parent_cancellation
+
+    async def _close_mcp_clients_cancellation_safe(
+        self,
+        clients: list[MCPClient],
+    ) -> list[BaseException]:
+        errors, _parent_cancellation = await self._await_mcp_client_drain(clients)
+        return errors
+
+    def _detach_published_runtime_state(self) -> list[MCPClient]:
+        clients = self._mcp_clients
+        self._agent = None
+        self._toolkit = None
+        self._mcp_clients = []
+        self._initialized = False
+        return clients
+
+    async def _close_published_mcp_clients(self) -> None:
+        clients = self._detach_published_runtime_state()
+        errors, parent_cancellation = await self._await_mcp_client_drain(clients)
+        if parent_cancellation is not None:
+            raise parent_cancellation
+        for error in errors:
+            if not isinstance(error, Exception):
+                raise error
 
     def _register_skills(self, toolkit: Any) -> None:
         if not self._skill_manager or not AGENTSCOPE_AVAILABLE:
@@ -771,7 +792,6 @@ class AgentIntegration:
         self._reject_sync_lifecycle_reentry("reset")
         _logger.info("重置Agent...")
         self._async_runtime.run(self._reset_impl())
-        self._history.clear()
         _logger.info("Agent已重置")
 
     async def _reset_impl(self) -> None:
@@ -780,11 +800,8 @@ class AgentIntegration:
 
     async def _reset_transaction(self) -> None:
         await self._settle_reply_work()
-        await self._close_mcp_clients()
-        self._agent = None
-        self._toolkit = None
-        self._mcp_clients = []
-        self._initialized = False
+        await self._close_published_mcp_clients()
+        self._history.clear()
 
     def get_history(self) -> List[Dict]:
         if self._history_repository:
@@ -859,11 +876,11 @@ class AgentIntegration:
         async with self._get_lifecycle_lock():
             history_snapshot = self._snapshot_history_selection()
             previous_agent_state = getattr(self._agent, "state", None)
-            success = self._history.set_session(session_id)
-            if not success:
-                self._restore_history_selection(history_snapshot)
-                return False
             try:
+                success = self._history.set_session(session_id)
+                if not success:
+                    self._restore_history_selection(history_snapshot)
+                    return False
                 await self._sync_history_to_memory_impl()
             except BaseException as error:
                 self._restore_history_selection(history_snapshot)
@@ -946,8 +963,4 @@ class AgentIntegration:
 
     async def _shutdown_transaction(self) -> None:
         await self._settle_reply_work()
-        await self._close_mcp_clients()
-        self._agent = None
-        self._toolkit = None
-        self._mcp_clients = []
-        self._initialized = False
+        await self._close_published_mcp_clients()

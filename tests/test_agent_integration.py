@@ -80,6 +80,14 @@ class _GatedConnectClient(_LifecycleClient):
         self.close_finished.set()
 
 
+class _CleanupAbort(BaseException):
+    pass
+
+
+class _SelectionAbort(BaseException):
+    pass
+
+
 async def _current_loop():
     return asyncio.get_running_loop()
 
@@ -736,6 +744,96 @@ def test_cancelled_initialize_future_closes_connected_local_client(
     assert agent._mcp_clients == []
 
 
+def test_initialize_old_published_fatal_close_drains_and_exposes_empty_state(
+    agent,
+    monkeypatch,
+):
+    first = _LifecycleClient(
+        "first",
+        stateful=True,
+        events=[],
+        close_error=asyncio.CancelledError(),
+    )
+    later = _LifecycleClient("later", stateful=True, events=[])
+    agent._agent = object()
+    agent._toolkit = object()
+    agent._mcp_clients = [first, later]
+    agent._initialized = True
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+
+    assert first.close_calls == 1
+    assert later.close_calls == 1
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+    assert agent._initialized is False
+
+
+def test_local_cleanup_fatal_close_drains_all_and_preserves_construct_error(
+    agent,
+    monkeypatch,
+):
+    first = _LifecycleClient(
+        "first",
+        stateful=True,
+        events=[],
+        close_error=_CleanupAbort("cleanup abort"),
+    )
+    later = _LifecycleClient("later", stateful=True, events=[])
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        AsyncMock(return_value=[first, later]),
+    )
+    _configure_successful_initialize(
+        agent,
+        monkeypatch,
+        toolkit_factory=Mock(side_effect=RuntimeError("construct boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="construct boom"):
+        agent._async_runtime.run(
+            agent._initialize_impl(
+                provider="openai",
+                model_name="model",
+                base_url="https://example.test/v1",
+                api_key="secret",
+            ),
+        )
+
+    assert first.close_calls == 1
+    assert later.close_calls == 1
+
+
+def test_connect_error_is_not_replaced_by_cleanup_fatal(agent, monkeypatch):
+    client = _LifecycleClient(
+        "broken",
+        stateful=True,
+        events=[],
+        connect_error=RuntimeError("connect boom"),
+        close_error=_CleanupAbort("cleanup abort"),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(return_value=[{"name": "broken", "enabled": True}]),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(return_value=client),
+    )
+    error = Mock()
+    monkeypatch.setattr(agent_integration._logger, "error", error)
+
+    assert agent._async_runtime.run(agent._connect_mcp_clients()) == []
+    assert client.close_calls == 1
+    assert "connect boom" in str(error.call_args.args[0])
+
+
 @pytest.mark.parametrize("competing_lifecycle", ["reset", "shutdown"])
 def test_initialize_transaction_serializes_with_reset_or_shutdown(
     agent,
@@ -777,6 +875,59 @@ def test_initialize_transaction_serializes_with_reset_or_shutdown(
     assert agent._toolkit is None
     assert agent._mcp_clients == []
     assert agent._async_runtime.is_running is (competing_lifecycle == "reset")
+
+
+def test_reset_first_serializes_history_clear_before_initialize_state(
+    agent,
+    monkeypatch,
+):
+    agent._history.add_message(
+        msg=UserMsg(name="User", content="must be cleared before initialize"),
+    )
+    _configure_successful_initialize(agent, monkeypatch)
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        AsyncMock(return_value=[]),
+    )
+    constructed_agent = SimpleNamespace(state=None)
+    agent_factory = Mock(return_value=constructed_agent)
+    monkeypatch.setattr(agent_integration, "Agent", agent_factory)
+    reset_at_tail = threading.Event()
+    release_reset = threading.Event()
+    original_reset_transaction = agent._reset_transaction
+
+    async def gated_reset_transaction():
+        await original_reset_transaction()
+        reset_at_tail.set()
+        while not release_reset.is_set():
+            await asyncio.sleep(0.001)
+
+    monkeypatch.setattr(agent, "_reset_transaction", gated_reset_transaction)
+    reset_thread = threading.Thread(target=agent.reset)
+    initialize_result = []
+    initialize_thread = threading.Thread(
+        target=lambda: initialize_result.append(
+            agent.initialize("openai", "model", "https://example.test/v1")
+        ),
+    )
+
+    reset_thread.start()
+    assert reset_at_tail.wait(timeout=1)
+    initialize_thread.start()
+    time.sleep(0.05)
+    initialize_waited_for_reset = initialize_thread.is_alive()
+    release_reset.set()
+    reset_thread.join(timeout=2)
+    initialize_thread.join(timeout=2)
+
+    assert initialize_waited_for_reset is True
+    assert not reset_thread.is_alive()
+    assert not initialize_thread.is_alive()
+    assert initialize_result == [True]
+    published_state = agent_factory.call_args.kwargs["state"]
+    assert published_state.context == []
+    assert agent._history.get_messages() == []
 
 
 @pytest.mark.parametrize(
@@ -837,6 +988,32 @@ def test_reset_failure_preserves_history_and_published_state(agent, monkeypatch)
     assert agent._agent is original_agent
     assert agent._toolkit is original_toolkit
     assert agent._initialized is True
+
+
+def test_reset_published_fatal_close_drains_to_empty_but_preserves_history(agent):
+    first = _LifecycleClient(
+        "first",
+        stateful=True,
+        events=[],
+        close_error=asyncio.CancelledError(),
+    )
+    later = _LifecycleClient("later", stateful=True, events=[])
+    agent._agent = object()
+    agent._toolkit = object()
+    agent._mcp_clients = [first, later]
+    agent._initialized = True
+    agent._history.add_message("user", "preserve until cleanup succeeds")
+
+    with pytest.raises(concurrent.futures.CancelledError):
+        agent.reset()
+
+    assert first.close_calls == 1
+    assert later.close_calls == 1
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+    assert agent._initialized is False
+    assert len(agent.get_history()) == 1
 
 
 def test_stable_core_imports_keep_agentscope_available(monkeypatch):
@@ -947,6 +1124,47 @@ def test_switch_session_false_after_partial_history_mutation_restores_snapshot(a
     agent._history = history
 
     assert agent.switch_session("broken-session") is False
+    assert history._session_id == "old-session"
+    assert history._is_new_session is False
+    assert history._messages == previous_messages
+    assert agent._agent.state is previous_state
+
+
+@pytest.mark.parametrize(
+    "selection_error",
+    [RuntimeError("selection failed"), _SelectionAbort("selection aborted")],
+)
+def test_switch_session_raise_after_partial_mutation_restores_snapshot(
+    agent,
+    selection_error,
+):
+    previous_messages = [AssistantMsg(name="Assistant", content="previous")]
+    previous_state = AgentState(context=previous_messages)
+    agent._agent = SimpleNamespace(state=previous_state)
+    agent._history_repository = object()
+
+    class RaisingHistory:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._session_id = "old-session"
+            self._is_new_session = False
+            self._messages = list(previous_messages)
+
+        def set_session(self, session_id):
+            self._session_id = session_id
+            self._is_new_session = True
+            self._messages = [UserMsg(name="User", content="partial")]
+            raise selection_error
+
+    history = RaisingHistory()
+    agent._history = history
+
+    if isinstance(selection_error, Exception):
+        assert agent.switch_session("broken-session") is False
+    else:
+        with pytest.raises(_SelectionAbort, match="selection aborted"):
+            agent.switch_session("broken-session")
+
     assert history._session_id == "old-session"
     assert history._is_new_session is False
     assert history._messages == previous_messages
