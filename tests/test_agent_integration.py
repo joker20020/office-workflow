@@ -3,7 +3,10 @@
 
 import asyncio
 import builtins
+import concurrent.futures
 import importlib.util
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
@@ -55,6 +58,26 @@ class _LifecycleClient:
 
     async def operate(self, operation):
         self._record_loop(operation)
+
+
+class _GatedConnectClient(_LifecycleClient):
+    def __init__(self, name, *, events):
+        super().__init__(name, stateful=True, events=events)
+        self.connect_started = threading.Event()
+        self.release_connect = threading.Event()
+        self.close_finished = threading.Event()
+
+    async def connect(self):
+        self._record_loop("connect")
+        self.connect_calls += 1
+        self.events.append(f"connect:{self.name}")
+        self.connect_started.set()
+        while not self.release_connect.is_set():
+            await asyncio.sleep(0.001)
+
+    async def close(self):
+        await super().close()
+        self.close_finished.set()
 
 
 async def _current_loop():
@@ -311,7 +334,10 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
         "_build_registry_function_tools",
         Mock(return_value=wrapped_tools),
     )
-    prepared_clients = [object(), object()]
+    prepared_clients = [
+        SimpleNamespace(is_stateful=False),
+        SimpleNamespace(is_stateful=False),
+    ]
     monkeypatch.setattr(
         agent,
         "_connect_mcp_clients",
@@ -668,6 +694,151 @@ def test_sync_and_async_chat_share_stateful_mcp_runtime_loop(agent, monkeypatch)
     assert all(closed is False for _, _, closed in client.loop_observations)
 
 
+def _configure_gated_runtime_initialize(agent, monkeypatch, client):
+    _configure_successful_initialize(agent, monkeypatch)
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(return_value=[{"name": client.name, "enabled": True}]),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(return_value=client),
+    )
+
+
+def test_cancelled_initialize_future_closes_connected_local_client(
+    agent,
+    monkeypatch,
+):
+    client = _GatedConnectClient("gated", events=[])
+    _configure_gated_runtime_initialize(agent, monkeypatch, client)
+    future = agent._async_runtime.submit(
+        agent._initialize_impl(
+            provider="openai",
+            model_name="model",
+            base_url="https://example.test/v1",
+            api_key="secret",
+        ),
+    )
+    assert client.connect_started.wait(timeout=1)
+
+    assert future.cancel() is True
+    with pytest.raises(concurrent.futures.CancelledError):
+        future.result(timeout=1)
+
+    assert client.close_finished.wait(timeout=1)
+    assert client.close_calls == 1
+    assert agent._initialized is False
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+
+
+@pytest.mark.parametrize("competing_lifecycle", ["reset", "shutdown"])
+def test_initialize_transaction_serializes_with_reset_or_shutdown(
+    agent,
+    monkeypatch,
+    competing_lifecycle,
+):
+    client = _GatedConnectClient("gated", events=[])
+    _configure_gated_runtime_initialize(agent, monkeypatch, client)
+    initialize_result = []
+    initialize_thread = threading.Thread(
+        target=lambda: initialize_result.append(
+            agent.initialize("openai", "model", "https://example.test/v1")
+        ),
+    )
+    lifecycle_done = threading.Event()
+    lifecycle_thread = threading.Thread(
+        target=lambda: (
+            getattr(agent, competing_lifecycle)(),
+            lifecycle_done.set(),
+        ),
+    )
+
+    initialize_thread.start()
+    assert client.connect_started.wait(timeout=1)
+    lifecycle_thread.start()
+    time.sleep(0.05)
+    completed_before_initialize_released = lifecycle_done.is_set()
+    client.release_connect.set()
+    initialize_thread.join(timeout=2)
+    lifecycle_thread.join(timeout=2)
+
+    assert completed_before_initialize_released is False
+    assert not initialize_thread.is_alive()
+    assert not lifecycle_thread.is_alive()
+    assert initialize_result == [True]
+    assert client.close_calls == 1
+    assert agent._initialized is False
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+    assert agent._async_runtime.is_running is (competing_lifecycle == "reset")
+
+
+@pytest.mark.parametrize(
+    "lifecycle_method",
+    ["initialize", "reset", "switch_session", "shutdown"],
+)
+def test_sync_lifecycle_reentry_from_runtime_thread_raises_without_mutation(
+    agent,
+    monkeypatch,
+    lifecycle_method,
+):
+    client = _LifecycleClient("owned", stateful=True, events=[])
+    original_agent = object()
+    original_toolkit = object()
+    agent._agent = original_agent
+    agent._toolkit = original_toolkit
+    agent._mcp_clients = [client]
+    agent._initialized = True
+    agent._history_repository = object()
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+
+    async def invoke():
+        if lifecycle_method == "initialize":
+            return agent.initialize("openai", "model", "https://example.test/v1")
+        if lifecycle_method == "switch_session":
+            return agent.switch_session("selected")
+        return getattr(agent, lifecycle_method)()
+
+    with pytest.raises(RuntimeError, match="runtime thread"):
+        agent._async_runtime.run(invoke())
+
+    assert agent._agent is original_agent
+    assert agent._toolkit is original_toolkit
+    assert agent._mcp_clients == [client]
+    assert agent._initialized is True
+    assert client.close_calls == 0
+    assert agent._async_runtime.is_running is True
+
+
+def test_reset_failure_preserves_history_and_published_state(agent, monkeypatch):
+    original_agent = object()
+    original_toolkit = object()
+    agent._agent = original_agent
+    agent._toolkit = original_toolkit
+    agent._initialized = True
+    agent._history.add_message("user", "preserve me")
+
+    async def fail_reset():
+        raise RuntimeError("reset failed")
+
+    monkeypatch.setattr(agent, "_reset_impl", fail_reset)
+
+    with pytest.raises(RuntimeError, match="reset failed"):
+        agent.reset()
+
+    assert len(agent.get_history()) == 1
+    assert agent._agent is original_agent
+    assert agent._toolkit is original_toolkit
+    assert agent._initialized is True
+
+
 def test_stable_core_imports_keep_agentscope_available(monkeypatch):
     module_path = agent_integration.__file__
     spec = importlib.util.spec_from_file_location(
@@ -746,6 +917,42 @@ def test_switch_session_failure_leaves_state_unchanged(agent, monkeypatch):
     assert agent._agent.state is previous_state
 
 
+def test_switch_session_false_after_partial_history_mutation_restores_snapshot(agent):
+    previous_messages = [AssistantMsg(name="Assistant", content="previous")]
+    previous_state = AgentState(context=previous_messages)
+    agent._agent = SimpleNamespace(state=previous_state)
+    agent._history_repository = object()
+
+    class PartialFailureHistory:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._session_id = "old-session"
+            self._is_new_session = False
+            self._messages = list(previous_messages)
+
+        @property
+        def session_id(self):
+            return self._session_id
+
+        def get_messages(self):
+            return list(self._messages)
+
+        def set_session(self, session_id):
+            self._session_id = session_id
+            self._is_new_session = False
+            self._messages = [UserMsg(name="User", content="partially loaded")]
+            return False
+
+    history = PartialFailureHistory()
+    agent._history = history
+
+    assert agent.switch_session("broken-session") is False
+    assert history._session_id == "old-session"
+    assert history._is_new_session is False
+    assert history._messages == previous_messages
+    assert agent._agent.state is previous_state
+
+
 def test_switch_session_state_publication_failure_rolls_back_empty_selection(
     agent,
     monkeypatch,
@@ -778,10 +985,16 @@ def test_switch_session_state_publication_failure_rolls_back_empty_selection(
 
     history = SwitchingHistory()
     agent._history = history
+    async def partially_publish_then_fail():
+        agent._agent.state = AgentState(
+            context=[UserMsg(name="User", content="incorrect new state")],
+        )
+        raise RuntimeError("publish failed")
+
     monkeypatch.setattr(
         agent,
-        "_sync_history_to_memory",
-        Mock(side_effect=RuntimeError("publish failed")),
+        "_sync_history_to_memory_impl",
+        partially_publish_then_fail,
     )
 
     assert agent.switch_session("selected-session") is False

@@ -143,6 +143,7 @@ class AgentIntegration:
         self._model_name: str = ""
         self._base_url: str = ""
         self._async_runtime = AgentAsyncRuntime()
+        self._lifecycle_lock: Optional[asyncio.Lock] = None
         self._current_loop: Optional[asyncio.AbstractEventLoop] = None
         self._active_reply_task: Optional[asyncio.Task[Any]] = None
         self._active_reply_cancel_requests: set[asyncio.Task[Any]] = set()
@@ -350,9 +351,24 @@ class AgentIntegration:
             )
         raise ValueError(f"unsupported provider: {provider}")
 
+    def _reject_sync_lifecycle_reentry(self, method_name: str) -> None:
+        runtime = getattr(self, "_async_runtime", None)
+        if runtime is not None and runtime.in_runtime_thread():
+            raise RuntimeError(
+                f"{method_name} cannot be called synchronously from the runtime thread"
+            )
+
+    def _get_lifecycle_lock(self) -> asyncio.Lock:
+        lock = getattr(self, "_lifecycle_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._lifecycle_lock = lock
+        return lock
+
     def initialize(
         self, provider: str = "dashscope", model_name: str = "", base_url: str = ""
     ) -> bool:
+        self._reject_sync_lifecycle_reentry("initialize")
         _logger.info("=" * 50)
         _logger.info(
             f"开始初始化Agent: provider={provider}, model_name={model_name}, base_url={base_url}"
@@ -400,6 +416,22 @@ class AgentIntegration:
         base_url: str,
         api_key: str,
     ) -> bool:
+        async with self._get_lifecycle_lock():
+            return await self._initialize_transaction(
+                provider=provider,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+            )
+
+    async def _initialize_transaction(
+        self,
+        *,
+        provider: str,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+    ) -> bool:
         await self._settle_reply_work()
         await self._close_mcp_clients()
         self._agent = None
@@ -440,8 +472,8 @@ class AgentIntegration:
                 state=state,
                 react_config=react_config,
             )
-        except Exception:
-            await self._close_mcp_clients(local_clients)
+        except BaseException:
+            await self._close_mcp_clients_cancellation_safe(local_clients)
             self._agent = None
             self._toolkit = None
             self._mcp_clients = []
@@ -507,15 +539,32 @@ class AgentIntegration:
                         await client.connect()
                     clients.append(client)
                     _logger.info(f"MCP客户端已准备: {server_name}")
-                except Exception as error:
+                except BaseException as error:
                     client_name = getattr(client, "name", server_name)
+                    if not isinstance(error, Exception):
+                        if client is not None and client.is_stateful is True:
+                            await self._close_mcp_clients_cancellation_safe([client])
+                        raise
                     _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
                     if client is not None and client.is_stateful is True:
                         await self._close_mcp_clients([client])
             return clients
-        except Exception:
-            await self._close_mcp_clients(clients)
+        except BaseException:
+            await self._close_mcp_clients_cancellation_safe(clients)
             raise
+
+    async def _close_mcp_clients_cancellation_safe(
+        self,
+        clients: list[MCPClient],
+    ) -> None:
+        cleanup_task = asyncio.create_task(self._close_mcp_clients(clients))
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                continue
+        if not cleanup_task.cancelled():
+            cleanup_task.result()
 
     async def _close_mcp_clients(
         self,
@@ -579,9 +628,6 @@ class AgentIntegration:
             return await runtime.run_async(
                 self._chat_impl(message, timeout_as_request_timeout=False),
             )
-        except asyncio.CancelledError:
-            self._last_response_interrupted = True
-            return ""
         except Exception as error:
             _logger.error(f"[异步] Agent对话失败: {error}", exc_info=True)
             return f"错误: {error}"
@@ -722,19 +768,17 @@ class AgentIntegration:
         )
 
     def reset(self) -> None:
+        self._reject_sync_lifecycle_reentry("reset")
         _logger.info("重置Agent...")
-        try:
-            self._async_runtime.run(self._reset_impl())
-        except Exception as error:
-            _logger.warning(f"重置Agent运行时失败: {error}")
-            self._agent = None
-            self._toolkit = None
-            self._mcp_clients = []
-            self._initialized = False
+        self._async_runtime.run(self._reset_impl())
         self._history.clear()
         _logger.info("Agent已重置")
 
     async def _reset_impl(self) -> None:
+        async with self._get_lifecycle_lock():
+            await self._reset_transaction()
+
+    async def _reset_transaction(self) -> None:
         await self._settle_reply_work()
         await self._close_mcp_clients()
         self._agent = None
@@ -782,28 +826,55 @@ class AgentIntegration:
         return session_id
 
     def switch_session(self, session_id: str) -> bool:
+        self._reject_sync_lifecycle_reentry("switch_session")
         if not self._history_repository:
             _logger.warning("未启用数据库持久化，无法切换会会")
             return False
 
-        previous_session_id = self._history.session_id
-        previous_messages = self._history.get_messages()
-        success = self._history.set_session(session_id)
-        if success:
+        try:
+            return self._async_runtime.run(self._switch_session_impl(session_id))
+        except Exception as error:
+            _logger.error(f"切换会话失败: {error}")
+            return False
+
+    def _snapshot_history_selection(self) -> tuple[Optional[str], bool, list[Any]]:
+        with self._history._lock:
+            return (
+                self._history._session_id,
+                self._history._is_new_session,
+                list(self._history._messages),
+            )
+
+    def _restore_history_selection(
+        self,
+        snapshot: tuple[Optional[str], bool, list[Any]],
+    ) -> None:
+        session_id, is_new_session, messages = snapshot
+        with self._history._lock:
+            self._history._session_id = session_id
+            self._history._is_new_session = is_new_session
+            self._history._messages = list(messages)
+
+    async def _switch_session_impl(self, session_id: str) -> bool:
+        async with self._get_lifecycle_lock():
+            history_snapshot = self._snapshot_history_selection()
+            previous_agent_state = getattr(self._agent, "state", None)
+            success = self._history.set_session(session_id)
+            if not success:
+                self._restore_history_selection(history_snapshot)
+                return False
             try:
-                self._sync_history_to_memory()
-            except Exception as error:
-                if previous_session_id is not None:
-                    self._history.set_session(previous_session_id)
-                else:
-                    with self._history._lock:
-                        self._history._session_id = None
-                        self._history._is_new_session = True
-                        self._history._messages = list(previous_messages)
+                await self._sync_history_to_memory_impl()
+            except BaseException as error:
+                self._restore_history_selection(history_snapshot)
+                if self._agent is not None and hasattr(self._agent, "state"):
+                    self._agent.state = previous_agent_state
+                if not isinstance(error, Exception):
+                    raise
                 _logger.error(f"切换会话状态发布失败: {error}")
                 return False
             _logger.info(f"切换到会话: {session_id}")
-        return success
+            return True
 
     def _sync_history_to_memory(self) -> None:
         self._async_runtime.run(self._sync_history_to_memory_impl())
@@ -860,19 +931,20 @@ class AgentIntegration:
         self._skill_manager = manager
 
     def shutdown(self) -> None:
+        self._reject_sync_lifecycle_reentry("shutdown")
         _logger.info("关闭Agent...")
-        try:
-            self._async_runtime.stop(cleanup_awaitable=self._shutdown_impl())
-        except Exception as error:
-            _logger.warning(f"关闭Agent运行时失败: {error}")
-        finally:
-            self._agent = None
-            self._toolkit = None
-            self._mcp_clients = []
-            self._initialized = False
+        self._async_runtime.stop(cleanup_awaitable=self._shutdown_impl())
+        self._agent = None
+        self._toolkit = None
+        self._mcp_clients = []
+        self._initialized = False
         _logger.info("Agent已关闭")
 
     async def _shutdown_impl(self) -> None:
+        async with self._get_lifecycle_lock():
+            await self._shutdown_transaction()
+
+    async def _shutdown_transaction(self) -> None:
         await self._settle_reply_work()
         await self._close_mcp_clients()
         self._agent = None

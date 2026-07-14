@@ -327,6 +327,41 @@ def test_failed_parked_cleanup_releases_reservation_and_allows_retry() -> None:
     assert integration._parked_reply_id is None
 
 
+class _CancelThenSucceedParkedAgent(_ParkedSyncAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_cleanup_started = threading.Event()
+
+    async def reply(self, *, inputs: UserInterruptEvent) -> AssistantMsg:
+        self.reply_count += 1
+        self.reply_loops.append(asyncio.get_running_loop())
+        if self.reply_count == 1:
+            self.first_cleanup_started.set()
+            await asyncio.Event().wait()
+        self.interrupt_input = inputs
+        return AssistantMsg(name="Assistant", content=[], id=inputs.reply_id)
+
+
+def test_independently_cancelled_parked_cleanup_releases_and_allows_retry() -> None:
+    integration = _chat_integration([])
+    integration._agent = _CancelThenSucceedParkedAgent()
+    integration.chat("question")
+    assert integration.interrupt("first") is True
+    assert integration._agent.first_cleanup_started.wait(timeout=1)
+    with integration._reply_ownership_lock:
+        first_cleanup = integration._parked_cleanup_future
+    assert first_cleanup is not None
+
+    assert first_cleanup.cancel() is True
+    assert _wait_until(lambda: integration._parked_cleanup_future is None)
+    assert integration._parked_reply_id == "sync-parked"
+
+    assert integration.interrupt("retry") is True
+    assert _wait_until(lambda: integration._parked_cleanup_future is None)
+    assert integration._agent.reply_count == 2
+    assert integration._parked_reply_id is None
+
+
 class _BlockingParkedAgent(_ParkedSyncAgent):
     def __init__(self) -> None:
         super().__init__()
@@ -438,6 +473,50 @@ def test_interrupt_without_active_or_parked_work_returns_false() -> None:
     assert integration.interrupt() is False
 
 
+@pytest.mark.parametrize("lifecycle_method", ["reset", "shutdown"])
+def test_runtime_callback_rejects_sync_lifecycle_without_losing_state(
+    lifecycle_method: str,
+) -> None:
+    integration = _chat_integration(_reply_events())
+    original_agent = integration._agent
+    original_toolkit = object()
+    integration._toolkit = original_toolkit
+
+    class StatefulClient:
+        name = "owned"
+        is_stateful = True
+
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    client = StatefulClient()
+    integration._mcp_clients = [client]
+    errors: list[RuntimeError] = []
+
+    def reenter_lifecycle(agent: Any, kwargs: dict, event: Any) -> None:
+        if errors:
+            return
+        try:
+            getattr(integration, lifecycle_method)()
+        except RuntimeError as error:
+            errors.append(error)
+
+    integration.register_streaming_callback(reenter_lifecycle)
+
+    assert integration.chat("question") == "Hello world"
+    assert len(errors) == 1
+    assert "runtime thread" in str(errors[0]).lower()
+    assert integration._initialized is True
+    assert integration._agent is original_agent
+    assert integration._toolkit is original_toolkit
+    assert integration._mcp_clients == [client]
+    assert client.close_calls == 0
+    assert integration._async_runtime.is_running is True
+
+
 def test_chat_persists_one_user_and_one_reconstructed_assistant_message() -> None:
     integration = _chat_integration(_reply_events())
 
@@ -486,6 +565,34 @@ async def test_interrupted_chat_async_persists_partial_text_without_generic_erro
     assert integration._history.add_message.call_count == 2
     partial_reply = integration._history.add_message.call_args_list[1].kwargs["msg"]
     assert partial_reply.get_text_content() == "Hello world"
+
+
+class _CallerCancellationAgent:
+    def __init__(self) -> None:
+        self.state = SimpleNamespace(reply_id="caller-cancel")
+        self.started = threading.Event()
+
+    async def reply_stream(self, *, inputs: Msg) -> AsyncGenerator[AgentEvent, None]:
+        yield ReplyStartEvent(
+            session_id="session-1",
+            reply_id="caller-cancel",
+            name="Assistant",
+        )
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_chat_async_propagates_caller_cancellation() -> None:
+    integration = _chat_integration([])
+    integration._agent = _CallerCancellationAgent()
+    chat_task = asyncio.create_task(integration.chat_async("question"))
+    assert await asyncio.to_thread(integration._agent.started.wait, 1)
+
+    chat_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await chat_task
 
 
 class _OwnershipStreamingAgent(_FakeStreamingAgent):
