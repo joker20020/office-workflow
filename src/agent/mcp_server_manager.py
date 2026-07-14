@@ -12,6 +12,13 @@ import threading
 import json
 from typing import Optional, List
 
+try:
+    from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
+except ImportError:
+    HttpMCPConfig = None
+    MCPClient = None
+    StdioMCPConfig = None
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -261,6 +268,42 @@ class McpServerManager:
                 "transport": server.get("transport", "streamable_http"),
                 "url": server["url"],
             }
+
+    def create_agentscope_client(self, name: str) -> "MCPClient | None":
+        """Build an AgentScope 2 MCP client without connecting it."""
+        server = self.get_server(name)
+        if not server:
+            return None
+
+        if MCPClient is None:
+            _logger.warning("AgentScope MCP integration is unavailable")
+            return None
+
+        timeout = float(server.get("timeout", 30))
+        if server["server_type"] == "stdio":
+            config = StdioMCPConfig(
+                command=server["command"],
+                args=server.get("args") or [],
+                env=server.get("env") or {},
+                cwd=server.get("cwd"),
+            )
+            is_stateful = True
+        else:
+            config = HttpMCPConfig(
+                url=server["url"],
+                headers=server.get("headers"),
+                timeout=timeout,
+            )
+            is_stateful = False
+
+        return MCPClient(
+            name=server["name"],
+            is_stateful=is_stateful,
+            mcp_config=config,
+            enable_tools=server.get("enable_tools"),
+            disable_tools=server.get("disable_tools"),
+            execution_timeout=timeout,
+        )
 
 
 # Singleton pattern implementation

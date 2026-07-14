@@ -9,10 +9,12 @@ from unittest.mock import Mock
 import pytest
 
 from agentscope.message import AssistantMsg, SystemMsg, UserMsg
+from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
 from agentscope.state import AgentState
 from agentscope.tool import FunctionTool
 
 import src.agent.agent_integration as agent_integration
+import src.agent.mcp_server_manager as mcp_server_manager
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.skill_manager import SkillManager
@@ -476,6 +478,168 @@ class TestMcpServerManager:
         assert config["name"] == "test_http"
         assert config["url"] == "http://localhost:8080/mcp"
         assert config["transport"] == "sse"
+
+    def test_create_agentscope_mcp_client_for_stdio_preserves_config(
+        self,
+        mcp_manager,
+        monkeypatch,
+    ):
+        mcp_manager.add_stdio_server(
+            "test_stdio",
+            "python",
+            ["-m", "server"],
+            {"DEBUG": "1"},
+            61,
+        )
+        stdio_config_factory = Mock(wraps=StdioMCPConfig)
+        client_factory = Mock(wraps=MCPClient)
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "StdioMCPConfig",
+            stdio_config_factory,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "MCPClient",
+            client_factory,
+            raising=False,
+        )
+
+        client = mcp_manager.create_agentscope_client("test_stdio")
+
+        stdio_config_factory.assert_called_once_with(
+            command="python",
+            args=["-m", "server"],
+            env={"DEBUG": "1"},
+            cwd=None,
+        )
+        config = client.mcp_config
+        client_factory.assert_called_once_with(
+            name="test_stdio",
+            is_stateful=True,
+            mcp_config=config,
+            enable_tools=None,
+            disable_tools=None,
+            execution_timeout=61.0,
+        )
+        assert isinstance(client, MCPClient)
+        assert client.mcp_config.args == ["-m", "server"]
+        assert client.mcp_config.env == {"DEBUG": "1"}
+        assert client.is_stateful is True
+        assert client.execution_timeout == 61.0
+
+    def test_create_agentscope_mcp_client_for_http_omits_legacy_transport(
+        self,
+        mcp_manager,
+        monkeypatch,
+    ):
+        server = {
+            "name": "test_http",
+            "server_type": "http",
+            "url": "https://example.test/mcp",
+            "headers": {"Authorization": "Bearer secret"},
+            "transport": "sse",
+            "timeout": 47,
+            "enable_tools": ["search"],
+            "disable_tools": ["delete"],
+        }
+        monkeypatch.setattr(mcp_manager, "get_server", Mock(return_value=server))
+        http_config_factory = Mock(wraps=HttpMCPConfig)
+        client_factory = Mock(wraps=MCPClient)
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "HttpMCPConfig",
+            http_config_factory,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "MCPClient",
+            client_factory,
+            raising=False,
+        )
+
+        client = mcp_manager.create_agentscope_client("test_http")
+
+        http_config_factory.assert_called_once_with(
+            url="https://example.test/mcp",
+            headers={"Authorization": "Bearer secret"},
+            timeout=47.0,
+        )
+        config = client.mcp_config
+        client_factory.assert_called_once_with(
+            name="test_http",
+            is_stateful=False,
+            mcp_config=config,
+            enable_tools=["search"],
+            disable_tools=["delete"],
+            execution_timeout=47.0,
+        )
+        assert isinstance(client, MCPClient)
+        assert client.mcp_config.headers == {"Authorization": "Bearer secret"}
+        assert client.is_stateful is False
+        assert client.execution_timeout == 47.0
+
+    def test_create_agentscope_mcp_client_missing_server_constructs_nothing(
+        self,
+        mcp_manager,
+        monkeypatch,
+    ):
+        config_factory = Mock()
+        client_factory = Mock()
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "StdioMCPConfig",
+            config_factory,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "HttpMCPConfig",
+            config_factory,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_server_manager,
+            "MCPClient",
+            client_factory,
+            raising=False,
+        )
+
+        assert mcp_manager.create_agentscope_client("missing") is None
+        config_factory.assert_not_called()
+        client_factory.assert_not_called()
+
+    def test_create_agentscope_mcp_client_without_agentscope_returns_none(
+        self,
+        db,
+        monkeypatch,
+    ):
+        module_path = mcp_server_manager.__file__
+        spec = importlib.util.spec_from_file_location(
+            "isolated_mcp_server_manager_without_agentscope",
+            module_path,
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        isolated_module = importlib.util.module_from_spec(spec)
+        real_import = builtins.__import__
+
+        def controlled_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "agentscope.mcp":
+                raise ImportError("simulated missing AgentScope MCP")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with monkeypatch.context() as import_patch:
+            import_patch.setattr(builtins, "__import__", controlled_import)
+            spec.loader.exec_module(isolated_module)
+
+        manager = isolated_module.McpServerManager(db)
+        manager.add_http_server("test_http", "https://example.test/mcp")
+
+        assert isolated_module.MCPClient is None
+        assert manager.create_agentscope_client("test_http") is None
 
 
 class TestHistorySyncPreservation:
