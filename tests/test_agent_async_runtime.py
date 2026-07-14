@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import gc
 import threading
 import time
 import warnings
@@ -211,6 +212,54 @@ def test_cleanup_exception_still_fully_stops_runtime() -> None:
     assert not any(thread.name == "cleanup-error-runtime" for thread in threading.enumerate())
 
 
+def test_cleanup_error_is_raised_only_after_delayed_drain_and_loop_close() -> None:
+    runtime = AgentAsyncRuntime(thread_name="delayed-cleanup-error-runtime")
+    loop, _, _ = runtime.run(_execution_context())
+    task_started = threading.Event()
+    cancellation_started = threading.Event()
+    allow_drain = threading.Event()
+    drain_finished = threading.Event()
+
+    async def slow_to_cancel() -> None:
+        task_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancellation_started.set()
+            while not allow_drain.is_set():
+                await asyncio.sleep(0.005)
+            drain_finished.set()
+
+    async def spawn() -> None:
+        asyncio.create_task(slow_to_cancel())
+
+    async def cleanup() -> None:
+        raise LookupError("cleanup failed before delayed drain")
+
+    runtime.run(spawn())
+    assert task_started.wait(timeout=5)
+    release = threading.Timer(0.15, allow_drain.set)
+    release.start()
+    try:
+        with pytest.raises(LookupError, match="cleanup failed before delayed drain"):
+            runtime.stop(cleanup(), timeout=0.01)
+
+        assert cancellation_started.is_set()
+        assert drain_finished.is_set()
+        assert loop.is_closed()
+        assert not runtime.is_running
+        assert not any(
+            thread.name == "delayed-cleanup-error-runtime"
+            for thread in threading.enumerate()
+        )
+    finally:
+        allow_drain.set()
+        release.cancel()
+        deadline = time.monotonic() + 5
+        while not loop.is_closed() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+
 def test_cleanup_scheduling_error_still_fully_stops_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -305,47 +354,125 @@ def test_start_submit_run_and_external_run_async_fail_after_stop() -> None:
         assert not [item for item in caught if "was never awaited" in str(item.message)]
 
 
+def test_stale_runtime_thread_ident_does_not_bypass_one_shot_rejection() -> None:
+    runtime = AgentAsyncRuntime()
+    _, _, stopped_ident = runtime.run(_execution_context())
+    runtime.stop()
+    owned_thread = runtime._thread
+    assert owned_thread is not None
+
+    ready = threading.Event()
+    proceed = threading.Event()
+    child_ident: list[int] = []
+    outcomes: list[tuple[str, Any]] = []
+
+    def use_stopped_runtime() -> None:
+        child_ident.append(threading.get_ident())
+        ready.set()
+        proceed.wait(timeout=5)
+        try:
+            runtime.stop()
+            outcomes.append(("stop", "returned"))
+        except BaseException as exc:
+            outcomes.append(("stop", exc))
+
+        async def run_after_stop() -> None:
+            with pytest.raises(RuntimeError, match="stopped"):
+                await runtime.run_async(asyncio.sleep(0))
+
+        try:
+            asyncio.run(run_after_stop())
+            outcomes.append(("run_async", "rejected"))
+        except BaseException as exc:
+            outcomes.append(("run_async", exc))
+
+    worker = threading.Thread(target=use_stopped_runtime)
+    worker.start()
+    assert ready.wait(timeout=5)
+    original_ident = owned_thread._ident
+    assert original_ident == stopped_ident
+    owned_thread._ident = child_ident[0]
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            proceed.set()
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+            assert outcomes == [("stop", "returned"), ("run_async", "rejected")]
+            assert not [item for item in caught if "was never awaited" in str(item.message)]
+    finally:
+        owned_thread._ident = original_ident
+
+
 def test_submit_stop_race_has_explicit_outcomes_and_no_coroutine_warnings() -> None:
     runtime = AgentAsyncRuntime(thread_name="submit-stop-race-runtime")
-    runtime.start()
-    barrier = threading.Barrier(2)
+    task_started = threading.Event()
+    cancellation_started = threading.Event()
+    allow_drain = threading.Event()
+    submission_started = threading.Event()
     outcomes: list[tuple[str, Any]] = []
+    stop_errors: list[BaseException] = []
+
+    async def hold_shutdown_open() -> None:
+        task_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancellation_started.set()
+            while not allow_drain.is_set():
+                await asyncio.sleep(0.005)
+
+    async def spawn_pending_task() -> None:
+        asyncio.create_task(hold_shutdown_open())
+
+    runtime.run(spawn_pending_task())
+    assert task_started.wait(timeout=5)
 
     async def value() -> int:
         return 7
 
-    def submit_many() -> None:
-        barrier.wait()
-        for _ in range(100):
-            coroutine: Coroutine[Any, Any, int] = value()
-            try:
-                future = runtime.submit(coroutine)
-                outcomes.append(("result", future.result(timeout=5)))
-            except (RuntimeError, concurrent.futures.CancelledError) as exc:
-                outcomes.append(("exception", exc))
-                break
+    def stop_runtime() -> None:
+        try:
+            runtime.stop()
+        except BaseException as exc:
+            stop_errors.append(exc)
 
-    worker = threading.Thread(target=submit_many)
+    def submit_during_stop() -> None:
+        coroutine: Coroutine[Any, Any, int] = value()
+        submission_started.set()
+        try:
+            runtime.submit(coroutine)
+            outcomes.append(("unexpected", "accepted"))
+        except BaseException as exc:
+            outcomes.append(("rejected", exc))
+
+    stopper = threading.Thread(target=stop_runtime)
+    submitter = threading.Thread(target=submit_during_stop)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        worker.start()
-        barrier.wait()
-        time.sleep(0.001)
-        runtime.stop()
-        worker.join(timeout=10)
-        assert not worker.is_alive()
-        assert outcomes
-        assert all(
-            outcome == ("result", 7)
-            or (
-                outcome[0] == "exception"
-                and (
-                    isinstance(outcome[1], concurrent.futures.CancelledError)
-                    or "stopped" in str(outcome[1])
-                )
+        stopper.start()
+        cancellation_observed = cancellation_started.wait(timeout=5)
+        if not cancellation_observed:
+            allow_drain.set()
+            stopper.join(timeout=5)
+            pytest.fail(
+                "pending task cancellation was not observed; "
+                f"stop_errors={stop_errors!r}, loop_closed={runtime.is_running is False}"
             )
-            for outcome in outcomes
-        )
+        submitter.start()
+        assert submission_started.wait(timeout=5)
+        allow_drain.set()
+        stopper.join(timeout=10)
+        submitter.join(timeout=10)
+        gc.collect()
+
+        assert not stopper.is_alive()
+        assert not submitter.is_alive()
+        assert stop_errors == []
+        assert len(outcomes) == 1
+        assert outcomes[0][0] == "rejected"
+        assert isinstance(outcomes[0][1], RuntimeError)
+        assert "stopped" in str(outcomes[0][1])
         assert not [item for item in caught if "was never awaited" in str(item.message)]
 
 

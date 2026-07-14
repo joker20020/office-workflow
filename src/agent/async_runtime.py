@@ -104,8 +104,13 @@ class AgentAsyncRuntime:
 
     def in_runtime_thread(self) -> bool:
         """Return whether the caller is the owned runtime thread."""
-        thread = self._thread
-        return thread is not None and thread.ident == threading.get_ident()
+        with self._condition:
+            thread = self._thread
+            return (
+                self._state in {"running", "stopping"}
+                and thread is threading.current_thread()
+                and thread.is_alive()
+            )
 
     @property
     def is_running(self) -> bool:
@@ -193,10 +198,13 @@ class AgentAsyncRuntime:
                 pass
         if thread is not None:
             thread.join(timeout=timeout)
-            if thread.is_alive() and cleanup_error is None:
-                cleanup_error = concurrent.futures.TimeoutError(
-                    "Timed out waiting for the agent async runtime thread to stop"
-                )
+            if thread.is_alive():
+                if cleanup_error is not None:
+                    thread.join()
+                else:
+                    cleanup_error = concurrent.futures.TimeoutError(
+                        "Timed out waiting for the agent async runtime thread to stop"
+                    )
 
         if cleanup_error is not None:
             raise cleanup_error
