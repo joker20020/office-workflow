@@ -4,7 +4,7 @@
 import builtins
 import importlib.util
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -21,6 +21,45 @@ from src.agent.skill_manager import SkillManager
 from src.agent.mcp_server_manager import McpServerManager
 from src.engine.node_engine import NodeEngine
 from src.storage.database import Database
+
+
+class _LifecycleClient:
+    def __init__(self, name, *, stateful, events, connect_error=None, close_error=None):
+        self.name = name
+        self.is_stateful = stateful
+        self.events = events
+        self.connect_error = connect_error
+        self.close_error = close_error
+        self.connect_calls = 0
+        self.close_calls = 0
+
+    async def connect(self):
+        self.connect_calls += 1
+        self.events.append(f"connect:{self.name}")
+        if self.connect_error:
+            raise self.connect_error
+
+    async def close(self):
+        self.close_calls += 1
+        self.events.append(f"close:{self.name}")
+        if self.close_error:
+            raise self.close_error
+
+
+def _configure_successful_initialize(agent, monkeypatch, *, toolkit_factory=None):
+    toolkit_factory = toolkit_factory or Mock(return_value=SimpleNamespace())
+    monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
+    monkeypatch.setattr(
+        agent_integration,
+        "Agent",
+        Mock(return_value=SimpleNamespace(state=None)),
+    )
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
+    return toolkit_factory
 
 
 @pytest.fixture
@@ -254,7 +293,12 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
         "_build_registry_function_tools",
         Mock(return_value=wrapped_tools),
     )
-    monkeypatch.setattr(agent, "_register_mcp_tools", Mock())
+    prepared_clients = [object(), object()]
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        Mock(return_value=prepared_clients),
+    )
     monkeypatch.setattr(agent, "_register_skills", Mock())
     monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
@@ -262,7 +306,8 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
 
     assert agent.initialize("openai", "model", "https://example.test/v1") is True
 
-    toolkit_factory.assert_called_once_with(tools=wrapped_tools)
+    toolkit_factory.assert_called_once_with(tools=wrapped_tools, mcps=prepared_clients)
+    assert agent._mcp_clients is prepared_clients
     toolkit.register_tool_function.assert_not_called()
     kwargs = agent_factory.call_args.kwargs
     assert kwargs["name"] == "WorkflowAssistant"
@@ -273,6 +318,172 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
     assert kwargs["state"].context == history_messages
     assert kwargs["react_config"].max_iters == 50
     assert kwargs["react_config"].interruption_raise_cancelled_error is False
+
+
+def test_connect_mcp_clients_prepares_enabled_clients_in_manager_order(agent, monkeypatch):
+    events = []
+    stateful = _LifecycleClient("stdio", stateful=True, events=events)
+    stateless = _LifecycleClient("http", stateful=False, events=events)
+    factory = Mock(side_effect=lambda name: {"stdio": stateful, "http": stateless}[name])
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(
+            return_value=[
+                {"name": "stdio", "enabled": True},
+                {"name": "disabled", "enabled": False},
+                {"name": "http", "enabled": True},
+            ],
+        ),
+    )
+    monkeypatch.setattr(agent._mcp_manager, "create_agentscope_client", factory)
+
+    clients = agent._connect_mcp_clients()
+
+    assert clients == [stateful, stateless]
+    assert events == ["connect:stdio"]
+    assert factory.call_args_list == [call("stdio"), call("http")]
+
+
+def test_connect_mcp_clients_excludes_named_failures_and_keeps_successes(
+    agent,
+    monkeypatch,
+):
+    events = []
+    first = _LifecycleClient("first", stateful=True, events=events)
+    broken = _LifecycleClient(
+        "broken-connect",
+        stateful=True,
+        events=events,
+        connect_error=RuntimeError("connect boom"),
+    )
+    last = _LifecycleClient("last", stateful=False, events=events)
+
+    def create(name):
+        if name == "factory-error":
+            raise RuntimeError("factory boom")
+        return {
+            "first": first,
+            "missing": None,
+            "broken-connect": broken,
+            "last": last,
+        }[name]
+
+    names = ["first", "missing", "factory-error", "broken-connect", "last"]
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "list_servers",
+        Mock(return_value=[{"name": name, "enabled": True} for name in names]),
+    )
+    monkeypatch.setattr(
+        agent._mcp_manager,
+        "create_agentscope_client",
+        Mock(side_effect=create),
+    )
+    warning = Mock()
+    error = Mock()
+    monkeypatch.setattr(agent_integration._logger, "warning", warning)
+    monkeypatch.setattr(agent_integration._logger, "error", error)
+
+    clients = agent._connect_mcp_clients()
+
+    assert clients == [first, last]
+    assert broken.close_calls == 1
+    assert events == [
+        "connect:first",
+        "connect:broken-connect",
+        "close:broken-connect",
+    ]
+    logged = " ".join(
+        str(args[0])
+        for logger in (warning, error)
+        for args, _ in logger.call_args_list
+    )
+    for name in ("missing", "factory-error", "broken-connect"):
+        assert name in logged
+
+
+def test_initialize_failure_closes_owned_stateful_clients(agent, monkeypatch):
+    events = []
+    stateful = _LifecycleClient("stdio", stateful=True, events=events)
+    stateless = _LifecycleClient("http", stateful=False, events=events)
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        Mock(return_value=[stateful, stateless]),
+    )
+    _configure_successful_initialize(
+        agent,
+        monkeypatch,
+        toolkit_factory=Mock(side_effect=RuntimeError("toolkit boom")),
+    )
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is False
+
+    assert stateful.close_calls == 1
+    assert stateless.close_calls == 0
+    assert agent._mcp_clients == []
+
+
+def test_shutdown_closes_stateful_once_continues_after_named_failure(
+    agent,
+    monkeypatch,
+):
+    events = []
+    first = _LifecycleClient(
+        "first",
+        stateful=True,
+        events=events,
+        close_error=RuntimeError("close boom"),
+    )
+    stateless = _LifecycleClient("http", stateful=False, events=events)
+    last = _LifecycleClient("last", stateful=True, events=events)
+    agent._mcp_clients = [first, stateless, last]
+    warning = Mock()
+    monkeypatch.setattr(agent_integration._logger, "warning", warning)
+
+    agent.shutdown()
+    agent.shutdown()
+
+    assert first.close_calls == 1
+    assert stateless.close_calls == 0
+    assert last.close_calls == 1
+    assert events == ["close:first", "close:last"]
+    assert "first" in str(warning.call_args.args[0])
+    assert agent._mcp_clients == []
+
+
+def test_reset_closes_owned_stateful_client(agent):
+    client = _LifecycleClient("reset", stateful=True, events=[])
+    agent._mcp_clients = [client]
+
+    agent.reset()
+
+    assert client.close_calls == 1
+    assert agent._mcp_clients == []
+
+
+def test_reinitialize_closes_previous_clients_before_connecting_new_ones(
+    agent,
+    monkeypatch,
+):
+    events = []
+    previous = _LifecycleClient("previous", stateful=True, events=events)
+    replacement = _LifecycleClient("replacement", stateful=False, events=events)
+    agent._mcp_clients = [previous]
+
+    def connect_replacement():
+        events.append("prepare:replacement")
+        return [replacement]
+
+    monkeypatch.setattr(agent, "_connect_mcp_clients", connect_replacement)
+    toolkit_factory = _configure_successful_initialize(agent, monkeypatch)
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+    assert events == ["close:previous", "prepare:replacement"]
+    assert agent._mcp_clients == [replacement]
+    toolkit_factory.assert_called_once_with(tools=[], mcps=[replacement])
 
 
 def test_stable_core_imports_keep_agentscope_available(monkeypatch):

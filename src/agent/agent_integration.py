@@ -73,10 +73,9 @@ except ImportError as e:
     _logger_agent = None
 
 try:
-    from agentscope.mcp import HttpStatelessClient, StdIOStatefulClient
+    from agentscope.mcp import MCPClient
 except ImportError:
-    HttpStatelessClient = None
-    StdIOStatefulClient = None
+    MCPClient = Any
 
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.chat_history import ChatHistory, serialize_message
@@ -396,6 +395,7 @@ class AgentIntegration:
             return False
 
         try:
+            self._close_mcp_clients()
             api_key = self._api_manager.get_key(provider, model_name)
             if not api_key:
                 _logger.error(f"未找到 {provider} 的API密钥")
@@ -415,7 +415,9 @@ class AgentIntegration:
             self._base_url = base_url
 
             function_tools = self._build_registry_function_tools()
-            self._toolkit = Toolkit(tools=function_tools)
+            mcp_clients = self._connect_mcp_clients()
+            self._mcp_clients = mcp_clients
+            self._toolkit = Toolkit(tools=function_tools, mcps=mcp_clients)
             _logger.info("Toolkit创建成功")
 
             model = self._create_model(provider, model_name, base_url, api_key)
@@ -435,7 +437,6 @@ class AgentIntegration:
                             请用自然语言与用户交流。使用工具完成工作流设计。""",
             )
 
-            self._register_mcp_tools()
             self._register_skills()
             
             _logger.info(f"系统提示词长度: {len(system_prompt)} 字符")
@@ -462,6 +463,7 @@ class AgentIntegration:
             return True
 
         except Exception as e:
+            self._close_mcp_clients()
             _logger.error(f"Agent初始化失败: {e}", exc_info=True)
             _logger.error("=" * 50)
             return False
@@ -488,52 +490,61 @@ class AgentIntegration:
             _logger.info("注册中心无工具可加载")
         return function_tools
 
-    def _register_mcp_tools(self) -> None:
+    @staticmethod
+    def _run_mcp_awaitable(awaitable: Any) -> Any:
+        """Run one MCP lifecycle awaitable without retaining its event loop."""
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(awaitable)
+        finally:
+            loop.close()
+
+    def _connect_mcp_clients(self) -> list[MCPClient]:
+        """Prepare enabled MCP clients in manager order, isolating failures."""
         if not self._mcp_manager or not AGENTSCOPE_AVAILABLE:
-            return
+            return []
 
-        enabled_servers = [s for s in self._mcp_manager.list_servers() if s.get("enabled")]
+        clients: list[MCPClient] = []
+        for server in self._mcp_manager.list_servers():
+            if not server.get("enabled"):
+                continue
 
-        registered_count = 0
-        for server in enabled_servers:
+            server_name = server["name"]
+            client: Optional[MCPClient] = None
             try:
-                config = self._mcp_manager.get_agentscope_config(server["name"])
-                if not config:
+                client = self._mcp_manager.create_agentscope_client(server_name)
+                if client is None:
+                    _logger.warning(f"MCP客户端创建失败 ({server_name}): factory returned None")
                     continue
 
-                server_type = server.get("server_type", "stdio")
+                if client.is_stateful is True:
+                    self._run_mcp_awaitable(client.connect())
+                clients.append(client)
+                _logger.info(f"MCP客户端已准备: {server_name}")
+            except Exception as error:
+                client_name = getattr(client, "name", server_name)
+                _logger.error(f"MCP客户端准备失败 ({client_name}): {error}")
+                if client is not None and client.is_stateful is True:
+                    try:
+                        self._run_mcp_awaitable(client.close())
+                    except Exception as close_error:
+                        _logger.warning(
+                            f"清理失败MCP客户端失败 ({client_name}): {close_error}",
+                        )
 
-                if server_type == "stdio":
-                    client = StdIOStatefulClient(
-                        name=config["name"],
-                        command=config["command"],
-                        args=config.get("args", []),
-                        env=config.get("env", {}),
-                        timeout=config.get("timeout", 30),
-                    )
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(client.connect())
-                    loop.run_until_complete(self._toolkit.register_mcp_client(client))
-                    loop.close()
-                    self._mcp_clients.append(client)
-                    registered_count += 1
-                    _logger.info(f"已注册MCP服务(stdio): {server['name']}")
-                else:
-                    client = HttpStatelessClient(
-                        name=config["name"],
-                        transport=config.get("transport", "streamable_http"),
-                        url=config["url"],
-                    )
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(self._toolkit.register_mcp_client(client))
-                    loop.close()
-                    self._mcp_clients.append(client)
-                    registered_count += 1
-                    _logger.info(f"已注册MCP服务(http): {server['name']}")
-            except Exception as e:
-                _logger.error(f"注册MCP服务失败 ({server['name']}): {e}")
+        return clients
 
-        _logger.info(f"共注册 {registered_count} 个MCP服务")
+    def _close_mcp_clients(self) -> None:
+        """Close and release every owned stateful MCP client exactly once."""
+        clients, self._mcp_clients = self._mcp_clients, []
+        for client in clients:
+            if client.is_stateful is not True:
+                continue
+            client_name = getattr(client, "name", type(client).__name__)
+            try:
+                self._run_mcp_awaitable(client.close())
+            except Exception as error:
+                _logger.warning(f"关闭MCP客户端失败 ({client_name}): {error}")
 
     def _register_skills(self) -> None:
         if not self._skill_manager or not AGENTSCOPE_AVAILABLE:
@@ -768,6 +779,7 @@ class AgentIntegration:
 
     def reset(self) -> None:
         _logger.info("重置Agent...")
+        self._close_mcp_clients()
         self._history.clear()
         self._dispose_parked_reply_runtime()
 
@@ -880,16 +892,7 @@ class AgentIntegration:
     def shutdown(self) -> None:
         _logger.info("关闭Agent...")
         self._dispose_parked_reply_runtime()
-        for client in self._mcp_clients:
-            try:
-                if hasattr(client, "close"):
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(client.close())
-                    loop.close()
-            except Exception as e:
-                _logger.warning(f"关闭MCP客户端失败: {e}")
-
-        self._mcp_clients.clear()
+        self._close_mcp_clients()
         self._agent = None
         self._initialized = False
         _logger.info("Agent已关闭")
