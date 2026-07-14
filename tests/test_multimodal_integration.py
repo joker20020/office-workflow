@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 import pytest
 import inspect
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+from agentscope.event import ReplyEndEvent, ReplyStartEvent
+from agentscope.message import Base64Source, DataBlock, TextBlock, URLSource, UserMsg
+
+from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.storage.database import Database
 from src.storage.models import ApiKeyRecord
@@ -75,8 +82,6 @@ class TestMultimodalIntegration:
         assert gpt35_config["supported_types"] == ["text"]
 
     def test_agent_integration_multimodal_message_format(self):
-        from src.agent.agent_integration import AgentIntegration
-
         sig = inspect.signature(AgentIntegration.chat)
         params = sig.parameters
         assert "message" in params
@@ -103,6 +108,54 @@ class TestMultimodalIntegration:
         video_widget = create_block_widget(video_block)
         assert video_widget is not None
         assert video_widget.BLOCK_TYPE == "video"
+
+    @pytest.mark.asyncio
+    async def test_chat_async_builds_user_message_with_data_blocks(self):
+        class StreamingAgent:
+            def __init__(self):
+                self.state = SimpleNamespace(reply_id="provisional")
+                self.received_inputs = None
+
+            async def reply_stream(self, *, inputs):
+                self.received_inputs = inputs
+                yield ReplyStartEvent(
+                    session_id="session",
+                    reply_id="reply",
+                    name="Assistant",
+                )
+                yield ReplyEndEvent(session_id="session", reply_id="reply")
+
+        integration = AgentIntegration.__new__(AgentIntegration)
+        integration._initialized = True
+        integration._agent = StreamingAgent()
+        integration._history = SimpleNamespace(add_message=Mock())
+        integration._streaming_callbacks = []
+        integration._last_response_interrupted = False
+
+        result = await integration.chat_async(
+            [
+                {"type": "text", "text": "inspect these"},
+                {"type": "image", "url": "https://example.test/image.png"},
+                {"type": "audio", "data": "YXVkaW8="},
+                {
+                    "type": "video",
+                    "data": "dmlkZW8=",
+                    "media_type": "video/webm",
+                },
+            ],
+        )
+
+        assert result == ""
+        msg = integration._agent.received_inputs
+        assert msg.role == "user"
+        assert isinstance(msg.content[0], TextBlock)
+        assert [type(block) for block in msg.content[1:]] == [DataBlock] * 3
+        assert isinstance(msg.content[1].source, URLSource)
+        assert msg.content[1].source.media_type == "image/png"
+        assert isinstance(msg.content[2].source, Base64Source)
+        assert msg.content[2].source.media_type == "audio/mpeg"
+        assert msg.content[3].source.media_type == "video/webm"
+        assert [block.name for block in msg.content[1:]] == ["image", "audio", "video"]
 
 
 class TestMultimodalMigration:

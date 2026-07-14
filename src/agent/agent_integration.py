@@ -3,7 +3,7 @@
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 try:
     from agentscope.credential import (
@@ -29,12 +29,14 @@ try:
     from agentscope.message import (
         AssistantMsg,
         Base64Source,
+        DataBlock,
         Msg,
         SystemMsg,
         TextBlock,
         URLSource,
         UserMsg,
     )
+    from agentscope.event import ReplyEndEvent, ReplyEndReason, ReplyStartEvent
     from agentscope.state import AgentState
     from agentscope.tool import Toolkit
 
@@ -53,15 +55,12 @@ except ImportError as e:
     UserMsg = None
     URLSource = None
     Base64Source = None
+    DataBlock = None
     Toolkit = None
+    ReplyEndEvent = None
+    ReplyEndReason = None
+    ReplyStartEvent = None
     _logger_agent = None
-
-try:
-    from agentscope.message import AudioBlock, ImageBlock, VideoBlock
-except ImportError:
-    AudioBlock = None
-    ImageBlock = None
-    VideoBlock = None
 
 try:
     from agentscope.mcp import HttpStatelessClient, StdIOStatefulClient
@@ -70,7 +69,7 @@ except ImportError:
     StdIOStatefulClient = None
 
 from src.agent.api_key_manager import ApiKeyManager
-from src.agent.chat_history import ChatHistory, deserialize_message, serialize_message
+from src.agent.chat_history import ChatHistory, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
 from src.engine.node_engine import NodeEngine
 from src.core.config_manager import get_config_manager
@@ -161,16 +160,28 @@ class AgentIntegration:
         if callback in self._streaming_callbacks:
             self._streaming_callbacks.remove(callback)
 
-    def _create_streaming_hook(self) -> Callable:
-        def streaming_hook(agent_self: Any, kwargs: dict, output: Any) -> Any:
-            for callback in self._streaming_callbacks:
-                try:
-                    callback(agent_self, kwargs, output)
-                except Exception as e:
-                    _logger.error(f"Streaming callback error: {e}")
-            return output
+    def _notify_stream_event(self, event: Any) -> None:
+        for callback in self._streaming_callbacks:
+            try:
+                callback(self._agent, {"event": event}, event)
+            except Exception as e:
+                _logger.error(f"Streaming callback error: {e}")
 
-        return streaming_hook
+    async def _consume_reply_stream(self, inputs: Msg) -> Msg:
+        provisional_id = getattr(getattr(self._agent, "state", None), "reply_id", None)
+        reply = AssistantMsg(name="Assistant", content=[], id=provisional_id)
+
+        async for event in self._agent.reply_stream(inputs=inputs):
+            if isinstance(event, ReplyStartEvent):
+                reply.id = event.reply_id
+            reply.append_event(event)
+            self._notify_stream_event(event)
+            if isinstance(event, ReplyEndEvent):
+                self._last_response_interrupted = (
+                    event.finished_reason == ReplyEndReason.INTERRUPTED
+                )
+
+        return reply
 
     def _create_model(
         self,
@@ -403,104 +414,22 @@ class AgentIntegration:
 
         try:
             if AGENTSCOPE_AVAILABLE and Msg is not None:
-                if isinstance(message, str):
-                    self._history.add_message("user", message)
-                    _logger.info("用户消息已添加到历史记录")
-                    msg = UserMsg(name="User", content=message)
-                else:
-                    content_blocks = []
-                    text_parts = []
-
-                    for block in message:
-                        block_type = block.get("type")
-
-                        if block_type == "text":
-                            text_content = block.get("text", "")
-                            content_blocks.append(TextBlock(type="text", text=text_content))
-                            # text_parts.append(text_content)
-
-                        elif block_type == "image":
-                            source = self._create_image_source(block)
-                            content_blocks.append(ImageBlock(type="image", source=source))
-                            text_parts.append(f"[图片]:{source}")
-
-                        elif block_type == "audio":
-                            source = self._create_audio_source(block)
-                            content_blocks.append(AudioBlock(type="audio", source=source))
-                            text_parts.append(f"[音频]:{source}")
-
-                        elif block_type == "video":
-                            source = self._create_video_source(block)
-                            content_blocks.append(VideoBlock(type="video", source=source))
-                            text_parts.append(f"[视频]:{source}")
-
-                    content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
-                    msg = UserMsg(name="User", content=content_blocks)
-                    self._history.add_message(msg=msg)
-                    _logger.info(f"多模态消息已添加到历史记录: {len(content_blocks)} 个内容块")
-
-                _logger.info(f"Msg对象创建成功: {msg}")
-
-                _logger.info("开始调用Agent...")
-                _logger.info(f"Provider: {self._provider}")
-                _logger.info(f"Model: {self._model_name}")
-                _logger.info(f"Base URL: {self._base_url}")
+                msg = self._create_user_message(message)
+                self._history.add_message(msg=msg)
 
                 self._current_loop = asyncio.new_event_loop()
                 loop = self._current_loop
                 try:
-                    _logger.info("执行异步调用...")
-                    response_msg = loop.run_until_complete(self._agent(msg))
-                    _logger.info(f"异步调用完成，响应类型: {type(response_msg)}")
-
-                    # 检测中断响应
-                    self._last_response_interrupted = bool(
-                          (getattr(response_msg, 'metadata', None) or {}).get("_is_interrupted", False)
-                    )
-                    if self._last_response_interrupted:
-                        _logger.info("检测到中断响应")
-
-                    text_blocks = response_msg.get_content_blocks("text")
-                    _logger.info(f"响应内容块: {text_blocks}")
-                    response = "".join([text_block["text"] for text_block in text_blocks])
-                    _logger.info(f"响应内容类型: {type(response)}")
-                    _logger.info(f"响应内容长度: {len(str(response)) if response else 0}")
+                    response_msg = loop.run_until_complete(self._consume_reply_stream(msg))
                 finally:
                     self._current_loop = None
                     loop.close()
-                    _logger.info("事件循环已关闭")
 
-                result = response.strip()
-
-                _logger.info(f"最终响应: '{result[:100]}...' (长度: {len(result)})")
-
-                # Extract all messages from agent's short-term memory
-                memory_messages = self.extract_agent_memory()
-                
-                if memory_messages:
-                    _logger.info(f"从agent memory获取 {len(memory_messages)} 条消息")
-                    self._history.clear()
-                    for mem_msg_dict in memory_messages:
-                        try:
-                            restored_msg = deserialize_message(mem_msg_dict)
-                            self._history.add_message(msg=restored_msg)
-                        except Exception as e:
-                            _logger.warning(f"存储消息失败: {e}")
-                else:
-                    # Fallback: store response directly if memory retrieval fails
-                    if hasattr(response_msg, "content"):
-                        full_msg = AssistantMsg(
-                            name="Assistant",
-                            content=response_msg.content,
-                            metadata=getattr(response_msg, "metadata", None),
-                        )
-                        self._history.add_message(msg=full_msg)
-                    else:
-                        self._history.add_message("assistant", result)
+                self._history.add_message(msg=response_msg)
+                result = (response_msg.get_text_content() or "").strip()
             else:
                 result = "AgentScope框架未安装"
                 _logger.error(result)
-                self._history.add_message("assistant", result)
 
             elapsed = time.time() - start_time
             _logger.info(f"对话处理完成，耗时: {elapsed:.2f}秒")
@@ -533,48 +462,11 @@ class AgentIntegration:
 
         try:
             if AGENTSCOPE_AVAILABLE and Msg is not None:
-                if isinstance(message, str):
-                    self._history.add_message("user", message)
-                    msg = UserMsg(name="User", content=message)
-                else:
-                    content_blocks = []
-                    text_parts = []
-
-                    for block in message:
-                        block_type = block.get("type")
-
-                        if block_type == "text":
-                            text_content = block.get("text", "")
-                            content_blocks.append(TextBlock(type="text", text=text_content))
-                            # text_parts.append(text_content)
-
-                        elif block_type == "image":
-                            source = self._create_image_source(block)
-                            content_blocks.append(ImageBlock(type="image", source=source))
-                            text_parts.append(f"[图片]:{source}")
-
-                        elif block_type == "audio":
-                            source = self._create_audio_source(block)
-                            content_blocks.append(AudioBlock(type="audio", source=source))
-                            text_parts.append(f"[音频]:{source}")
-
-                        elif block_type == "video":
-                            source = self._create_video_source(block)
-                            content_blocks.append(VideoBlock(type="video", source=source))
-                            text_parts.append(f"[视频]:{source}")
-
-                    content_blocks.append(TextBlock(type="text", text="附件来源:\n" + "\n".join(text_parts)))
-                    msg = UserMsg(name="User", content=content_blocks)
-                    self._history.add_message(msg=msg)
-
-                _logger.info("[异步] 调用Agent...")
-
-                response_msg = await self._agent(msg)
-
-                text_blocks = response_msg.get_content_blocks("text")
-                result = "".join([block.get("text", "") for block in text_blocks])
-
+                msg = self._create_user_message(message)
+                self._history.add_message(msg=msg)
+                response_msg = await self._consume_reply_stream(msg)
                 self._history.add_message(msg=response_msg)
+                result = (response_msg.get_text_content() or "").strip()
             else:
                 result = "AgentScope框架未安装"
 
@@ -587,44 +479,36 @@ class AgentIntegration:
             _logger.error(f"[异步] Agent对话失败: {e}", exc_info=True)
             return f"错误: {e}"
 
-    def _create_image_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
-        if "url" in block:
-            url = block["url"]
-            if url.startswith("file://"):
-                url = url[7:]
-            return URLSource(type="url", url=url)
-        elif "data" in block:
-            return Base64Source(
-                type="base64", media_type=block.get("media_type", "image/png"), data=block["data"]
-            )
-        else:
-            raise ValueError("Image block must have 'url' or 'data' field")
+    def _create_user_message(self, message: str | List[Dict[str, Any]]) -> Msg:
+        if isinstance(message, str):
+            return UserMsg(name="User", content=message)
 
-    def _create_audio_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
-        if "url" in block:
-            url = block["url"]
-            if url.startswith("file://"):
-                url = url[7:]
-            return URLSource(type="url", url=url)
-        elif "data" in block:
-            return Base64Source(
-                type="base64", media_type=block.get("media_type", "audio/mpeg"), data=block["data"]
-            )
-        else:
-            raise ValueError("Audio block must have 'url' or 'data' field")
+        content_blocks = []
+        for block in message:
+            block_type = block.get("type")
+            if block_type == "text":
+                content_blocks.append(TextBlock(text=block.get("text", "")))
+            elif block_type in ("image", "audio", "video"):
+                content_blocks.append(self._create_data_block(block, block_type))
+        return UserMsg(name="User", content=content_blocks)
 
-    def _create_video_source(self, block: Dict[str, Any]) -> Union[Any, Any]:
+    def _create_data_block(self, block: Dict[str, Any], media_kind: str) -> Any:
+        default_media_types = {
+            "image": "image/png",
+            "audio": "audio/mpeg",
+            "video": "video/mp4",
+        }
+        media_type = block.get("media_type", default_media_types[media_kind])
         if "url" in block:
             url = block["url"]
             if url.startswith("file://"):
                 url = url[7:]
-            return URLSource(type="url", url=url)
+            source = URLSource(url=url, media_type=media_type)
         elif "data" in block:
-            return Base64Source(
-                type="base64", media_type=block.get("media_type", "video/mp4"), data=block["data"]
-            )
+            source = Base64Source(data=block["data"], media_type=media_type)
         else:
-            raise ValueError("Video block must have 'url' or 'data' field")
+            raise ValueError(f"{media_kind.title()} block must have 'url' or 'data' field")
+        return DataBlock(source=source, name=media_kind)
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """中断当前 Agent 执行

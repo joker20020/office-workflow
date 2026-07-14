@@ -3,6 +3,7 @@
 
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator
+from unittest.mock import Mock
 
 import pytest
 
@@ -163,6 +164,51 @@ async def test_reply_end_reason_controls_interrupted_state_and_keeps_partial_tex
     assert integration._last_response_interrupted is expected_interrupted
     assert reply.get_text_content() == "Hello world"
     assert reply.finished_at == events[-1].created_at
+
+
+def _chat_integration(events: list[AgentEvent]) -> AgentIntegration:
+    integration = _integration_with(events)
+    integration._initialized = True
+    integration._history = SimpleNamespace(add_message=Mock())
+    integration._provider = "test"
+    integration._model_name = "test-model"
+    integration._base_url = "https://example.test"
+    integration._current_loop = None
+    return integration
+
+
+def test_chat_persists_one_user_and_one_reconstructed_assistant_message() -> None:
+    integration = _chat_integration(_reply_events())
+
+    result = integration.chat("  question  ")
+
+    assert result == "Hello world"
+    assert integration._history.add_message.call_count == 2
+    user_call, assistant_call = integration._history.add_message.call_args_list
+    user_msg = user_call.kwargs["msg"]
+    assistant_msg = assistant_call.kwargs["msg"]
+    assert user_msg.role == "user"
+    assert user_msg.get_text_content() == "  question  "
+    assert integration._agent.received_inputs is user_msg
+    assert assistant_msg.role == "assistant"
+    assert assistant_msg.id == "reply-1"
+    assert assistant_msg.get_text_content() == "Hello world"
+
+
+@pytest.mark.asyncio
+async def test_chat_async_persists_one_user_and_one_reconstructed_assistant_message() -> None:
+    integration = _chat_integration(_reply_events())
+
+    result = await integration.chat_async("question")
+
+    assert result == "Hello world"
+    assert integration._history.add_message.call_count == 2
+    user_call, assistant_call = integration._history.add_message.call_args_list
+    user_msg = user_call.kwargs["msg"]
+    assistant_msg = assistant_call.kwargs["msg"]
+    assert integration._agent.received_inputs is user_msg
+    assert assistant_msg.role == "assistant"
+    assert assistant_msg.id == "reply-1"
 
 
 class _OrderMiddleware(MiddlewareBase):

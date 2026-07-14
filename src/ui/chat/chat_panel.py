@@ -24,6 +24,20 @@ from PySide6.QtWidgets import (
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
+from agentscope.event import (
+    DataBlockDeltaEvent,
+    DataBlockStartEvent,
+    TextBlockDeltaEvent,
+    TextBlockStartEvent,
+    ThinkingBlockDeltaEvent,
+    ThinkingBlockStartEvent,
+    ToolCallDeltaEvent,
+    ToolCallStartEvent,
+    ToolResultDataDeltaEvent,
+    ToolResultStartEvent,
+    ToolResultTextDeltaEvent,
+)
+
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.ui.chat.settings_panel import AgentSettingsDialog
@@ -39,6 +53,94 @@ if TYPE_CHECKING:
     from src.storage.repositories import ChatHistoryRepository
 
 _logger = get_logger(__name__)
+
+
+def _media_block_type(media_type: str) -> str:
+    prefix = media_type.split("/", 1)[0]
+    return prefix if prefix in ("image", "audio", "video") else "data"
+
+
+def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[str, Any]]:
+    """Translate one original AgentScope event into the widget block payload."""
+    if isinstance(event, TextBlockStartEvent):
+        state[("text", event.block_id)] = ""
+    elif isinstance(event, TextBlockDeltaEvent):
+        key = ("text", event.block_id)
+        state[key] = state.get(key, "") + event.delta
+        return {"type": "text", "text": state[key]}
+    elif isinstance(event, ThinkingBlockStartEvent):
+        state[("thinking", event.block_id)] = ""
+    elif isinstance(event, ThinkingBlockDeltaEvent):
+        key = ("thinking", event.block_id)
+        state[key] = state.get(key, "") + event.delta
+        return {"type": "thinking", "thinking": state[key]}
+    elif isinstance(event, ToolCallStartEvent):
+        key = ("tool_use", event.tool_call_id)
+        state[key] = {"name": event.tool_call_name, "input": ""}
+        return {
+            "type": "tool_use",
+            "id": event.tool_call_id,
+            "name": event.tool_call_name,
+            "input": "",
+        }
+    elif isinstance(event, ToolCallDeltaEvent):
+        key = ("tool_use", event.tool_call_id)
+        current = state.setdefault(key, {"name": "", "input": ""})
+        current["input"] += event.delta
+        return {
+            "type": "tool_use",
+            "id": event.tool_call_id,
+            "name": current["name"],
+            "input": current["input"],
+        }
+    elif isinstance(event, ToolResultStartEvent):
+        key = ("tool_result", event.tool_call_id)
+        state[key] = {"name": event.tool_call_name, "output": ""}
+        return {
+            "type": "tool_result",
+            "id": event.tool_call_id,
+            "name": event.tool_call_name,
+            "output": "",
+        }
+    elif isinstance(event, ToolResultTextDeltaEvent):
+        key = ("tool_result", event.tool_call_id)
+        current = state.setdefault(key, {"name": "", "output": ""})
+        current["output"] += event.delta
+        return {
+            "type": "tool_result",
+            "id": event.tool_call_id,
+            "name": current["name"],
+            "output": current["output"],
+        }
+    elif isinstance(event, DataBlockStartEvent):
+        state[("data", event.block_id)] = {
+            "media_type": event.media_type,
+            "data": "",
+        }
+    elif isinstance(event, DataBlockDeltaEvent):
+        key = ("data", event.block_id)
+        current = state.setdefault(
+            key, {"media_type": event.media_type, "data": ""}
+        )
+        current["data"] += event.data
+        return {
+            "type": _media_block_type(current["media_type"]),
+            "source": {
+                "type": "base64",
+                "data": current["data"],
+                "media_type": current["media_type"],
+            },
+        }
+    elif isinstance(event, ToolResultDataDeltaEvent):
+        source = {
+            "type": "base64" if event.data is not None else "url",
+            "media_type": event.media_type,
+        }
+        source["data" if event.data is not None else "url"] = (
+            event.data if event.data is not None else event.url
+        )
+        return {"type": _media_block_type(event.media_type), "source": source}
+    return None
 
 
 def _extract_text_from_msg(msg: Any) -> str:
@@ -1120,24 +1222,22 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._on_stop_clicked()
 
     def _create_streaming_callback(self) -> Callable:
-        """Create streaming callback for real-time block updates.
+        """Create a callback that adapts original AgentScope stream events.
 
-        This callback is invoked by the agent's post_print hook during streaming.
-        It extracts content blocks (thinking, tool_use, tool_result, text) from
-        the Msg output and emits block_update signals for UI rendering.
+        Text, thinking, tool call/result, and data deltas are translated into
+        the existing block-update payload consumed by the chat widgets.
 
         Returns:
             Callable: The streaming callback function
         """
 
+        event_state: Dict[Any, Any] = {}
+
         def callback(agent_self: Any, kwargs: dict, output: Any) -> None:
-            if kwargs is None:
-                return
-            msg = kwargs.get("msg", None)
-            # Extract all content blocks from the Msg object
-            blocks = _extract_blocks_from_msg(msg)
-            if self._worker:
-                self._worker.block_update.emit(blocks)
+            event = (kwargs or {}).get("event", output)
+            block = _event_to_block_update(event, event_state)
+            if block is not None and self._worker:
+                self._worker.block_update.emit([block])
 
         return callback
 

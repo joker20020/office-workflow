@@ -8,6 +8,20 @@ from typing import Any
 from PySide6.QtCore import Signal, QThread
 from PySide6.QtWidgets import QWidget
 
+from agentscope.event import (
+    DataBlockDeltaEvent,
+    TextBlockDeltaEvent,
+    TextBlockStartEvent,
+    ThinkingBlockDeltaEvent,
+    ThinkingBlockStartEvent,
+    ToolCallDeltaEvent,
+    ToolCallStartEvent,
+    ToolResultStartEvent,
+    ToolResultTextDeltaEvent,
+)
+
+import src.ui.chat.chat_panel as chat_panel
+
 
 class MockStreamingWidget:
     """Mock widget for streaming tests"""
@@ -123,3 +137,78 @@ class TestChatPanelStreaming:
 
         assert streaming_text == ""
         assert streaming_message is None
+
+    def test_event_adapter_accumulates_text_and_thinking_deltas(self):
+        state = {}
+        chat_panel._event_to_block_update(TextBlockStartEvent(reply_id="reply", block_id="text"), state)
+        first = chat_panel._event_to_block_update(
+            TextBlockDeltaEvent(reply_id="reply", block_id="text", delta="Hello"), state
+        )
+        second = chat_panel._event_to_block_update(
+            TextBlockDeltaEvent(reply_id="reply", block_id="text", delta=" world"), state
+        )
+        chat_panel._event_to_block_update(
+            ThinkingBlockStartEvent(reply_id="reply", block_id="thinking"), state
+        )
+        thinking = chat_panel._event_to_block_update(
+            ThinkingBlockDeltaEvent(
+                reply_id="reply", block_id="thinking", delta="reasoning"
+            ),
+            state,
+        )
+
+        assert first == {"type": "text", "text": "Hello"}
+        assert second == {"type": "text", "text": "Hello world"}
+        assert thinking == {"type": "thinking", "thinking": "reasoning"}
+
+    def test_event_adapter_translates_tool_call_result_and_data_events(self):
+        state = {}
+        tool_start = chat_panel._event_to_block_update(
+            ToolCallStartEvent(
+                reply_id="reply", tool_call_id="call", tool_call_name="search"
+            ),
+            state,
+        )
+        tool_delta = chat_panel._event_to_block_update(
+            ToolCallDeltaEvent(
+                reply_id="reply", tool_call_id="call", delta='{"q":"docs"}'
+            ),
+            state,
+        )
+        result_start = chat_panel._event_to_block_update(
+            ToolResultStartEvent(
+                reply_id="reply", tool_call_id="call", tool_call_name="search"
+            ),
+            state,
+        )
+        result_delta = chat_panel._event_to_block_update(
+            ToolResultTextDeltaEvent(reply_id="reply", tool_call_id="call", delta="found"),
+            state,
+        )
+        data = chat_panel._event_to_block_update(
+            DataBlockDeltaEvent(
+                reply_id="reply",
+                block_id="image",
+                data="aW1hZ2U=",
+                media_type="image/png",
+            ),
+            state,
+        )
+
+        assert tool_start == {
+            "type": "tool_use",
+            "id": "call",
+            "name": "search",
+            "input": "",
+        }
+        assert tool_delta["input"] == '{"q":"docs"}'
+        assert result_start["type"] == "tool_result"
+        assert result_delta["output"] == "found"
+        assert data == {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "data": "aW1hZ2U=",
+                "media_type": "image/png",
+            },
+        }
