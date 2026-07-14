@@ -581,6 +581,48 @@ class TestMcpServerManager:
         assert client.is_stateful is False
         assert client.execution_timeout == 47.0
 
+    def test_create_agentscope_mcp_client_for_stored_http_server(
+        self,
+        mcp_manager,
+    ):
+        mcp_manager.add_http_server(
+            "stored_http",
+            "https://stored.example/mcp",
+            "sse",
+        )
+
+        client = mcp_manager.create_agentscope_client("stored_http")
+
+        assert isinstance(client, MCPClient)
+        assert isinstance(client.mcp_config, HttpMCPConfig)
+        assert client.mcp_config.url == "https://stored.example/mcp"
+        assert client.mcp_config.timeout == 30.0
+        assert "transport" not in client.mcp_config.model_dump()
+        assert client.is_stateful is False
+        assert client.execution_timeout == 30.0
+        assert mcp_manager.get_server("stored_http")["transport"] == "sse"
+
+    def test_update_stored_http_server_url_is_used_by_agentscope_client(
+        self,
+        mcp_manager,
+    ):
+        mcp_manager.add_http_server(
+            "updated_http",
+            "https://before.example/mcp",
+            "sse",
+        )
+        assert mcp_manager.update_http_server(
+            "updated_http",
+            url="https://after.example/mcp",
+            transport="streamable_http",
+        )
+
+        client = mcp_manager.create_agentscope_client("updated_http")
+
+        assert client.mcp_config.url == "https://after.example/mcp"
+        assert "transport" not in client.mcp_config.model_dump()
+        assert client.is_stateful is False
+
     def test_create_agentscope_mcp_client_missing_server_constructs_nothing(
         self,
         mcp_manager,
