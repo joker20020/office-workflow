@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.chat_history import ChatHistory
+import src.agent.workflow_tools as workflow_tools
 from src.agent.workflow_tools import WorkflowTools
 from src.engine.node_engine import NodeEngine
 from src.engine.node_graph import NodeGraph
@@ -43,17 +44,31 @@ def test_make_response_uses_text_block_and_success_state():
 def test_make_response_failure_uses_error_state_and_preserves_metadata():
     from src.agent.workflow_tools import _make_response
 
+    content = {"message": "失败", "node": "中文节点"}
     response = _make_response(
-        {"message": "failed"},
+        content,
         False,
         {"request_id": "request-1"},
     )
 
     assert len(response.content) == 1
     assert isinstance(response.content[0], TextBlock)
-    assert response.content[0].text == '{"message": "failed"}'
+    assert "失败" in response.content[0].text
+    assert "中文节点" in response.content[0].text
+    assert "\\u" not in response.content[0].text
+    assert json.loads(response.content[0].text) == content
     assert response.state is ToolResultState.ERROR
     assert response.metadata == {"success": False, "request_id": "request-1"}
+
+
+def test_make_response_without_agentscope_returns_original_content(monkeypatch):
+    content = {"message": "preserve identity"}
+    monkeypatch.setattr(workflow_tools, "AGENTSCOPE_AVAILABLE", False)
+    monkeypatch.setattr(workflow_tools, "ToolResponse", None)
+
+    response = workflow_tools._make_response(content)
+
+    assert response is content
 
 
 def _extract_result(response):

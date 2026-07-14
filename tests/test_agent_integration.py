@@ -201,16 +201,24 @@ def test_registry_callables_are_wrapped_once_in_order(agent, monkeypatch):
     def second_tool():
         """Second tool docs."""
 
+    registry = agent_integration.AgentToolRegistry.instance()
     monkeypatch.setattr(
-        agent_integration.AgentToolRegistry.instance(),
+        registry,
         "get_all_tools",
         Mock(return_value=[first_tool, second_tool, first_tool]),
     )
+    wrapped_funcs = []
+
+    def recording_function_tool(*, func, **kwargs):
+        wrapped_funcs.append(func)
+        return FunctionTool(func=func, **kwargs)
+
+    monkeypatch.setattr(agent_integration, "FunctionTool", recording_function_tool)
 
     tools = agent._build_registry_function_tools()
 
     assert all(isinstance(tool, FunctionTool) for tool in tools)
-    assert [tool._func for tool in tools] == [first_tool, second_tool]
+    assert wrapped_funcs == [first_tool, second_tool]
     assert [tool.name for tool in tools] == ["first_tool", "second_tool"]
     assert [tool.description for tool in tools] == [
         "First tool docs.",
@@ -232,7 +240,7 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
 
     constructed_agent = SimpleNamespace(state=None)
     agent_factory = Mock(return_value=constructed_agent)
-    toolkit = object()
+    toolkit = SimpleNamespace(register_tool_function=Mock())
     toolkit_factory = Mock(return_value=toolkit)
     model = object()
     monkeypatch.setattr(agent_integration, "Agent", agent_factory)
@@ -253,6 +261,7 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
     assert agent.initialize("openai", "model", "https://example.test/v1") is True
 
     toolkit_factory.assert_called_once_with(tools=wrapped_tools)
+    toolkit.register_tool_function.assert_not_called()
     kwargs = agent_factory.call_args.kwargs
     assert kwargs["name"] == "WorkflowAssistant"
     assert kwargs["system_prompt"] == "configured prompt"
