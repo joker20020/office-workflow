@@ -320,11 +320,14 @@ class PermissionManager:
         self._granted[plugin_name].add(permission)
 
         # 持久化到数据库
+        repository_succeeded = True
         if self._repository:
-            self._repository.grant_permission(plugin_name, permission)
+            repository_succeeded = self._repository.grant_permission(
+                plugin_name, permission
+            )
 
         _logger.info(f"授权: 插件 '{plugin_name}' 获得权限 '{permission.value}'")
-        if not already_granted:
+        if not already_granted and repository_succeeded:
             self._change_notifier.notify(action="granted", name=plugin_name)
 
     def grant_all(self, plugin_name: str, permissions: Set[Permission]) -> None:
@@ -342,12 +345,15 @@ class PermissionManager:
         self._granted[plugin_name].update(permissions)
 
         # 持久化到数据库
+        repository_succeeded = True
         if self._repository:
-            self._repository.grant_permissions(plugin_name, permissions)
+            repository_succeeded = self._repository.grant_permissions(
+                plugin_name, permissions
+            )
 
         perm_values = [p.value for p in permissions]
         _logger.info(f"批量授权: 插件 '{plugin_name}' 获得权限: {perm_values}")
-        if new_permissions:
+        if new_permissions and repository_succeeded:
             self._change_notifier.notify(action="granted", name=plugin_name)
 
     def revoke(self, plugin_name: str, permission: Permission) -> bool:
@@ -368,11 +374,15 @@ class PermissionManager:
             self._granted[plugin_name].remove(permission)
 
             # 从数据库删除
+            repository_succeeded = True
             if self._repository:
-                self._repository.revoke_permission(plugin_name, permission)
+                repository_succeeded = self._repository.revoke_permission(
+                    plugin_name, permission
+                )
 
             _logger.info(f"撤销: 插件 '{plugin_name}' 失去权限 '{permission.value}'")
-            self._change_notifier.notify(action="revoked", name=plugin_name)
+            if repository_succeeded:
+                self._change_notifier.notify(action="revoked", name=plugin_name)
             return True
 
         return False

@@ -385,6 +385,59 @@ class TestPermissionManager:
             ("revoked", set()),
         ]
 
+    def test_grant_repository_false_keeps_memory_and_return_without_change_event(self):
+        repository = Mock()
+        repository.grant_permission.return_value = False
+        pm = PermissionManager(repository=repository)
+        events = []
+        pm.subscribe_changes(events.append)
+
+        result = pm.grant("plugin", Permission.FILE_READ)
+
+        assert result is None
+        assert pm.check("plugin", Permission.FILE_READ)
+        repository.grant_permission.assert_called_once_with(
+            "plugin", Permission.FILE_READ
+        )
+        assert events == []
+
+    def test_grant_all_repository_false_keeps_memory_and_return_without_change_event(
+        self,
+    ):
+        repository = Mock()
+        repository.grant_permissions.return_value = False
+        pm = PermissionManager(repository=repository)
+        events = []
+        pm.subscribe_changes(events.append)
+        permissions = {Permission.FILE_READ, Permission.FILE_WRITE}
+
+        result = pm.grant_all("plugin", permissions)
+
+        assert result is None
+        assert pm.get_granted_permissions("plugin") == permissions
+        repository.grant_permissions.assert_called_once_with("plugin", permissions)
+        assert events == []
+
+    def test_revoke_repository_false_keeps_memory_and_true_return_without_change_event(
+        self,
+    ):
+        repository = Mock()
+        repository.grant_permission.return_value = True
+        repository.revoke_permission.return_value = False
+        pm = PermissionManager(repository=repository)
+        pm.grant("plugin", Permission.FILE_READ)
+        events = []
+        pm.subscribe_changes(events.append)
+
+        result = pm.revoke("plugin", Permission.FILE_READ)
+
+        assert result is True
+        assert not pm.check("plugin", Permission.FILE_READ)
+        repository.revoke_permission.assert_called_once_with(
+            "plugin", Permission.FILE_READ
+        )
+        assert events == []
+
     def test_loading_permissions_does_not_notify_changes(self):
         repository = Mock()
         repository.get_all_plugins.return_value = [
