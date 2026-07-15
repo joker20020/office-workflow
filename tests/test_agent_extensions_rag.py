@@ -970,7 +970,11 @@ def _install_unity_recording_fakes(
             captured["message"] = msg
             if reply_error is not None:
                 raise reply_error
-            return reply or AssistantMsg(name="UnityAgent", content="unity result")
+            return (
+                reply
+                if reply is not None
+                else AssistantMsg(name="UnityAgent", content="unity result")
+            )
 
     class FakeReActConfig:
         def __init__(self, **kwargs):
@@ -1062,6 +1066,22 @@ async def test_unity_prompt_keeps_structured_markdown_contract(monkeypatch):
         assert heading in prompt
     assert "GameObject" in prompt
     assert "MCP/custom tool" in prompt
+    assert "addXRRig" in prompt
+    assert "ignoredTool" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_unity_empty_reply_uses_no_content_fallback_and_closes(monkeypatch):
+    events, _ = _install_unity_recording_fakes(
+        monkeypatch,
+        reply=AssistantMsg(name="UnityAgent", content=""),
+    )
+
+    result = await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    assert result == "Unity Agent 未返回内容"
+    assert events.count("close") == 1
+    assert events[-1] == "close"
 
 
 @pytest.mark.asyncio
