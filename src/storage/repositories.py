@@ -365,8 +365,8 @@ class ChatHistoryRepository:
             新消息的ID，失败返回 None
 
         Example:
-            >>> from agentscope.message import Msg
-            >>> msg = Msg(name="User", content="你好", role="user")
+            >>> from agentscope.message import UserMsg
+            >>> msg = UserMsg(name="User", content="你好")
             >>> repo.add_message(session_id, msg)
         """
         if msg is None:
