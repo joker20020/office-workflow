@@ -84,6 +84,7 @@ from src.agent.api_key_manager import ApiKeyManager
 from src.agent.async_runtime import AgentAsyncRuntime
 from src.agent.chat_history import ChatHistory, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
+from src.core.change_notifier import ExposureChange
 from src.core.permission_manager import Permission
 from src.engine.node_engine import NodeEngine
 from src.core.config_manager import get_config_manager
@@ -160,6 +161,19 @@ class AgentIntegration:
         self._parked_reply_id: Optional[str] = None
         self._parked_cleanup_future: Optional[concurrent.futures.Future[Any]] = None
         self._last_response_interrupted: bool = False
+        self._exposure_change_lock = threading.Lock()
+        self._exposure_rebuild_dirty = False
+        self._exposure_rebuild_in_progress = False
+        self._exposure_rebuild_idle = threading.Event()
+        self._exposure_rebuild_idle.set()
+        self._exposure_subscriptions: list[tuple[Any, int]] = []
+        self._exposure_rebuild_task: Optional[asyncio.Task[Any]] = None
+        self._shutdown_started = False
+
+        self._bind_exposure_source(AgentToolRegistry.instance())
+        self._bind_exposure_source(self._mcp_manager)
+        self._bind_exposure_source(self._skill_manager)
+        self._bind_exposure_source(self._permission_manager)
 
         if history_repository:
             if session_id:
@@ -363,6 +377,119 @@ class AgentIntegration:
             raise RuntimeError(
                 f"{method_name} cannot be called synchronously from the runtime thread"
             )
+
+    def _bind_exposure_source(self, source: Any) -> None:
+        if source is None:
+            return
+        token = source.subscribe_changes(self._on_exposure_change)
+        self._exposure_subscriptions.append((source, token))
+
+    def _replace_exposure_source(self, attribute: str, source: Any) -> bool:
+        previous = getattr(self, attribute)
+        if previous is source:
+            return False
+        with self._exposure_change_lock:
+            for index, (bound_source, token) in enumerate(
+                self._exposure_subscriptions
+            ):
+                if bound_source is previous:
+                    previous.unsubscribe_changes(token)
+                    self._exposure_subscriptions.pop(index)
+                    break
+            setattr(self, attribute, source)
+            if source is not None and not self._shutdown_started:
+                self._bind_exposure_source(source)
+        return True
+
+    def _on_exposure_change(self, event: ExposureChange) -> None:
+        with self._exposure_change_lock:
+            if self._shutdown_started or not self._initialized:
+                return
+            self._exposure_rebuild_dirty = True
+            idle = self._exposure_rebuild_idle
+            if self._exposure_rebuild_in_progress:
+                owns_drain = False
+            else:
+                self._exposure_rebuild_in_progress = True
+                idle.clear()
+                owns_drain = True
+
+        _logger.debug(
+            "Agent exposure changed: source=%s action=%s name=%s",
+            event.source,
+            event.action,
+            event.name,
+        )
+        if not owns_drain:
+            if not self._async_runtime.in_runtime_thread():
+                idle.wait()
+            return
+
+        if self._async_runtime.in_runtime_thread():
+            task = asyncio.create_task(self._drain_exposure_rebuilds())
+            self._exposure_rebuild_task = task
+            task.add_done_callback(self._clear_exposure_rebuild_task)
+            return
+
+        try:
+            self._async_runtime.run(self._drain_exposure_rebuilds())
+        except Exception:
+            with self._exposure_change_lock:
+                self._exposure_rebuild_dirty = False
+                self._exposure_rebuild_in_progress = False
+                self._exposure_rebuild_idle.set()
+            _logger.exception("Agent exposure rebuild drain failed")
+
+    def _clear_exposure_rebuild_task(self, task: asyncio.Task[Any]) -> None:
+        if self._exposure_rebuild_task is task:
+            self._exposure_rebuild_task = None
+        if not task.cancelled():
+            try:
+                task.exception()
+            except Exception:
+                _logger.exception("Agent exposure rebuild task failed")
+
+    async def _drain_exposure_rebuilds(self) -> None:
+        transitioned_to_idle = False
+        try:
+            while True:
+                with self._exposure_change_lock:
+                    if self._shutdown_started:
+                        self._exposure_rebuild_dirty = False
+                        self._exposure_rebuild_in_progress = False
+                        self._exposure_rebuild_idle.set()
+                        transitioned_to_idle = True
+                        return
+                    self._exposure_rebuild_dirty = False
+
+                try:
+                    api_key = self._api_manager.get_key(
+                        self._provider,
+                        self._model_name,
+                    )
+                    if not api_key:
+                        _logger.error(
+                            "Agent exposure rebuild skipped: current API key is unavailable"
+                        )
+                    else:
+                        await self._rebuild_agent_runtime_impl(api_key=api_key)
+                except Exception:
+                    _logger.exception("Agent exposure rebuild failed")
+
+                with self._exposure_change_lock:
+                    if not self._shutdown_started and self._exposure_rebuild_dirty:
+                        continue
+                    self._exposure_rebuild_dirty = False
+                    self._exposure_rebuild_in_progress = False
+                    self._exposure_rebuild_idle.set()
+                    transitioned_to_idle = True
+                    return
+        finally:
+            if not transitioned_to_idle:
+                with self._exposure_change_lock:
+                    self._exposure_rebuild_dirty = False
+                    self._exposure_rebuild_in_progress = False
+                    self._exposure_rebuild_idle.set()
 
     def _get_lifecycle_lock(self) -> asyncio.Lock:
         lock = getattr(self, "_lifecycle_lock", None)
@@ -1019,13 +1146,29 @@ class AgentIntegration:
         return self._provider
 
     def set_mcp_manager(self, manager: "McpServerManager") -> None:
-        self._mcp_manager = manager
+        if self._replace_exposure_source("_mcp_manager", manager):
+            self._on_exposure_change(
+                ExposureChange(source="mcp", action="replaced", name=None),
+            )
 
     def set_skill_manager(self, manager: "SkillManager") -> None:
-        self._skill_manager = manager
+        if self._replace_exposure_source("_skill_manager", manager):
+            self._on_exposure_change(
+                ExposureChange(source="skills", action="replaced", name=None),
+            )
 
     def shutdown(self) -> None:
         self._reject_sync_lifecycle_reentry("shutdown")
+        exposure_lock = getattr(self, "_exposure_change_lock", None)
+        if exposure_lock is not None:
+            with exposure_lock:
+                self._shutdown_started = True
+                subscriptions = self._exposure_subscriptions
+                self._exposure_subscriptions = []
+                idle = self._exposure_rebuild_idle
+            for source, token in subscriptions:
+                source.unsubscribe_changes(token)
+            idle.wait()
         _logger.info("关闭Agent...")
         self._async_runtime.stop(cleanup_awaitable=self._shutdown_impl())
         self._agent = None

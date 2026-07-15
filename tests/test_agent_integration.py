@@ -713,6 +713,390 @@ def test_sync_rebuild_runtime_thread_reentry_is_rejected_without_mutation(agent)
     assert agent._initialized is True
 
 
+def _publishable_agent_runtime(agent):
+    agent._agent = SimpleNamespace(state=AgentState())
+    agent._toolkit = object()
+    agent._initialized = True
+    agent._provider = "openai"
+    agent._model_name = "model"
+    agent._base_url = "https://example.test/v1"
+
+
+def test_exposure_change_before_initialization_does_not_start_runtime(
+    agent,
+    monkeypatch,
+):
+    registry = AgentToolRegistry.instance()
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", AsyncMock(return_value=True))
+
+    registry.register("preinit-automatic-rebuild", [lambda: None])
+    try:
+        assert agent._async_runtime.is_running is False
+        assert agent._rebuild_agent_runtime_impl.await_count == 0
+        assert agent._exposure_rebuild_dirty is False
+        assert agent._exposure_rebuild_in_progress is False
+        assert agent._exposure_rebuild_idle.is_set()
+    finally:
+        registry.unregister("preinit-automatic-rebuild")
+
+
+def test_external_exposure_change_waits_for_automatic_rebuild(agent, monkeypatch):
+    registry = AgentToolRegistry.instance()
+    _publishable_agent_runtime(agent)
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    async def rebuild(*, api_key):
+        assert api_key == "fresh-secret"
+        started.set()
+        while not release.is_set():
+            await asyncio.sleep(0.001)
+        finished.set()
+        return True
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="fresh-secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    caller_returned = threading.Event()
+
+    def publish():
+        registry.register("external-automatic-rebuild", [lambda: None])
+        caller_returned.set()
+
+    caller = threading.Thread(target=publish)
+    caller.start()
+    assert started.wait(2)
+    assert not caller_returned.is_set()
+    release.set()
+    caller.join(2)
+    try:
+        assert not caller.is_alive()
+        assert finished.is_set()
+        assert caller_returned.is_set()
+        assert agent._exposure_rebuild_idle.is_set()
+    finally:
+        registry.unregister("external-automatic-rebuild")
+
+
+def test_exposure_changes_coalesce_one_follow_up_and_all_callers_wait(
+    agent,
+    monkeypatch,
+):
+    _publishable_agent_runtime(agent)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    calls = 0
+    active = 0
+    max_active = 0
+    call_lock = threading.Lock()
+
+    async def rebuild(*, api_key):
+        nonlocal calls, active, max_active
+        with call_lock:
+            calls += 1
+            call_number = calls
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if call_number == 1:
+                first_started.set()
+                while not release_first.is_set():
+                    await asyncio.sleep(0.001)
+            return True
+        finally:
+            with call_lock:
+                active -= 1
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    returned = [threading.Event(), threading.Event(), threading.Event()]
+
+    def notify(index):
+        agent._on_exposure_change(SimpleNamespace(source="tools", action="changed", name=str(index)))
+        returned[index].set()
+
+    threads = [threading.Thread(target=notify, args=(index,)) for index in range(3)]
+    threads[0].start()
+    assert first_started.wait(2)
+    threads[1].start()
+    threads[2].start()
+    assert not any(event.is_set() for event in returned)
+    release_first.set()
+    for thread in threads:
+        thread.join(2)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert all(event.is_set() for event in returned)
+    assert calls == 2
+    assert max_active == 1
+    assert agent._exposure_rebuild_idle.is_set()
+
+
+def test_exposure_change_in_idle_transition_is_not_lost(agent, monkeypatch):
+    class PauseAfterThirdRelease:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._release_count = 0
+            self.gap_open = threading.Event()
+            self.second_change_marked = threading.Event()
+            self.release_gap = threading.Event()
+
+        def __enter__(self):
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self._release_count += 1
+            release_number = self._release_count
+            self._lock.release()
+            if release_number == 3:
+                self.gap_open.set()
+                assert self.release_gap.wait(2)
+            elif release_number == 4:
+                self.second_change_marked.set()
+
+    _publishable_agent_runtime(agent)
+    controlled_lock = PauseAfterThirdRelease()
+    agent._exposure_change_lock = controlled_lock
+    calls = 0
+
+    async def rebuild(*, api_key):
+        nonlocal calls
+        calls += 1
+        return True
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    first = threading.Thread(
+        target=lambda: agent._on_exposure_change(
+            SimpleNamespace(source="tools", action="first", name=None),
+        ),
+    )
+    second = threading.Thread(
+        target=lambda: agent._on_exposure_change(
+            SimpleNamespace(source="tools", action="second", name=None),
+        ),
+    )
+
+    first.start()
+    assert controlled_lock.gap_open.wait(2)
+    second.start()
+    assert controlled_lock.second_change_marked.wait(2)
+    controlled_lock.release_gap.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert calls == 2
+    assert agent._exposure_rebuild_idle.is_set()
+
+
+def test_exposure_submit_failure_restores_idle_state(agent):
+    _publishable_agent_runtime(agent)
+    agent._async_runtime.stop()
+
+    try:
+        agent._on_exposure_change(
+            SimpleNamespace(source="tools", action="changed", name=None),
+        )
+
+        assert agent._exposure_rebuild_dirty is False
+        assert agent._exposure_rebuild_in_progress is False
+        assert agent._exposure_rebuild_idle.is_set()
+    finally:
+        # Keep teardown bounded while this RED test demonstrates the stuck state.
+        agent._exposure_rebuild_dirty = False
+        agent._exposure_rebuild_in_progress = False
+        agent._exposure_rebuild_idle.set()
+
+
+def test_runtime_thread_exposure_change_schedules_without_sync_wait(
+    agent,
+    monkeypatch,
+):
+    _publishable_agent_runtime(agent)
+    rebuild_started = threading.Event()
+    release = threading.Event()
+
+    async def rebuild(*, api_key):
+        rebuild_started.set()
+        while not release.is_set():
+            await asyncio.sleep(0.001)
+        return True
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+
+    async def publish_on_runtime():
+        agent._on_exposure_change(
+            SimpleNamespace(source="skills", action="enabled", name="writer"),
+        )
+        return "callback-returned"
+
+    future = agent._async_runtime.submit(publish_on_runtime())
+    assert future.result(timeout=2) == "callback-returned"
+    assert rebuild_started.wait(2)
+    assert not agent._exposure_rebuild_idle.is_set()
+    release.set()
+    assert agent._exposure_rebuild_idle.wait(2)
+
+
+def test_manager_replacement_rebinds_exposure_subscription(
+    agent,
+    monkeypatch,
+    db,
+):
+    _publishable_agent_runtime(agent)
+    old_manager = agent._skill_manager
+    new_manager = SkillManager(db)
+    rebuild = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+
+    agent.set_skill_manager(new_manager)
+    after_replacement = rebuild.await_count
+    old_manager.add_skill("old-unsubscribed", "/old")
+    assert rebuild.await_count == after_replacement
+    new_manager.add_skill("new-subscribed", "/new")
+    assert rebuild.await_count == after_replacement + 1
+    agent.set_skill_manager(new_manager)
+    assert rebuild.await_count == after_replacement + 1
+
+    old_mcp_manager = agent._mcp_manager
+    new_mcp_manager = McpServerManager(db)
+    agent.set_mcp_manager(new_mcp_manager)
+    after_mcp_replacement = rebuild.await_count
+    old_mcp_manager.add_http_server("old-unsubscribed", "https://old.test/mcp")
+    assert rebuild.await_count == after_mcp_replacement
+    new_mcp_manager.add_http_server("new-subscribed", "https://new.test/mcp")
+    assert rebuild.await_count == after_mcp_replacement + 1
+    agent.set_mcp_manager(new_mcp_manager)
+    assert rebuild.await_count == after_mcp_replacement + 1
+
+
+def test_mcp_and_skill_events_trigger_automatic_rebuild(agent, monkeypatch):
+    _publishable_agent_runtime(agent)
+    rebuild = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+
+    agent._mcp_manager.add_http_server("automatic", "https://example.test/mcp")
+    assert rebuild.await_count == 1
+    agent._skill_manager.add_skill("automatic", "/skills/automatic")
+    assert rebuild.await_count == 2
+
+
+def test_permission_changes_automatically_filter_and_restore_owned_group(
+    api_key_manager,
+    node_engine,
+    mcp_manager,
+    skill_manager,
+    monkeypatch,
+):
+    AgentToolRegistry._reset_for_testing()
+    registry = AgentToolRegistry.instance()
+    permissions = PermissionManager()
+    integration = AgentIntegration(
+        api_key_manager,
+        node_engine,
+        mcp_manager=mcp_manager,
+        skill_manager=skill_manager,
+        permission_manager=permissions,
+    )
+    tool = lambda: "owned"
+
+    monkeypatch.setattr(integration._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(integration, "_connect_mcp_clients", AsyncMock(return_value=[]))
+    monkeypatch.setattr(skill_manager, "get_enabled_skill_paths", Mock(return_value=[]))
+    monkeypatch.setattr(
+        agent_integration,
+        "Toolkit",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        agent_integration,
+        "Agent",
+        lambda **kwargs: SimpleNamespace(state=kwargs["state"]),
+    )
+    monkeypatch.setattr(integration, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(integration.config, "get", Mock(return_value="prompt"))
+    _publishable_agent_runtime(integration)
+
+    try:
+        registry.register("owned-automatic", [tool], owner_name="owned-plugin")
+        assert integration._toolkit.tools == []
+
+        permissions.grant("owned-plugin", Permission.AGENT_TOOL)
+        assert len(integration._toolkit.tools) == 1
+        assert integration._toolkit.tools[0]._func is tool
+
+        assert permissions.revoke("owned-plugin", Permission.AGENT_TOOL) is True
+        assert integration._toolkit.tools == []
+    finally:
+        integration.shutdown()
+        registry.unregister("owned-automatic")
+        AgentToolRegistry._reset_for_testing()
+
+
+def test_shutdown_waits_for_running_exposure_drain(agent, monkeypatch):
+    registry = AgentToolRegistry.instance()
+    _publishable_agent_runtime(agent)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def rebuild(*, api_key):
+        started.set()
+        while not release.is_set():
+            await asyncio.sleep(0.001)
+        return True
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    publisher = threading.Thread(
+        target=lambda: registry.register("shutdown-waits", [lambda: None]),
+    )
+    publisher.start()
+    assert started.wait(2)
+    shutdown = threading.Thread(target=agent.shutdown)
+    shutdown.start()
+    time.sleep(0.05)
+    assert shutdown.is_alive()
+    release.set()
+    publisher.join(2)
+    shutdown.join(2)
+    try:
+        assert not publisher.is_alive()
+        assert not shutdown.is_alive()
+        assert agent._exposure_rebuild_idle.is_set()
+        assert agent._async_runtime.is_running is False
+    finally:
+        registry.unregister("shutdown-waits")
+
+
+def test_shutdown_unsubscribes_before_stop_and_post_shutdown_is_terminal(
+    agent,
+    monkeypatch,
+):
+    registry = AgentToolRegistry.instance()
+    _publishable_agent_runtime(agent)
+    rebuild = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+
+    agent.shutdown()
+    agent.shutdown()
+    before = rebuild.await_count
+    registry.register("post-shutdown-unsubscribe", [lambda: None])
+    try:
+        assert rebuild.await_count == before
+        assert agent._async_runtime.is_running is False
+        assert agent._exposure_subscriptions == []
+        assert agent._exposure_rebuild_idle.is_set()
+    finally:
+        registry.unregister("post-shutdown-unsubscribe")
+
+
 @pytest.mark.parametrize("api_key", ["short", "a-very-long-raw-api-key"])
 def test_initialize_never_stores_raw_api_key(agent, monkeypatch, api_key):
     _configure_successful_initialize(agent, monkeypatch)
