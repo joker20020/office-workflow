@@ -16,6 +16,9 @@ import json
 import math
 import os
 import re
+import stat
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -54,6 +57,7 @@ try:
         TaskUpdate,
         Toolkit,
         ToolChunk,
+        ToolMiddlewareBase,
         ToolResponse,
     )
 
@@ -127,57 +131,214 @@ _HANDOFF_HEADINGS = (
     "## 警告与未完成项",
 )
 _HANDOFF_STATUSES = {"成功", "部分成功", "失败"}
+_HANDOFF_SECTION_TITLES = tuple(
+    heading.removeprefix("## ") for heading in _HANDOFF_HEADINGS[1:]
+)
+
+
+def _parse_handoff_sections(text: str) -> tuple[Any, str | None]:
+    """Parse exact required headings outside Markdown fenced blocks."""
+    lines = text.splitlines()
+    required = list(_HANDOFF_HEADINGS)
+    found = []
+    fence = None
+    first_outside_content = None
+
+    for index, line in enumerate(lines):
+        fence_open = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence is not None:
+            fence_close = re.match(
+                rf"^ {{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*$",
+                line,
+            )
+            if fence_close:
+                fence = None
+            continue
+        if fence_open:
+            marker = fence_open.group(1)
+            fence = (marker[0], len(marker))
+            if first_outside_content is None:
+                first_outside_content = (index, line)
+            continue
+        if line.strip() and first_outside_content is None:
+            first_outside_content = (index, line)
+
+        heading_match = re.fullmatch(r"(#{1,6})[ \t]+(.+?)[ \t]*", line)
+        if not heading_match:
+            continue
+        heading_title = heading_match.group(2)
+        if heading_title in {"执行结果", *_HANDOFF_SECTION_TITLES}:
+            expected = (
+                "# 执行结果"
+                if heading_title == "执行结果"
+                else f"## {heading_title}"
+            )
+            if line.rstrip() != expected:
+                return None, f"结构化交接标题级别或格式无效：{line}"
+        if line.rstrip() in required:
+            found.append((line.rstrip(), index))
+
+    if fence is not None:
+        return None, "结构化交接包含未闭合的代码围栏"
+    if first_outside_content is None or first_outside_content[1].rstrip() != required[0]:
+        return None, "结构化交接必须以精确的一级标题 # 执行结果 开始"
+    found_names = [name for name, _ in found]
+    missing = [heading for heading in required if heading not in found_names]
+    if missing:
+        return None, f"结构化交接缺少必需章节：{', '.join(missing)}"
+    if found_names != required:
+        return None, "结构化交接章节顺序或唯一性无效"
+
+    sections = {}
+    for position, (heading, line_index) in enumerate(found[1:], 1):
+        end = found[position + 1][1] if position + 1 < len(found) else len(lines)
+        section_content = "\n".join(lines[line_index + 1:end]).strip()
+        if not section_content:
+            return None, f"结构化交接章节内容为空：{heading}"
+        sections[heading.removeprefix("## ")] = section_content
+    return sections, None
+
+
+def _safe_code_fence(content: Any, language: str = "") -> str:
+    """Wrap untrusted text in a backtick fence longer than its longest run."""
+    text = str(content)
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{language}\n{text}\n{fence}"
+
+
+def _content_text(content: Any) -> str:
+    blocks = content if isinstance(content, list) else [content]
+    return "\n".join(
+        block.text if isinstance(block, TextBlock) else str(block)
+        for block in blocks
+    )
+
+
+class _TaskObservationMiddleware(ToolMiddlewareBase):
+    """Record actual AgentScope Task tool inputs, chunks, and state snapshots."""
+
+    def __init__(self, records: list):
+        self.records = records
+
+    async def on_tool_call(self, tool, input_kwargs, next_handler):
+        state = input_kwargs.get("_agent_state")
+        safe_input = {
+            key: value
+            for key, value in input_kwargs.items()
+            if key != "_agent_state"
+        }
+        chunks = []
+        error = None
+        try:
+            async for chunk in next_handler(**input_kwargs):
+                chunks.append(chunk)
+                yield chunk
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            states = [chunk.state for chunk in chunks]
+            self.records.append(
+                {
+                    "operation": tool.name,
+                    "input": json.loads(
+                        json.dumps(safe_input, ensure_ascii=False, default=str),
+                    ),
+                    "success": bool(chunks)
+                    and all(
+                        state_value
+                        not in {
+                            ToolResultState.ERROR,
+                            ToolResultState.DENIED,
+                            ToolResultState.INTERRUPTED,
+                        }
+                        for state_value in states
+                    )
+                    and error is None,
+                    "result": "\n".join(_content_text(chunk.content) for chunk in chunks)
+                    or (str(error) if error is not None else "无工具结果"),
+                    "states": [state_value.value for state_value in states],
+                    "tasks": [
+                        task.model_dump(mode="json")
+                        for task in state.tasks_context.tasks
+                    ]
+                    if isinstance(state, AgentState)
+                    else [],
+                },
+            )
 
 
 def _validate_subagent_handoff(
     content: str,
     subject: str,
     file_records: Any = None,
+    task_records: Any = None,
 ) -> _SubagentResult:
-    """Validate a model handoff and attach deterministic process-file evidence."""
+    """Validate and safely normalize a structured subagent handoff."""
     text = str(content or "")
-    missing = [heading for heading in _HANDOFF_HEADINGS if heading not in text]
-    if missing:
-        return _subagent_failure(
-            subject,
-            f"结构化交接缺少必需章节：{', '.join(missing)}",
-        )
-    status_match = re.search(r"(?m)^## 状态\s*\n([^\n]+)", text)
-    if status_match is None:
-        return _subagent_failure(subject, "结构化交接无法解析状态值")
-    status = status_match.group(1).strip()
-    if status not in _HANDOFF_STATUSES:
-        return _subagent_failure(subject, f"结构化交接状态值无效：{status}")
+    sections, parse_error = _parse_handoff_sections(text)
+    validation_issue = parse_error
+    status = "失败"
+    if validation_issue is None:
+        status_lines = sections["状态"].splitlines()
+        if len(status_lines) != 1:
+            validation_issue = "结构化交接状态章节只能包含一个状态值"
+        else:
+            status = status_lines[0].strip()
+            if status not in _HANDOFF_STATUSES:
+                validation_issue = f"结构化交接状态值无效：{status}"
+    if validation_issue is not None:
+        text = str(_subagent_failure(subject, validation_issue))
+        sections, _ = _parse_handoff_sections(text)
+        status = "失败"
 
-    records = list(file_records or [])
-    has_recorded_error = any(not record["success"] for record in records)
-    if has_recorded_error and status == "成功":
-        text = (
-            text[:status_match.start(1)]
-            + "部分成功"
-            + text[status_match.end(1):]
+    files = list(file_records or [])
+    tasks = list(task_records or [])
+    evidence_required = task_records is not None
+    issues = ([validation_issue] if validation_issue is not None else []) + [
+        record["result"]
+        for record in [*files, *tasks]
+        if not record["success"]
+    ]
+    if evidence_required:
+        required_task_tools = {"TaskCreate", "TaskGet", "TaskList", "TaskUpdate"}
+        observed_task_tools = {record["operation"] for record in tasks}
+        missing_task_tools = sorted(required_task_tools - observed_task_tools)
+        if missing_task_tools:
+            issues.append(
+                "缺少实际 Task 工具结果：" + ", ".join(missing_task_tools),
+            )
+        successful_file_tools = {
+            record["operation"] for record in files if record["success"]
+        }
+        missing_file_tools = sorted(
+            {"write_text_file", "view_text_file"} - successful_file_tools,
         )
+        if missing_file_tools:
+            issues.append(
+                "缺少实际成功文件工具结果：" + ", ".join(missing_file_tools),
+            )
+    if issues and status == "成功":
         status = "部分成功"
-    if records:
-        def prepend_section(heading: str, evidence: str) -> None:
-            nonlocal text
-            marker = f"{heading}\n"
-            position = text.index(marker) + len(marker)
-            text = text[:position] + evidence + "\n" + text[position:]
+        sections["状态"] = status
 
+    if files or tasks or evidence_required:
         successful_files = []
         seen_paths = set()
-        for record in records:
+        for record in files:
             path = record.get("path")
             if record["success"] and path and path not in seen_paths:
                 successful_files.append(f"- JSON 工艺文件：{path}（工具已验证）")
                 seen_paths.add(path)
         if successful_files:
-            prepend_section("## 生成文件", "\n".join(successful_files))
+            sections["生成文件"] = (
+                "\n".join(successful_files) + "\n" + sections["生成文件"]
+            )
 
         contents = []
         seen_contents = set()
-        for record in records:
+        for record in files:
             path = record.get("path")
             content_value = record.get("content")
             content_key = (path, content_value)
@@ -187,22 +348,53 @@ def _validate_subagent_handoff(
                 and content_value is not None
                 and content_key not in seen_contents
             ):
-                contents.append(f"### {path}\n```json\n{content_value}\n```")
+                contents.append(f"### {path}\n{_safe_code_fence(content_value, 'json')}")
                 seen_contents.add(content_key)
         if contents:
-            prepend_section("## 具体结果", "\n".join(contents))
+            sections["具体结果"] = "\n".join(contents) + "\n" + sections["具体结果"]
 
         tool_evidence = []
-        for index, record in enumerate(records, 1):
+        for index, record in enumerate(tasks, 1):
             tool_evidence.append(
-                f"### {index}. {record['operation']}\n{record['result']}",
+                f"### Task {index}. {record['operation']}\n"
+                "实际输入：\n"
+                f"{_safe_code_fence(json.dumps(record['input'], ensure_ascii=False), 'json')}\n"
+                "实际结果：\n"
+                f"{_safe_code_fence(record['result'], 'text')}",
             )
-        prepend_section("## 执行记录", "\n".join(tool_evidence))
+        if tasks:
+            final_tasks = tasks[-1].get("tasks", [])
+            tool_evidence.append(
+                "### Task 最终状态\n"
+                + _safe_code_fence(
+                    json.dumps(final_tasks, ensure_ascii=False, indent=2),
+                    "json",
+                ),
+            )
+        for index, record in enumerate(files, 1):
+            tool_evidence.append(
+                f"### File {index}. {record['operation']}\n"
+                + _safe_code_fence(record["result"], "text"),
+            )
+        if tool_evidence:
+            sections["执行记录"] = (
+                "\n".join(tool_evidence) + "\n" + sections["执行记录"]
+            )
 
-        errors = [record["result"] for record in records if not record["success"]]
-        if errors:
-            prepend_section("## 警告与未完成项", "\n".join(errors))
-    return _SubagentResult(text, success=status == "成功" and not has_recorded_error)
+        if issues:
+            rendered_issues = "\n".join(
+                "- 实际错误或缺失证据：\n" + _safe_code_fence(issue, "text")
+                for issue in issues
+            )
+            sections["警告与未完成项"] = (
+                rendered_issues + "\n" + sections["警告与未完成项"]
+            )
+
+        normalized = ["# 执行结果"]
+        for title in _HANDOFF_SECTION_TITLES:
+            normalized.extend([f"## {title}", sections[title]])
+        text = "\n".join(normalized)
+    return _SubagentResult(text, success=status == "成功" and not issues)
 
 
 def _make_response(content: str, success: bool = True) -> Any:
@@ -216,23 +408,75 @@ def _make_response(content: str, success: bool = True) -> Any:
 
 def _make_process_file_tools(output_root: Any, records: Any = None):
     """Bind ProcessAgent JSON file capabilities to one resolved output root."""
-    root = Path(output_root).expanduser().resolve()
+    requested_root = Path(output_root).expanduser()
+    requested_root.mkdir(parents=True, exist_ok=True)
+    root = requested_root.resolve()
+    root_identity = os.lstat(root)
     observations = records if records is not None else []
+    verified_artifacts = {}
 
-    def resolve_json_path(file_path: str) -> Path:
-        requested = Path(file_path).expanduser()
-        resolved = (
-            requested.resolve()
-            if requested.is_absolute()
-            else (root / requested).resolve()
+    def ensure_trusted_root() -> None:
+        current = os.lstat(root)
+        file_attributes = getattr(current, "st_file_attributes", 0)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or bool(file_attributes & reparse_flag)
+            or not os.path.samestat(current, root_identity)
+        ):
+            raise ValueError(f"工艺输出根目录已被替换或不是可信目录：{root}")
+
+    def artifact_target(file_path: str) -> tuple[str, Path]:
+        if (
+            not file_path
+            or file_path in {".", ".."}
+            or "/" in file_path
+            or "\\" in file_path
+            or Path(file_path).name != file_path
+            or any(ord(character) < 32 for character in file_path)
+        ):
+            raise ValueError(
+                "工艺文件路径必须是输出根目录中的文件名，不得包含目录",
+            )
+        if Path(file_path).suffix.lower() != ".json":
+            raise ValueError(f"工艺文件必须使用 .json 扩展名：{file_path}")
+        ensure_trusted_root()
+        return file_path, root / file_path
+
+    def is_link_or_reparse(path_stat: os.stat_result) -> bool:
+        file_attributes = getattr(path_stat, "st_file_attributes", 0)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        return stat.S_ISLNK(path_stat.st_mode) or bool(
+            file_attributes & reparse_flag,
         )
-        try:
-            resolved.relative_to(root)
-        except ValueError as exc:
-            raise ValueError(f"路径位于输出根目录之外：{resolved}") from exc
-        if resolved.suffix.lower() != ".json":
-            raise ValueError(f"工艺文件必须使用 .json 扩展名：{resolved}")
-        return resolved
+
+    def opened_file_path(descriptor: int, fallback: Path) -> Path:
+        """Resolve the object behind an opened handle before writing to it."""
+        if os.name == "nt":
+            import ctypes
+            import msvcrt
+
+            file_handle = msvcrt.get_osfhandle(descriptor)
+            get_final_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+            required = get_final_path(file_handle, None, 0, 0)
+            if required <= 0:
+                raise OSError("无法验证临时工艺文件的最终句柄路径")
+            buffer = ctypes.create_unicode_buffer(required + 1)
+            written = get_final_path(file_handle, buffer, len(buffer), 0)
+            if written <= 0 or written >= len(buffer):
+                raise OSError("无法读取临时工艺文件的最终句柄路径")
+            final_path = buffer.value
+            if final_path.startswith("\\\\?\\UNC\\"):
+                final_path = "\\\\" + final_path[8:]
+            elif final_path.startswith("\\\\?\\"):
+                final_path = final_path[4:]
+            return Path(final_path)
+
+        proc_handle = Path(f"/proc/self/fd/{descriptor}")
+        if proc_handle.exists():
+            return Path(os.path.realpath(proc_handle))
+        return fallback.resolve(strict=True)
 
     def result_chunk(
         operation: str,
@@ -257,11 +501,69 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
 
     def write_text_file(file_path: str, content: str) -> Any:
         """将完整 UTF-8 JSON 文本写入本次工艺输出根目录。"""
+        temporary_path = None
+        cleanup_path = None
         try:
-            target = resolve_json_path(file_path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8", newline="")
+            artifact_name, target = artifact_target(file_path)
+            descriptor, temporary_name = tempfile.mkstemp(
+                dir=root,
+                prefix=".process-artifact-",
+                suffix=".tmp",
+            )
+            temporary_path = Path(temporary_name)
+            try:
+                cleanup_path = opened_file_path(descriptor, temporary_path)
+                if os.path.normcase(str(cleanup_path.parent)) != os.path.normcase(
+                    str(root),
+                ):
+                    raise OSError(
+                        "临时工艺文件句柄位于可信输出根目录之外",
+                    )
+                ensure_trusted_root()
+            except Exception:
+                os.close(descriptor)
+                raise
+            with os.fdopen(
+                descriptor,
+                "w+",
+                encoding="utf-8",
+                newline="",
+            ) as file_handle:
+                file_handle.write(content)
+                file_handle.flush()
+                os.fsync(file_handle.fileno())
+                file_handle.seek(0)
+                verified_content = file_handle.read()
+                opened_identity = os.fstat(file_handle.fileno())
+            if verified_content != content:
+                raise OSError("临时工艺文件句柄校验失败")
+            ensure_trusted_root()
+            temporary_identity = os.lstat(temporary_path)
+            if (
+                not os.path.samestat(opened_identity, temporary_identity)
+                or is_link_or_reparse(temporary_identity)
+                or temporary_identity.st_nlink != 1
+            ):
+                raise OSError("临时工艺文件在原子替换前被更换")
+            os.replace(temporary_path, target)
+            temporary_path = None
+            cleanup_path = None
+            installed_identity = os.lstat(target)
+            if (
+                is_link_or_reparse(installed_identity)
+                or installed_identity.st_nlink != 1
+            ):
+                target.unlink(missing_ok=True)
+                raise OSError("原子替换后的工艺文件不是独占普通文件")
+            verified_artifacts[artifact_name] = {
+                "path": target,
+                "content": verified_content,
+            }
         except Exception as exc:
+            if cleanup_path is not None:
+                cleanup_path.unlink(missing_ok=True)
+            elif temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
             return result_chunk(
                 "write_text_file",
                 False,
@@ -272,16 +574,21 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
             "write_text_file",
             True,
             "# 文件写入结果\n## 状态\n成功\n"
-            f"## 绝对路径\n{target}\n## 完整内容\n{content}",
+            f"## 绝对路径\n{target}\n## 完整内容\n{verified_content}",
             target,
-            content,
+            verified_content,
         )
 
     def view_text_file(file_path: str) -> Any:
-        """读取本次工艺输出根目录中的完整 UTF-8 JSON 文本。"""
+        """返回本次运行通过写入句柄验证的完整 JSON 文本。"""
         try:
-            target = resolve_json_path(file_path)
-            content = target.read_text(encoding="utf-8")
+            artifact_name, _ = artifact_target(file_path)
+            if artifact_name not in verified_artifacts:
+                raise ValueError(
+                    "只能查看本次运行写入并验证的工艺文件",
+                )
+            target = verified_artifacts[artifact_name]["path"]
+            content = verified_artifacts[artifact_name]["content"]
         except Exception as exc:
             return result_chunk(
                 "view_text_file",
@@ -385,6 +692,11 @@ def _run_async(coro):
     result = [None, None]
     worker_state = {}
     task_ready = threading.Event()
+    cleanup_issues = []
+    cleanup_grace = _get_timeout_seconds(
+        "AGENT_TOOL_CLEANUP_GRACE_SECONDS",
+        5.0,
+    )
 
     def _target():
         loop = asyncio.new_event_loop()
@@ -398,6 +710,7 @@ def _run_async(coro):
             result[1] = exc
         finally:
             try:
+                cleanup_deadline = time.monotonic() + cleanup_grace
                 pending = [
                     pending_task
                     for pending_task in asyncio.all_tasks(loop)
@@ -406,23 +719,70 @@ def _run_async(coro):
                 for pending_task in pending:
                     pending_task.cancel()
                 if pending:
-                    loop.run_until_complete(
-                        asyncio.gather(*pending, return_exceptions=True),
+                    async def wait_pending_tasks():
+                        return await asyncio.wait(
+                            pending,
+                            timeout=max(0.0, cleanup_deadline - time.monotonic()),
+                        )
+
+                    _, still_pending = loop.run_until_complete(
+                        wait_pending_tasks(),
                     )
-                loop.run_until_complete(loop.shutdown_asyncgens())
+                    if still_pending:
+                        cleanup_issues.append(
+                            f"{len(still_pending)} 个异步清理任务仍在运行",
+                        )
+
+                remaining = max(0.0, cleanup_deadline - time.monotonic())
+                if remaining > 0:
+                    asyncgen_shutdown = loop.create_task(loop.shutdown_asyncgens())
+
+                    async def wait_asyncgen_shutdown():
+                        return await asyncio.wait(
+                            {asyncgen_shutdown},
+                            timeout=max(
+                                0.0,
+                                cleanup_deadline - time.monotonic(),
+                            ),
+                        )
+
+                    _, pending_shutdown = loop.run_until_complete(
+                        wait_asyncgen_shutdown(),
+                    )
+                    if pending_shutdown:
+                        cleanup_issues.append("异步生成器清理仍在运行")
+
+                executor = getattr(loop, "_default_executor", None)
+                if executor is not None:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    live_executor_threads = [
+                        executor_thread
+                        for executor_thread in getattr(executor, "_threads", ())
+                        if executor_thread.is_alive()
+                    ]
+                    if live_executor_threads:
+                        cleanup_issues.append(
+                            "默认执行器仍有 "
+                            f"{len(live_executor_threads)} 个工作线程在运行",
+                        )
             finally:
                 asyncio.set_event_loop(None)
                 loop.close()
 
-    worker = threading.Thread(target=_target)
+    worker = threading.Thread(target=_target, daemon=True)
     worker.start()
     task_ready.wait()
     timeout = _get_timeout_seconds("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0)
     worker.join(timeout=timeout)
     if worker.is_alive():
         worker_state["loop"].call_soon_threadsafe(worker_state["task"].cancel)
-        worker.join()
-        raise _AgentToolTimeoutError(f"执行超时：工具运行超过 {timeout:g} 秒")
+        worker.join(timeout=cleanup_grace)
+        if worker.is_alive():
+            cleanup_issues.append("协程或 MCP 清理线程仍在运行")
+        message = f"执行超时：工具运行超过 {timeout:g} 秒"
+        if cleanup_issues:
+            message += "；清理未完成，" + "；".join(cleanup_issues)
+        raise _AgentToolTimeoutError(message)
     if result[1] is not None:
         raise result[1]
     if result[0] is None:
@@ -1455,16 +1815,18 @@ class AgentExtensionTools:
             os.environ.get("PROCESS_OUTPUT_ROOT", os.getcwd()),
         ).expanduser().resolve()
         file_records = []
+        task_records = []
+        task_observer = _TaskObservationMiddleware(task_records)
         process_write_file, process_view_file = _make_process_file_tools(
             process_output_root,
             file_records,
         )
         toolkit = Toolkit(
             tools=[
-                TaskCreate(),
-                TaskGet(),
-                TaskList(),
-                TaskUpdate(),
+                TaskCreate(middlewares=[task_observer]),
+                TaskGet(middlewares=[task_observer]),
+                TaskList(middlewares=[task_observer]),
+                TaskUpdate(middlewares=[task_observer]),
                 FunctionTool(func=process_write_file),
                 FunctionTool(func=process_view_file),
             ],
@@ -1478,7 +1840,7 @@ class AgentExtensionTools:
             system_prompt=f"""
         你是一个工艺规划师,你的任务是根据查询到的知识帮助用户进行工艺规划
         在你进行规划前，请先制定一个工艺规划计划。必须使用 TaskCreate 创建完整的工艺编写任务列表，使用 TaskList 和 TaskGet 检查任务，使用 TaskUpdate 标记进行中与已完成，并逐步执行直至全部任务完成才能结束规划。
-        每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入当前文件夹下的文件内进行保存，注意输出文件结构的可读性
+        每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入输出根目录。文件路径只能是根目录下的 .json 文件名，不得包含子目录、绝对路径或路径跳转，注意输出文件结构的可读性
         同时你需要编写完成所有规划任务后再结束，请确保所有工序工步均保存，不能提前退出
 
         每个文件写入后必须调用 view_text_file 重新读取并核对，确认 JSON 完整且工序与工步关系一致。
@@ -1521,6 +1883,7 @@ class AgentExtensionTools:
             reply_text,
             "工艺规划",
             file_records,
+            task_records,
         )
 
     # ==================== 4. ComfyUI 图像生成 ====================

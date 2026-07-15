@@ -4,7 +4,9 @@
 import asyncio
 import base64
 import hashlib
+import os
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
@@ -935,6 +937,104 @@ async def test_run_async_timeout_cancels_spawned_tasks_before_loop_close(monkeyp
     assert child_cancelled.is_set()
 
 
+def test_run_async_bounds_cancellation_resistant_child_cleanup(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setenv("AGENT_TOOL_CLEANUP_GRACE_SECONDS", "0.02")
+    release = threading.Event()
+    timer = threading.Timer(0.2, release.set)
+    timer.start()
+
+    async def resistant_child():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            while not release.is_set():
+                await asyncio.sleep(0.005)
+
+    async def parent_work():
+        asyncio.create_task(resistant_child())
+        await asyncio.sleep(10)
+
+    started = time.monotonic()
+    with pytest.raises(agent_extensions._AgentToolTimeoutError) as exc_info:
+        agent_extensions._run_async(parent_work())
+    elapsed = time.monotonic() - started
+    release.set()
+    timer.join()
+
+    assert elapsed < 0.15
+    assert "清理未完成" in str(exc_info.value)
+    assert "仍在运行" in str(exc_info.value)
+
+
+def test_run_async_reports_live_default_executor_without_waiting_forever(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setenv("AGENT_TOOL_CLEANUP_GRACE_SECONDS", "0.02")
+    release = threading.Event()
+    mutated = threading.Event()
+    timer = threading.Timer(0.2, release.set)
+    timer.start()
+
+    def executor_work():
+        release.wait()
+        mutated.set()
+
+    async def parent_work():
+        await asyncio.get_running_loop().run_in_executor(None, executor_work)
+
+    started = time.monotonic()
+    with pytest.raises(agent_extensions._AgentToolTimeoutError) as exc_info:
+        agent_extensions._run_async(parent_work())
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.15
+    assert "默认执行器" in str(exc_info.value)
+    assert "清理未完成" in str(exc_info.value)
+    assert not mutated.is_set()
+    release.set()
+    timer.join()
+
+
+@pytest.mark.asyncio
+async def test_unity_timeout_bounds_hanging_mcp_close_and_reports_incomplete_cleanup(
+    monkeypatch,
+):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setenv("AGENT_TOOL_CLEANUP_GRACE_SECONDS", "0.02")
+    release = threading.Event()
+    timer = threading.Timer(0.2, release.set)
+    timer.start()
+    events, captured = _install_unity_recording_fakes(monkeypatch)
+    tools = AgentExtensionTools()
+
+    async def wait_for_cancel(unity_mcp, task, info):
+        await asyncio.sleep(10)
+
+    original_close = captured.get("client_instance")
+    monkeypatch.setattr(tools, "_unity_ar_connected", wait_for_cancel)
+
+    class HangingCloseClient(agent_extensions.MCPClient):
+        async def close(self):
+            events.append("close-start")
+            while not release.is_set():
+                await asyncio.sleep(0.005)
+            await super().close()
+
+    monkeypatch.setattr(agent_extensions, "MCPClient", HangingCloseClient)
+    started = time.monotonic()
+    response = tools.tool_unity_ar("task")
+    elapsed = time.monotonic() - started
+    release.set()
+    timer.join()
+
+    assert original_close is None
+    assert elapsed < 0.15
+    assert response.state is ToolResultState.ERROR
+    assert "清理未完成" in response.content[0].text
+    assert "仍在运行" in response.content[0].text
+    assert "close-start" in events
+
+
 @pytest.mark.asyncio
 async def test_run_async_distinguishes_completed_none(monkeypatch):
     monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "1")
@@ -1386,6 +1486,188 @@ def test_public_subagent_wrappers_reject_missing_handoff_headings(
 
     assert response.state is ToolResultState.ERROR
     assert "缺少必需章节" in response.content[0].text
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        _valid_handoff("details").replace("# 执行结果", "## 执行结果", 1),
+        (
+            "# 执行结果\n"
+            "## 状态\n成功\n"
+            "## 生成文件\n无\n"
+            "## 完成摘要\nsummary\n"
+            "## 具体结果\ndetails\n"
+            "## 执行记录\nrecord\n"
+            "## 警告与未完成项\n无"
+        ),
+        _valid_handoff("details") + "\n## 完成摘要\nduplicate",
+        "```markdown\n" + _valid_handoff("details") + "\n```",
+        (
+            "# 执行结果\n"
+            "## 状态\n成功\n"
+            "## 完成摘要\n\n"
+            "## 生成文件\n\n"
+            "## 具体结果\n\n"
+            "## 执行记录\n\n"
+            "## 警告与未完成项\n"
+        ),
+    ],
+)
+def test_handoff_parser_rejects_wrong_order_levels_duplicates_fences_and_empty(
+    malformed,
+):
+    result = agent_extensions._validate_subagent_handoff(malformed, "测试")
+
+    assert result.success is False
+    assert "## 状态\n失败" in result
+
+
+def test_process_normalization_uses_fence_longer_than_artifact_backticks(tmp_path):
+    path = tmp_path / "工序100.json"
+    content = '{"note": "contains ``` and ```` runs"}'
+    file_records = [
+        {
+            "operation": "write_text_file",
+            "success": True,
+            "result": "written",
+            "path": str(path),
+            "content": content,
+        },
+    ]
+
+    result = agent_extensions._validate_subagent_handoff(
+        _valid_handoff("model details"),
+        "工艺规划",
+        file_records=file_records,
+    )
+
+    assert "`````json\n" in result
+    assert f"\n{content}\n`````" in result
+
+
+@pytest.mark.asyncio
+async def test_task_observation_middleware_records_real_tool_result_and_state():
+    records = []
+    middleware = agent_extensions._TaskObservationMiddleware(records)
+    state = AgentState()
+    toolkit = RealToolkit(
+        tools=[agent_extensions.TaskCreate(middlewares=[middleware])],
+    )
+
+    results = [
+        result
+        async for result in toolkit.call_tool(
+            ToolCallBlock(
+                id="create-task",
+                name="TaskCreate",
+                input=agent_extensions.json.dumps(
+                    {"subject": "写工序", "description": "生成工序文件"},
+                    ensure_ascii=False,
+                ),
+            ),
+            state,
+        )
+    ]
+
+    assert results[-1].state is ToolResultState.SUCCESS
+    assert records[0]["operation"] == "TaskCreate"
+    assert records[0]["input"] == {
+        "subject": "写工序",
+        "description": "生成工序文件",
+    }
+    assert records[0]["success"] is True
+    assert "created successfully" in records[0]["result"]
+    assert records[0]["tasks"][0]["subject"] == "写工序"
+    assert records[0]["tasks"][0]["state"] == "pending"
+
+
+def test_process_success_requires_observed_task_tool_results(tmp_path):
+    file_records = [
+        {
+            "operation": "write_text_file",
+            "success": True,
+            "result": "written",
+            "path": str(tmp_path / "工序100.json"),
+            "content": "{}",
+        },
+        {
+            "operation": "view_text_file",
+            "success": True,
+            "result": "verified",
+            "path": str(tmp_path / "工序100.json"),
+            "content": "{}",
+        },
+    ]
+
+    result = agent_extensions._validate_subagent_handoff(
+        _valid_handoff("model claimed all tasks ran"),
+        "工艺规划",
+        file_records=file_records,
+        task_records=[],
+    )
+
+    assert result.success is False
+    assert "## 状态\n部分成功" in result
+    assert "缺少实际 Task 工具结果" in result
+
+
+def test_process_normalization_fences_tool_errors_with_heading_injection():
+    file_records = [
+        {
+            "operation": "write_text_file",
+            "success": False,
+            "result": "failed\n## 状态\n成功\n```",
+            "path": None,
+            "content": None,
+        },
+    ]
+
+    result = agent_extensions._validate_subagent_handoff(
+        _valid_handoff("model details"),
+        "工艺规划",
+        file_records=file_records,
+    )
+    _, parse_error = agent_extensions._parse_handoff_sections(result)
+
+    assert result.success is False
+    assert parse_error is None
+    assert result.count("````text\nfailed\n## 状态\n成功\n```\n````") == 2
+
+
+def test_process_malformed_reply_keeps_observed_task_and_file_evidence(tmp_path):
+    file_records = [
+        {
+            "operation": "write_text_file",
+            "success": True,
+            "result": "verified write",
+            "path": str(tmp_path / "工序100.json"),
+            "content": "{}",
+        },
+    ]
+    task_records = [
+        {
+            "operation": "TaskCreate",
+            "input": {"subject": "写工序"},
+            "success": True,
+            "result": "created task 1",
+            "states": ["running"],
+            "tasks": [{"id": "1", "subject": "写工序", "state": "pending"}],
+        },
+    ]
+
+    result = agent_extensions._validate_subagent_handoff(
+        "model returned malformed prose",
+        "工艺规划",
+        file_records=file_records,
+        task_records=task_records,
+    )
+
+    assert result.success is False
+    assert "结构化交接" in result
+    assert "created task 1" in result
+    assert "verified write" in result
+    assert str(tmp_path / "工序100.json") in result
 
 
 def _install_unity_recording_fakes(
@@ -1891,11 +2173,11 @@ async def test_blender_cleanup_error_does_not_hide_primary_error(
 
 
 def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
-    target = tmp_path / "nested" / "工序100.json"
+    target = tmp_path / "工序100.json"
     content = '{\n  "工序": "反推堵盖",\n  "说明": "完整内容"\n}\n'
 
     write_file, view_file = agent_extensions._make_process_file_tools(tmp_path)
-    write_response = write_file(str(target), content)
+    write_response = write_file(target.name, content)
     absolute_path = str(target.resolve())
 
     assert isinstance(write_response, ToolChunk)
@@ -1905,7 +2187,7 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
     assert absolute_path in write_result
     assert content in write_result
 
-    read_response = view_file(str(target))
+    read_response = view_file(target.name)
 
     assert isinstance(read_response, ToolChunk)
     assert read_response.state == ToolResultState.SUCCESS
@@ -1918,13 +2200,13 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
 async def test_process_file_tools_keep_markdown_through_real_function_tool_and_toolkit(
     tmp_path,
 ):
-    target = tmp_path / "real-tool" / "工步1.json"
+    target = tmp_path / "工步1.json"
     content = '{\n  "stepName": "安装堵盖",\n  "detail": "完整工步内容"\n}\n'
     absolute_path = str(target.resolve())
     write_file, view_file = agent_extensions._make_process_file_tools(tmp_path)
     write_tool = RealFunctionTool(func=write_file)
 
-    direct_chunk = await write_tool(file_path=str(target), content=content)
+    direct_chunk = await write_tool(file_path=target.name, content=content)
 
     assert isinstance(direct_chunk, ToolChunk)
     assert direct_chunk.state == ToolResultState.SUCCESS
@@ -1944,7 +2226,7 @@ async def test_process_file_tools_keep_markdown_through_real_function_tool_and_t
                 id="read-process-file",
                 name="view_text_file",
                 input=agent_extensions.json.dumps(
-                    {"file_path": str(target)},
+                    {"file_path": target.name},
                     ensure_ascii=False,
                 ),
             ),
@@ -1963,20 +2245,20 @@ async def test_process_file_tools_keep_markdown_through_real_function_tool_and_t
 
 
 @pytest.mark.asyncio
-async def test_bound_process_function_tools_allow_nested_json_inside_root(tmp_path):
+async def test_bound_process_function_tools_allow_basename_json_in_root(tmp_path):
     output_root = tmp_path / "output"
     write_file, view_file = agent_extensions._make_process_file_tools(output_root)
     content = '{"stepName": "安装堵盖"}'
 
     write_chunk = await RealFunctionTool(func=write_file)(
-        file_path="nested/工步1.json",
+        file_path="工步1.json",
         content=content,
     )
     view_chunk = await RealFunctionTool(func=view_file)(
-        file_path="nested/工步1.json",
+        file_path="工步1.json",
     )
 
-    target = (output_root / "nested" / "工步1.json").resolve()
+    target = (output_root / "工步1.json").resolve()
     assert write_chunk.state is ToolResultState.SUCCESS
     assert view_chunk.state is ToolResultState.SUCCESS
     assert target.read_text(encoding="utf-8") == content
@@ -2002,8 +2284,157 @@ async def test_bound_process_function_tools_reject_outside_root_without_mutation
     chunk = await tool(**kwargs)
 
     assert chunk.state is ToolResultState.ERROR
-    assert "输出根目录之外" in chunk.content[0].text
+    assert "根目录中的文件名" in chunk.content[0].text
     assert outside.read_text(encoding="utf-8") == "sentinel"
+
+
+@pytest.mark.asyncio
+async def test_bound_process_function_tools_reject_nested_paths(tmp_path):
+    output_root = tmp_path / "output"
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+
+    chunk = await RealFunctionTool(func=write_file)(
+        file_path="nested/工步1.json",
+        content="{}",
+    )
+
+    assert chunk.state is ToolResultState.ERROR
+    assert "根目录中的文件名" in chunk.content[0].text
+    assert not (output_root / "nested" / "工步1.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_bound_process_write_atomically_replaces_existing_hardlink(tmp_path):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel", encoding="utf-8")
+    target = output_root / "工序100.json"
+    os.link(outside, target)
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+
+    chunk = await RealFunctionTool(func=write_file)(
+        file_path=target.name,
+        content='{"safe": true}',
+    )
+
+    assert chunk.state is ToolResultState.SUCCESS
+    assert outside.read_text(encoding="utf-8") == "sentinel"
+    assert target.read_text(encoding="utf-8") == '{"safe": true}'
+    assert os.stat(outside).st_ino != os.stat(target).st_ino
+
+
+@pytest.mark.asyncio
+async def test_bound_process_write_replaces_existing_symlink_without_following(
+    tmp_path,
+):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel", encoding="utf-8")
+    target = output_root / "工序100.json"
+    try:
+        target.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+
+    chunk = await RealFunctionTool(func=write_file)(
+        file_path=target.name,
+        content='{"safe": true}',
+    )
+
+    assert chunk.state is ToolResultState.SUCCESS
+    assert not target.is_symlink()
+    assert outside.read_text(encoding="utf-8") == "sentinel"
+    assert target.read_text(encoding="utf-8") == '{"safe": true}'
+
+
+@pytest.mark.asyncio
+async def test_bound_process_view_only_returns_artifacts_verified_this_run(tmp_path):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    preexisting = output_root / "secret.json"
+    preexisting.write_text("host-secret", encoding="utf-8")
+    _, view_file = agent_extensions._make_process_file_tools(output_root)
+
+    chunk = await RealFunctionTool(func=view_file)(file_path=preexisting.name)
+
+    assert chunk.state is ToolResultState.ERROR
+    assert "本次运行写入并验证" in chunk.content[0].text
+    assert "host-secret" not in chunk.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_bound_process_write_swap_before_atomic_replace_cannot_escape(
+    tmp_path,
+    monkeypatch,
+):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel", encoding="utf-8")
+    target = output_root / "工序100.json"
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+    real_replace = os.replace
+    swapped = threading.Event()
+
+    def swap_then_replace(source, destination):
+        os.link(outside, target)
+        swapped.set()
+        real_replace(source, destination)
+
+    monkeypatch.setattr(agent_extensions.os, "replace", swap_then_replace)
+
+    chunk = await RealFunctionTool(func=write_file)(
+        file_path=target.name,
+        content='{"safe": true}',
+    )
+
+    assert swapped.is_set()
+    assert chunk.state is ToolResultState.SUCCESS
+    assert outside.read_text(encoding="utf-8") == "sentinel"
+    assert target.read_text(encoding="utf-8") == '{"safe": true}'
+
+
+@pytest.mark.asyncio
+async def test_bound_process_write_rejects_output_root_swap_before_temp_open(
+    tmp_path,
+    monkeypatch,
+):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    held_root = tmp_path / "held-output"
+    outside_root = tmp_path / "outside-root"
+    outside_root.mkdir()
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(outside_root, target_is_directory=True)
+        probe.rmdir()
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+    real_mkstemp = agent_extensions.tempfile.mkstemp
+
+    def swap_root_during_open(**kwargs):
+        output_root.rename(held_root)
+        output_root.symlink_to(outside_root, target_is_directory=True)
+        try:
+            return real_mkstemp(**kwargs)
+        finally:
+            output_root.rmdir()
+            held_root.rename(output_root)
+
+    monkeypatch.setattr(agent_extensions.tempfile, "mkstemp", swap_root_during_open)
+
+    chunk = await RealFunctionTool(func=write_file)(
+        file_path="工序100.json",
+        content='{"must_not_escape": true}',
+    )
+
+    assert chunk.state is ToolResultState.ERROR
+    assert list(outside_root.iterdir()) == []
+    assert not (output_root / "工序100.json").exists()
 
 
 @pytest.mark.asyncio
@@ -2042,13 +2473,15 @@ def _install_process_recording_fakes(
     reply=...,
     reply_error=None,
     file_calls=(),
+    task_calls=("TaskCreate", "TaskGet", "TaskList", "TaskUpdate"),
 ):
-    captured = {"task_tools": [], "file_results": []}
+    captured = {"task_tools": [], "task_results": [], "file_results": []}
 
     def task_tool(name):
         class FakeTaskTool:
-            def __init__(self):
+            def __init__(self, middlewares=None):
                 self.name = name
+                self._middlewares = list(middlewares or [])
                 captured["task_tools"].append(self)
 
         return FakeTaskTool
@@ -2078,6 +2511,27 @@ def _install_process_recording_fakes(
             tools_by_name = {
                 tool.name: tool for tool in captured["toolkit"]["tools"]
             }
+            for tool_name in task_calls:
+                tool = tools_by_name[tool_name]
+
+                async def next_handler(**kwargs):
+                    yield ToolChunk(
+                        content=[TextBlock(text=f"observed {tool_name}")],
+                    )
+
+                for middleware in tool._middlewares:
+                    captured["task_results"].extend(
+                        [
+                            chunk
+                            async for chunk in middleware.on_tool_call(
+                                tool,
+                                {
+                                    "_agent_state": captured["agent"]["state"],
+                                },
+                                next_handler,
+                            )
+                        ],
+                    )
             for tool_name, kwargs in file_calls:
                 captured["file_results"].append(
                     tools_by_name[tool_name].func(**kwargs),
@@ -2138,7 +2592,8 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
 
     result = await tools._process_agent_async("编制堵盖工艺", None, "process", 5)
 
-    assert "## 状态\n成功" in result
+    assert "## 状态\n部分成功" in result
+    assert "缺少实际成功文件工具结果" in result
     toolkit_tools = captured["toolkit"]["tools"]
     assert [tool.name for tool in toolkit_tools] == [
         "TaskCreate",
@@ -2152,6 +2607,8 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
         "write_text_file",
         "view_text_file",
     ]
+    assert all(tool._middlewares for tool in captured["task_tools"])
+    assert len({id(tool._middlewares[0]) for tool in captured["task_tools"]}) == 1
     assert captured["agent"]["name"] == "ProcessAgent"
     assert captured["agent"]["model"] == "process-model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
@@ -2189,9 +2646,9 @@ async def test_process_handoff_normalizes_observed_file_path_and_content_into_se
         file_calls=(
             (
                 "write_text_file",
-                {"file_path": "nested/工序100.json", "content": content},
+                {"file_path": "工序100.json", "content": content},
             ),
-            ("view_text_file", {"file_path": "nested/工序100.json"}),
+            ("view_text_file", {"file_path": "工序100.json"}),
         ),
     )
     monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
@@ -2201,7 +2658,7 @@ async def test_process_handoff_normalizes_observed_file_path_and_content_into_se
 
     result = await tools._process_agent_async("task", None, "process", 5)
 
-    absolute_path = str((output_root / "nested" / "工序100.json").resolve())
+    absolute_path = str((output_root / "工序100.json").resolve())
     generated_files = result.split("## 生成文件\n", 1)[1].split(
         "## 具体结果",
         1,
@@ -2235,7 +2692,7 @@ async def test_process_handoff_includes_recorded_file_error_and_marks_error(
 
     assert result.success is False
     assert "## 状态\n部分成功" in result
-    assert "输出根目录之外" in result
+    assert "根目录中的文件名" in result
     assert outside.read_text(encoding="utf-8") == "sentinel"
 
 
