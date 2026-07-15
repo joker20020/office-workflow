@@ -385,10 +385,10 @@ class AgentIntegration:
         self._exposure_subscriptions.append((source, token))
 
     def _replace_exposure_source(self, attribute: str, source: Any) -> bool:
-        previous = getattr(self, attribute)
-        if previous is source:
-            return False
         with self._exposure_change_lock:
+            previous = getattr(self, attribute)
+            if previous is source:
+                return False
             for index, (bound_source, token) in enumerate(
                 self._exposure_subscriptions
             ):
@@ -426,7 +426,17 @@ class AgentIntegration:
             return
 
         if self._async_runtime.in_runtime_thread():
-            task = asyncio.create_task(self._drain_exposure_rebuilds())
+            drain = self._drain_exposure_rebuilds()
+            try:
+                task = asyncio.create_task(drain)
+            except Exception:
+                drain.close()
+                with self._exposure_change_lock:
+                    self._exposure_rebuild_dirty = False
+                    self._exposure_rebuild_in_progress = False
+                    self._exposure_rebuild_idle.set()
+                _logger.exception("Agent exposure rebuild task scheduling failed")
+                return
             self._exposure_rebuild_task = task
             task.add_done_callback(self._clear_exposure_rebuild_task)
             return

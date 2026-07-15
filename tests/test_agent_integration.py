@@ -727,16 +727,32 @@ def test_exposure_change_before_initialization_does_not_start_runtime(
     monkeypatch,
 ):
     registry = AgentToolRegistry.instance()
-    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", AsyncMock(return_value=True))
+    preinit_tool = lambda: "preinit"
+    toolkit_factory = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
+    monkeypatch.setattr(
+        agent_integration,
+        "Agent",
+        lambda **kwargs: SimpleNamespace(state=kwargs["state"]),
+    )
+    monkeypatch.setattr(agent, "_connect_mcp_clients", AsyncMock(return_value=[]))
+    monkeypatch.setattr(agent._skill_manager, "get_enabled_skill_paths", Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="prompt"))
 
-    registry.register("preinit-automatic-rebuild", [lambda: None])
+    registry.register("preinit-automatic-rebuild", [preinit_tool])
     try:
         assert agent._async_runtime.is_running is False
-        assert agent._rebuild_agent_runtime_impl.await_count == 0
         assert agent._exposure_rebuild_dirty is False
         assert agent._exposure_rebuild_in_progress is False
         assert agent._exposure_rebuild_idle.is_set()
+        assert agent.initialize("openai", "model", "https://example.test/v1") is True
+        assert len(agent._toolkit.tools) == 1
+        assert agent._toolkit.tools[0]._func is preinit_tool
     finally:
+        agent.shutdown()
         registry.unregister("preinit-automatic-rebuild")
 
 
@@ -782,7 +798,33 @@ def test_exposure_changes_coalesce_one_follow_up_and_all_callers_wait(
     agent,
     monkeypatch,
 ):
+    class CountingIdleEvent:
+        def __init__(self):
+            self._event = threading.Event()
+            self._event.set()
+            self._lock = threading.Lock()
+            self._waiters = 0
+            self.two_followers_waiting = threading.Event()
+
+        def clear(self):
+            self._event.clear()
+
+        def set(self):
+            self._event.set()
+
+        def is_set(self):
+            return self._event.is_set()
+
+        def wait(self, timeout=None):
+            with self._lock:
+                self._waiters += 1
+                if self._waiters == 2:
+                    self.two_followers_waiting.set()
+            return self._event.wait(timeout)
+
     _publishable_agent_runtime(agent)
+    controlled_idle = CountingIdleEvent()
+    agent._exposure_rebuild_idle = controlled_idle
     first_started = threading.Event()
     release_first = threading.Event()
     calls = 0
@@ -820,6 +862,7 @@ def test_exposure_changes_coalesce_one_follow_up_and_all_callers_wait(
     assert first_started.wait(2)
     threads[1].start()
     threads[2].start()
+    assert controlled_idle.two_followers_waiting.wait(2)
     assert not any(event.is_set() for event in returned)
     release_first.set()
     for thread in threads:
@@ -942,6 +985,64 @@ def test_runtime_thread_exposure_change_schedules_without_sync_wait(
     assert agent._exposure_rebuild_idle.wait(2)
 
 
+def test_runtime_thread_task_creation_failure_restores_idle_and_isolates_callback(
+    agent,
+    monkeypatch,
+):
+    _publishable_agent_runtime(agent)
+    rebuild = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    real_create_task = asyncio.create_task
+    attempts = 0
+
+    def create_task(coroutine):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("task creation rejected")
+        return real_create_task(coroutine)
+
+    monkeypatch.setattr(agent_integration.asyncio, "create_task", create_task)
+
+    async def publish_on_runtime():
+        agent._on_exposure_change(
+            SimpleNamespace(source="tools", action="changed", name="first"),
+        )
+        return "callback-isolated"
+
+    try:
+        assert agent._async_runtime.submit(publish_on_runtime()).result(timeout=2) == (
+            "callback-isolated"
+        )
+        assert agent._exposure_rebuild_dirty is False
+        assert agent._exposure_rebuild_in_progress is False
+        assert agent._exposure_rebuild_idle.is_set()
+
+        completed = threading.Event()
+        follower = threading.Thread(
+            target=lambda: (
+                agent._on_exposure_change(
+                    SimpleNamespace(source="tools", action="changed", name="second"),
+                ),
+                completed.set(),
+            ),
+        )
+        follower.start()
+        follower.join(2)
+        assert not follower.is_alive()
+        assert completed.is_set()
+        assert rebuild.await_count == 1
+        shutdown = threading.Thread(target=agent.shutdown)
+        shutdown.start()
+        shutdown.join(2)
+        assert not shutdown.is_alive()
+    finally:
+        agent._exposure_rebuild_dirty = False
+        agent._exposure_rebuild_in_progress = False
+        agent._exposure_rebuild_idle.set()
+
+
 def test_manager_replacement_rebinds_exposure_subscription(
     agent,
     monkeypatch,
@@ -973,6 +1074,65 @@ def test_manager_replacement_rebinds_exposure_subscription(
     assert rebuild.await_count == after_mcp_replacement + 1
     agent.set_mcp_manager(new_mcp_manager)
     assert rebuild.await_count == after_mcp_replacement + 1
+
+
+def test_concurrent_manager_replacement_detaches_intermediate_subscription(
+    agent,
+    monkeypatch,
+    db,
+):
+    class FirstPairRendezvousLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._counter_lock = threading.Lock()
+            self._enters = 0
+            self._barrier = threading.Barrier(2)
+
+        def __enter__(self):
+            with self._counter_lock:
+                self._enters += 1
+                should_rendezvous = self._enters <= 2
+            if should_rendezvous:
+                self._barrier.wait(timeout=2)
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self._lock.release()
+
+    old_manager = agent._skill_manager
+    first_manager = SkillManager(db)
+    second_manager = SkillManager(db)
+    agent._exposure_change_lock = FirstPairRendezvousLock()
+    replacements = [
+        threading.Thread(target=agent.set_skill_manager, args=(first_manager,)),
+        threading.Thread(target=agent.set_skill_manager, args=(second_manager,)),
+    ]
+    for replacement in replacements:
+        replacement.start()
+    for replacement in replacements:
+        replacement.join(2)
+    assert all(not replacement.is_alive() for replacement in replacements)
+
+    final_manager = agent._skill_manager
+    intermediate_manager = (
+        second_manager if final_manager is first_manager else first_manager
+    )
+    bound_skill_managers = [
+        source
+        for source, _token in agent._exposure_subscriptions
+        if source in {old_manager, first_manager, second_manager}
+    ]
+    assert bound_skill_managers == [final_manager]
+
+    _publishable_agent_runtime(agent)
+    rebuild = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent, "_rebuild_agent_runtime_impl", rebuild)
+    intermediate_manager.add_skill("intermediate", "/intermediate")
+    assert rebuild.await_count == 0
+    final_manager.add_skill("final", "/final")
+    assert rebuild.await_count == 1
 
 
 def test_mcp_and_skill_events_trigger_automatic_rebuild(agent, monkeypatch):
