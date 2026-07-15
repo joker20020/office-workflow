@@ -6,11 +6,12 @@
 - process_agent_tool: 工艺规划 — 查询RAG知识库 → 重排序 → AgentScope 任务工具生成工序工步文件
 - unity_agent_tool: Unity AR — 通过MCP连接Unity编辑器，自动创建AR辅助装配程序
 - blender_agent_tool: Blender建模 — 通过MCP连接Blender，完成三维建模任务
-- comfyui_agent_tool: 图像生成 — ReActAgent细化提示词后调用ComfyUI生成图像
+- comfyui_agent_tool: 图像生成 — AgentScope 2 Agent细化提示词后调用ComfyUI生成图像
 """
 
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import os
@@ -32,7 +33,6 @@ try:
         AssistantMsg,
         Base64Source,
         DataBlock,
-        Msg,
         TextBlock,
         ToolResultState,
         UserMsg,
@@ -129,7 +129,7 @@ def view_text_file(file_path: str) -> Any:
     )
 
 
-def _message_text(msg: Msg) -> str:
+def _message_text(msg: Any) -> str:
     if msg is None:
         return ""
     return msg.get_text_content() or ""
@@ -1287,80 +1287,168 @@ class AgentExtensionTools:
             return _make_response(f"图像生成失败: {e}", success=False)
 
     async def _comfyui_agent_async(self, task: str) -> str:
-        """
-        严格对应 main.py comfyui_agent_tool:
-        创建内部 generate_image_from_text 工具函数，注册到 toolkit，
-        然后由 ReActAgent 细化提示词后调用。
-        """
+        """Refine a prompt with AgentScope 2 and generate one verified image."""
+
+        def format_result(
+            status: str,
+            summary: str,
+            files: str,
+            details: str,
+            record: str,
+            warnings: str,
+        ) -> str:
+            return (
+                "# 执行结果\n"
+                f"## 状态\n{status}\n"
+                f"## 完成摘要\n{summary}\n"
+                f"## 生成文件\n{files}\n"
+                f"## 具体结果\n{details}\n"
+                f"## 执行记录\n{record}\n"
+                f"## 警告与未完成项\n{warnings}"
+            )
+
         if not AGENTSCOPE_AVAILABLE:
-            return "AgentScope 未安装，无法使用图像生成功能"
+            return format_result(
+                "失败",
+                "未生成图片。",
+                "无",
+                "AgentScope 未安装，无法细化正向提示词。",
+                "未调用图像 API。",
+                "AgentScope 未安装。",
+            )
 
-        requester = self._get_requester()
-
-        # 内部工具函数 — 与 main.py 完全一致
-        async def generate_image_from_text(prompt: str, output_name: str):
-            """
-            调用API生成所需的图片
-
-            :param prompt: 生成图片的正向提示词
-            :param output_name: 生成图片的保存名称
-            :return:
-            """
-            success = await requester.text_to_image(prompt, output_name)
-            return ToolResponse(content=[
-                TextBlock(type="text", text=f"图片生成{'成功' if success else '失败'}")
-            ])
-
-        toolkit = Toolkit()
-        toolkit.register_tool_function(generate_image_from_text)
-
-        comfyui_agent = ReActAgent(
-            name="comfyui_agent",
-            sys_prompt=f"""
-        你是一个ai图片生成助手,你的任务是根据用户的描述，合理细化生成图片细节要求，并调用api进行生成
-        注意：请将用户描述往符合图像生成模型要求的方向进行细化，使其包含必要的细节，及要求
-        图像应该为2维工程图风格，以指示为主，尽量不要出现人物等元素
-        若有多张图片需要生成，请逐张生成
-
-        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        toolkit = Toolkit(tools=[])
+        comfyui_agent = Agent(
+            name="ComfyUIAgent",
+            system_prompt="""
+        你是一个 AI 图片提示词优化助手。根据用户描述，返回一段可直接用于图像模型的正向提示词，不要调用工具，也不要输出 Markdown。
+        提示词必须体现二维工程图、清晰装配指示、必要技术细节，并尽量避免人物元素。
+        调用方会根据实际 API 返回和文件校验生成最终交接；最终交接必须包含以下 Markdown 结构，章节不得缺失：
         # 执行结果
         ## 状态
-        只能填写：成功、部分成功或失败；只有工具明确返回成功时才能标记对应图片生成成功。
+        只有图像 API 工具明确返回成功且预期本地文件存在时才能填写成功。
         ## 完成摘要
-        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        只总结实际完成的图像生成工作。
         ## 生成文件
-        对每张图片逐项列出类型、输出文件名或路径、用途和验证状态。
-        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
-        没有生成文件时必须明确写“无”。
+        每张图片必须列出经过验证的绝对路径；路径未提供时不得猜测。
         ## 具体结果
-        对每张图片分别给出实际使用的提示词、输出名称和生成结果，不得只给总体结论。
+        必须列出实际使用的提示词、负向提示词、尺寸、步数、种子和 API 结果。
         ## 执行记录
-        按调用顺序列出每次图像生成工具调用的关键参数和返回结果。
+        必须列出图像 API 调用参数和验证结果。
         ## 警告与未完成项
-        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
+        必须列出失败、缺失或未经验证的内容；没有问题时写“无”。
         """,
-            model=OpenAIChatModel(
-                model_name=self._llm_name,
-                api_key=os.environ["LLM_API_KEY"],
-                stream=True,
-                enable_thinking=False,
-                client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 4096, "max_completion_tokens": 4096},
+            model=_build_model(
+                "openai",
+                self._llm_name,
+                os.environ["LLM_BASE_URL"],
+                os.environ["LLM_API_KEY"],
             ),
-            formatter=DeepSeekChatFormatter(),
             toolkit=toolkit,
-            memory=InMemoryMemory(),
+            react_config=ReActConfig(max_iters=60),
         )
 
-        msg = Msg(name="user", content=task, role="user")
-        msg_res = await comfyui_agent(msg)
+        try:
+            msg_res = await comfyui_agent.reply(
+                UserMsg(name="User", content=task)
+            )
+        except Exception as exc:
+            return format_result(
+                "失败",
+                "提示词细化失败，未生成图片。",
+                "无",
+                f"ComfyUI Agent 异常：{exc}",
+                "未调用图像 API。",
+                f"提示词细化异常：{exc}",
+            )
 
-        if msg_res is None:
-            return "ComfyUI Agent 未返回结果"
-        blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        if blocks:
-            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
-        return str(msg_res.content) if msg_res.content else "ComfyUI Agent 未返回内容"
+        positive_prompt = _message_text(msg_res).strip()
+        if not positive_prompt:
+            reason = "ComfyUI Agent 未返回结果" if msg_res is None else "ComfyUI Agent 返回内容为空"
+            return format_result(
+                "失败",
+                "未获得可用正向提示词，未生成图片。",
+                "无",
+                reason,
+                "未调用图像 API。",
+                reason,
+            )
+
+        negative_prompt = (
+            "people, person, portrait, photorealistic, watermark, signature"
+        )
+        width = 1024
+        height = 1024
+        steps = 20
+        seed = None
+        prompt_hash = hashlib.sha256(
+            positive_prompt.encode("utf-8")
+        ).hexdigest()[:16]
+        output_name = f"comfyui-{prompt_hash}.png"
+        requester = self._get_requester()
+        output_path = os.path.abspath(
+            os.path.join(requester.data_dir, "img", output_name)
+        )
+
+        api_result = None
+        api_error = None
+        try:
+            api_result = await requester.text_to_image(
+                positive_prompt,
+                output_name,
+                negative_prompt=negative_prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                seed=seed,
+            )
+        except Exception as exc:
+            api_error = exc
+
+        file_exists = os.path.isfile(output_path)
+        succeeded = api_result is True and file_exists
+        api_text = f"异常：{api_error}" if api_error else str(api_result)
+        details = (
+            f"- 实际正向提示词：{positive_prompt}\n"
+            f"- 实际负向提示词：{negative_prompt}\n"
+            f"- 尺寸：{width}x{height}\n"
+            f"- 步数：{steps}\n"
+            f"- 种子：{'未提供' if seed is None else seed}\n"
+            f"- 输出名称：{output_name}\n"
+            f"- 预期绝对路径：{output_path}\n"
+            f"- API 返回：{api_text}\n"
+            f"- 本地文件存在：{file_exists}"
+        )
+        record = (
+            "1. AgentScope 2 Agent 已细化用户请求。\n"
+            f"2. 调用 text_to_image，尺寸 {width}x{height}，步数 {steps}，"
+            f"种子 {'未提供' if seed is None else seed}。\n"
+            f"3. API 返回：{api_text}；文件校验：{file_exists}。"
+        )
+        if succeeded:
+            return format_result(
+                "成功",
+                "图像 API 返回成功，且生成文件已在本地验证存在。",
+                f"- PNG 图像：{output_path}（已验证）",
+                details,
+                record,
+                "无",
+            )
+
+        if api_error:
+            warning = f"图像 API 异常：{api_error}"
+        elif api_result is True:
+            warning = f"图像 API 返回成功，但预期文件不存在：{output_path}"
+        else:
+            warning = f"图像 API 返回：{api_result}"
+        return format_result(
+            "失败",
+            "图像生成未通过 API 与本地文件双重验证。",
+            "无",
+            details,
+            record,
+            warning,
+        )
 
     # ==================== 5. 提取JSON ====================
 

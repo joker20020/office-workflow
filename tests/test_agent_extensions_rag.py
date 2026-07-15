@@ -897,6 +897,224 @@ async def test_text_to_image_uses_configured_timeout(
     assert timeout.total == 12.5
 
 
+def _install_comfyui_recording_fakes(
+    monkeypatch,
+    tmp_path,
+    *,
+    reply="refined positive prompt",
+    reply_error=None,
+    api_result=True,
+    api_error=None,
+    write_file=True,
+):
+    captured = {"api_calls": []}
+
+    class FakeToolkit:
+        def __init__(self, **kwargs):
+            captured["toolkit"] = kwargs
+            captured["toolkit_instance"] = self
+
+    class FakeReActConfig:
+        def __init__(self, **kwargs):
+            captured["react_config"] = kwargs
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured["agent"] = kwargs
+
+        async def reply(self, msg):
+            captured["message"] = msg
+            if reply_error is not None:
+                raise reply_error
+            if reply is None:
+                return None
+            return AssistantMsg(name="ComfyUIAgent", content=reply)
+
+    class FakeRequester:
+        data_dir = str(tmp_path)
+
+        async def text_to_image(self, prompt, output_name, **kwargs):
+            captured["api_calls"].append((prompt, output_name, kwargs))
+            if api_error is not None:
+                raise api_error
+            if api_result and write_file:
+                target = tmp_path / "img" / output_name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"png")
+            return api_result
+
+    def fake_build_model(provider, model_name, base_url, api_key):
+        captured["model"] = (provider, model_name, base_url, api_key)
+        return "comfyui-model"
+
+    real_user_msg = agent_extensions.UserMsg
+
+    def fake_user_msg(**kwargs):
+        captured["user_msg"] = kwargs
+        return real_user_msg(**kwargs)
+
+    monkeypatch.setattr(agent_extensions, "Toolkit", FakeToolkit)
+    monkeypatch.setattr(agent_extensions, "Agent", FakeAgent, raising=False)
+    monkeypatch.setattr(agent_extensions, "ReActConfig", FakeReActConfig, raising=False)
+    monkeypatch.setattr(agent_extensions, "_build_model", fake_build_model)
+    monkeypatch.setattr(agent_extensions, "UserMsg", fake_user_msg)
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://model/v1")
+    tools = AgentExtensionTools()
+    tools._requester = FakeRequester()
+    return tools, captured
+
+
+@pytest.mark.asyncio
+async def test_comfyui_uses_agentscope2_agent_and_reports_written_image(
+    monkeypatch,
+    tmp_path,
+):
+    refined_prompt = "refined positive prompt"
+    tools, captured = _install_comfyui_recording_fakes(
+        monkeypatch,
+        tmp_path,
+        reply=refined_prompt,
+    )
+
+    result = await tools._comfyui_agent_async("draw an assembly guide")
+
+    expected_name = (
+        f"comfyui-{hashlib.sha256(refined_prompt.encode('utf-8')).hexdigest()[:16]}.png"
+    )
+    expected_path = str((tmp_path / "img" / expected_name).resolve())
+    assert captured["toolkit"] == {"tools": []}
+    assert captured["agent"]["name"] == "ComfyUIAgent"
+    assert captured["agent"]["model"] == "comfyui-model"
+    assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
+    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["model"] == (
+        "openai",
+        tools._llm_name,
+        "http://model/v1",
+        "secret",
+    )
+    assert captured["user_msg"] == {
+        "name": "User",
+        "content": "draw an assembly guide",
+    }
+    assert captured["message"].role == "user"
+    assert captured["api_calls"] == [
+        (
+            refined_prompt,
+            expected_name,
+            {
+                "negative_prompt": (
+                    "people, person, portrait, photorealistic, watermark, signature"
+                ),
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "seed": None,
+            },
+        )
+    ]
+    for heading in (
+        "# 执行结果",
+        "## 状态",
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in result
+    assert "成功" in result
+    assert refined_prompt in result
+    assert "people, person, portrait, photorealistic, watermark, signature" in result
+    assert "1024x1024" in result
+    assert "20" in result
+    assert "未提供" in result
+    assert expected_path in result
+    assert "API 返回：True" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "reply_error", "expected"),
+    [
+        (None, None, "未返回"),
+        ("", None, "空"),
+        ("unused", RuntimeError("agent failed"), "agent failed"),
+    ],
+)
+async def test_comfyui_agent_failures_are_structured_without_image_api_call(
+    monkeypatch,
+    tmp_path,
+    reply,
+    reply_error,
+    expected,
+):
+    tools, captured = _install_comfyui_recording_fakes(
+        monkeypatch,
+        tmp_path,
+        reply=reply,
+        reply_error=reply_error,
+    )
+
+    result = await tools._comfyui_agent_async("task")
+
+    assert "## 状态\n失败" in result
+    assert expected in result
+    assert "## 生成文件\n无" in result
+    assert captured["api_calls"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("api_result", "api_error", "write_file", "expected"),
+    [
+        (False, None, False, "API 返回：False"),
+        (True, None, False, "预期文件不存在"),
+        (True, RuntimeError("backend offline"), False, "backend offline"),
+    ],
+)
+async def test_comfyui_image_failures_never_report_success(
+    monkeypatch,
+    tmp_path,
+    api_result,
+    api_error,
+    write_file,
+    expected,
+):
+    tools, _ = _install_comfyui_recording_fakes(
+        monkeypatch,
+        tmp_path,
+        api_result=api_result,
+        api_error=api_error,
+        write_file=write_file,
+    )
+
+    result = await tools._comfyui_agent_async("task")
+
+    assert "## 状态\n失败" in result
+    assert expected in result
+    assert "## 状态\n成功" not in result
+
+
+def test_comfyui_sync_wrapper_preserves_tool_response(monkeypatch):
+    def fake_run_async(coro):
+        coro.close()
+        return "# 执行结果\n## 状态\n成功"
+
+    monkeypatch.setattr(
+        agent_extensions,
+        "_run_async",
+        fake_run_async,
+    )
+
+    response = AgentExtensionTools().tool_generate_image("task")
+
+    assert isinstance(response, ToolResponse)
+    assert response.state == ToolResultState.SUCCESS
+    assert response.content[0].text == "# 执行结果\n## 状态\n成功"
+
+
 def _install_unity_recording_fakes(
     monkeypatch,
     *,
@@ -1651,11 +1869,17 @@ def _subagent_prompt_source(agent_name: str) -> str:
         "unity_agent": "UnityAgent",
         "blender_agent": "BlenderAgent",
         "process_agent": "ProcessAgent",
+        "comfyui_agent": "ComfyUIAgent",
     }.get(agent_name, agent_name)
     start = source.index(f'name="{runtime_name}"')
     model_constructor = (
         "model=_build_model("
-        if agent_name in {"unity_agent", "blender_agent", "process_agent"}
+        if agent_name in {
+            "unity_agent",
+            "blender_agent",
+            "process_agent",
+            "comfyui_agent",
+        }
         else "model=OpenAIChatModel("
     )
     end = source.index(model_constructor, start)
