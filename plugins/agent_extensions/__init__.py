@@ -42,6 +42,8 @@ try:
         DeepSeekChatModel,
         OpenAIChatModel,
     )
+    from agentscope.permission import PermissionMode
+    from agentscope.state import AgentState
     from agentscope.tool import (
         FunctionTool,
         TaskCreate,
@@ -49,6 +51,7 @@ try:
         TaskList,
         TaskUpdate,
         Toolkit,
+        ToolChunk,
         ToolResponse,
     )
 
@@ -89,12 +92,19 @@ def write_text_file(file_path: str, content: str) -> Any:
         os.makedirs(parent_dir, exist_ok=True)
     with open(absolute_path, "w", encoding="utf-8", newline="") as file_handle:
         file_handle.write(content)
-    return _make_response(
-        "# 文件写入结果\n"
-        "## 状态\n成功\n"
-        f"## 绝对路径\n{absolute_path}\n"
-        "## 完整内容\n"
-        f"{content}",
+    return ToolChunk(
+        content=[
+            TextBlock(
+                text=(
+                    "# 文件写入结果\n"
+                    "## 状态\n成功\n"
+                    f"## 绝对路径\n{absolute_path}\n"
+                    "## 完整内容\n"
+                    f"{content}"
+                ),
+            ),
+        ],
+        state=ToolResultState.SUCCESS,
     )
 
 
@@ -103,12 +113,19 @@ def view_text_file(file_path: str) -> Any:
     absolute_path = os.path.abspath(os.path.expanduser(file_path))
     with open(absolute_path, "r", encoding="utf-8") as file_handle:
         content = file_handle.read()
-    return _make_response(
-        "# 文件读取结果\n"
-        "## 状态\n成功\n"
-        f"## 绝对路径\n{absolute_path}\n"
-        "## 完整内容\n"
-        f"{content}",
+    return ToolChunk(
+        content=[
+            TextBlock(
+                text=(
+                    "# 文件读取结果\n"
+                    "## 状态\n成功\n"
+                    f"## 绝对路径\n{absolute_path}\n"
+                    "## 完整内容\n"
+                    f"{content}"
+                ),
+            ),
+        ],
+        state=ToolResultState.SUCCESS,
     )
 
 
@@ -1204,6 +1221,9 @@ class AgentExtensionTools:
                 FunctionTool(func=view_text_file),
             ],
         )
+        process_state = AgentState(
+            permission_context={"mode": PermissionMode.BYPASS},
+        )
 
         process_agent = Agent(
             name="ProcessAgent",
@@ -1240,6 +1260,7 @@ class AgentExtensionTools:
                 os.environ["VLM_API_KEY"],
             ),
             toolkit=toolkit,
+            state=process_state,
             react_config=ReActConfig(max_iters=60),
         )
 

@@ -28,6 +28,7 @@ from agentscope.message import (
     Base64Source,
     DataBlock,
     TextBlock,
+    ToolCallBlock,
     ToolResultState,
 )
 from agentscope.model import (
@@ -35,7 +36,18 @@ from agentscope.model import (
     DeepSeekChatModel,
     OpenAIChatModel,
 )
-from agentscope.tool import ToolResponse
+from agentscope.permission import (
+    PermissionBehavior,
+    PermissionEngine,
+    PermissionMode,
+)
+from agentscope.state import AgentState
+from agentscope.tool import (
+    FunctionTool as RealFunctionTool,
+    Toolkit as RealToolkit,
+    ToolChunk,
+    ToolResponse,
+)
 
 
 class FakeResponse:
@@ -1386,7 +1398,7 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
     write_response = agent_extensions.write_text_file(str(target), content)
     absolute_path = str(target.resolve())
 
-    assert isinstance(write_response, ToolResponse)
+    assert isinstance(write_response, ToolChunk)
     assert write_response.state == ToolResultState.SUCCESS
     assert target.read_text(encoding="utf-8") == content
     write_result = write_response.content[0].text
@@ -1395,11 +1407,88 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
 
     read_response = agent_extensions.view_text_file(str(target))
 
-    assert isinstance(read_response, ToolResponse)
+    assert isinstance(read_response, ToolChunk)
     assert read_response.state == ToolResultState.SUCCESS
     read_result = read_response.content[0].text
     assert absolute_path in read_result
     assert content in read_result
+
+
+@pytest.mark.asyncio
+async def test_process_file_tools_keep_markdown_through_real_function_tool_and_toolkit(
+    tmp_path,
+):
+    target = tmp_path / "real-tool" / "工步1.json"
+    content = '{\n  "stepName": "安装堵盖",\n  "detail": "完整工步内容"\n}\n'
+    absolute_path = str(target.resolve())
+    write_tool = RealFunctionTool(func=agent_extensions.write_text_file)
+
+    direct_chunk = await write_tool(file_path=str(target), content=content)
+
+    assert isinstance(direct_chunk, ToolChunk)
+    assert direct_chunk.state == ToolResultState.SUCCESS
+    direct_text = direct_chunk.content[0].text
+    assert direct_text.startswith("# 文件写入结果\n")
+    assert absolute_path in direct_text
+    assert content in direct_text
+    assert "content=[TextBlock" not in direct_text
+
+    toolkit = RealToolkit(
+        tools=[RealFunctionTool(func=agent_extensions.view_text_file)]
+    )
+    results = [
+        result
+        async for result in toolkit.call_tool(
+            ToolCallBlock(
+                id="read-process-file",
+                name="view_text_file",
+                input=agent_extensions.json.dumps(
+                    {"file_path": str(target)},
+                    ensure_ascii=False,
+                ),
+            ),
+            AgentState(),
+        )
+    ]
+
+    final_response = results[-1]
+    assert isinstance(final_response, ToolResponse)
+    assert final_response.state == ToolResultState.SUCCESS
+    response_text = final_response.content[0].text
+    assert response_text.startswith("# 文件读取结果\n")
+    assert absolute_path in response_text
+    assert content in response_text
+    assert "content=[TextBlock" not in response_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("helper", "tool_input"),
+    [
+        (
+            agent_extensions.write_text_file,
+            {"file_path": "工序100.json", "content": "{}"},
+        ),
+        (
+            agent_extensions.view_text_file,
+            {"file_path": "工序100.json"},
+        ),
+    ],
+)
+async def test_process_file_tools_are_allowed_by_explicit_bypass_state(
+    helper,
+    tool_input,
+):
+    state = AgentState(permission_context={"mode": PermissionMode.BYPASS})
+    tool = RealFunctionTool(func=helper)
+
+    decision = await PermissionEngine(state.permission_context).check_permission(
+        tool,
+        tool_input,
+    )
+
+    assert state.permission_context.mode == PermissionMode.BYPASS
+    assert decision.behavior == PermissionBehavior.ALLOW
 
 
 def _install_process_recording_fakes(monkeypatch, *, reply=..., reply_error=None):
@@ -1501,6 +1590,11 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
     assert captured["agent"]["name"] == "ProcessAgent"
     assert captured["agent"]["model"] == "process-model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
+    assert isinstance(captured["agent"]["state"], AgentState)
+    assert (
+        captured["agent"]["state"].permission_context.mode
+        == PermissionMode.BYPASS
+    )
     assert captured["react_config"] == {"max_iters": 60}
     assert captured["model"] == (
         "openai",
