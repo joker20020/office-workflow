@@ -3,7 +3,7 @@
 智能体扩展插件
 
 严格按照 main.py 中的实现方式，为AI助手提供以下多智能体扩展能力：
-- process_agent_tool: 工艺规划 — 查询RAG知识库 → 重排序 → 构建完整prompt → ReActAgent+PlanNotebook生成工序工步文件
+- process_agent_tool: 工艺规划 — 查询RAG知识库 → 重排序 → AgentScope 任务工具生成工序工步文件
 - unity_agent_tool: Unity AR — 通过MCP连接Unity编辑器，自动创建AR辅助装配程序
 - blender_agent_tool: Blender建模 — 通过MCP连接Blender，完成三维建模任务
 - comfyui_agent_tool: 图像生成 — ReActAgent细化提示词后调用ComfyUI生成图像
@@ -42,7 +42,15 @@ try:
         DeepSeekChatModel,
         OpenAIChatModel,
     )
-    from agentscope.tool import Toolkit, ToolResponse
+    from agentscope.tool import (
+        FunctionTool,
+        TaskCreate,
+        TaskGet,
+        TaskList,
+        TaskUpdate,
+        Toolkit,
+        ToolResponse,
+    )
 
     AGENTSCOPE_AVAILABLE = True
 except ImportError:
@@ -70,6 +78,37 @@ def _make_response(content: str, success: bool = True) -> Any:
     return ToolResponse(
         content=[TextBlock(text=str(content))],
         state=ToolResultState.SUCCESS if success else ToolResultState.ERROR,
+    )
+
+
+def write_text_file(file_path: str, content: str) -> Any:
+    """将完整 UTF-8 文本写入文件，并返回绝对路径与未截断内容。"""
+    absolute_path = os.path.abspath(os.path.expanduser(file_path))
+    parent_dir = os.path.dirname(absolute_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+    with open(absolute_path, "w", encoding="utf-8", newline="") as file_handle:
+        file_handle.write(content)
+    return _make_response(
+        "# 文件写入结果\n"
+        "## 状态\n成功\n"
+        f"## 绝对路径\n{absolute_path}\n"
+        "## 完整内容\n"
+        f"{content}",
+    )
+
+
+def view_text_file(file_path: str) -> Any:
+    """读取 UTF-8 文本文件，并返回绝对路径与未截断完整内容。"""
+    absolute_path = os.path.abspath(os.path.expanduser(file_path))
+    with open(absolute_path, "r", encoding="utf-8") as file_handle:
+        content = file_handle.read()
+    return _make_response(
+        "# 文件读取结果\n"
+        "## 状态\n成功\n"
+        f"## 绝对路径\n{absolute_path}\n"
+        "## 完整内容\n"
+        f"{content}",
     )
 
 
@@ -1035,7 +1074,7 @@ class AgentExtensionTools:
         limit: int = 5,
     ) -> Any:
         """根据任务要求，查询向量数据库，rerank重排序后，由工艺规划Agent生成完整的工序工步文件。
-        Agent会使用PlanNotebook制定计划，并使用write_text_file工具将工序工步写入JSON文件。
+        Agent会使用 Task 工具制定并跟踪计划，并使用 write_text_file 工具将工序工步写入JSON文件。
 
         Args:
             task: 任务要求（如"创建一份反推堵盖的安装工艺文件"）
@@ -1063,7 +1102,7 @@ class AgentExtensionTools:
     ) -> str:
         """
         通过 ProcessGen RAG 后端检索候选，重排后构建完整 prompt，
-        再由带 PlanNotebook 的 ReActAgent 执行工艺规划。
+        再由带 Task 工具的 AgentScope 2 Agent 执行工艺规划。
         """
         if not AGENTSCOPE_AVAILABLE:
             return "AgentScope 未安装，无法使用工艺规划功能"
@@ -1082,16 +1121,15 @@ class AgentExtensionTools:
         query_content_list = self._build_rag_content_blocks(query_res)
 
         # ---- 4. 构建完整prompt（知识库结果 + 用户问题 + 工序/工步JSON模板） ----
-        msg = Msg(
-            name="user",
-            role="user",
-            content=[TextBlock(type="text", text="知识库中搜索有如下结果\n")] +
+        msg = UserMsg(
+            name="User",
+            content=[TextBlock(text="知识库中搜索有如下结果\n")] +
                     query_content_list +
                     [
-                        TextBlock(type="text",
+                        TextBlock(
                                   text=f"用户的问题是:{task}, 请你根据知识库结果回答用户的问题，在你回答用户问题时，需要过滤掉搜索中无关的项"),
-                        TextBlock(type="text", text="对于装配工序请使用以下json格式模板进行回答：\n"),
-                        TextBlock(type="text", text="""
+                        TextBlock(text="对于装配工序请使用以下json格式模板进行回答：\n"),
+                        TextBlock(text="""
                                {
                                     "info":{
                                         "processID":"工序号",
@@ -1123,8 +1161,8 @@ class AgentExtensionTools:
                                     ]
                                 }
                                """),
-                        TextBlock(type="text", text="对于装配工步请使用以下json格式模板进行回答：\n"),
-                        TextBlock(type="text", text="""
+                        TextBlock(text="对于装配工步请使用以下json格式模板进行回答：\n"),
+                        TextBlock(text="""
                                {
                                     "info":{
                                         "stepID":"工步号",
@@ -1155,22 +1193,28 @@ class AgentExtensionTools:
                     ],
         )
 
-        # ---- 5. 创建带 PlanNotebook 的工艺规划 Agent ----
-        toolkit = Toolkit()
-        toolkit.register_tool_function(write_text_file)
-        toolkit.register_tool_function(view_text_file)
+        # ---- 5. 创建带任务与文件工具的 AgentScope 2 工艺规划 Agent ----
+        toolkit = Toolkit(
+            tools=[
+                TaskCreate(),
+                TaskGet(),
+                TaskList(),
+                TaskUpdate(),
+                FunctionTool(func=write_text_file),
+                FunctionTool(func=view_text_file),
+            ],
+        )
 
-        plan_notebook = PlanNotebook()
-
-        process_agent = ReActAgent(
-            name="process_agent",
-            sys_prompt=f"""
+        process_agent = Agent(
+            name="ProcessAgent",
+            system_prompt=f"""
         你是一个工艺规划师,你的任务是根据查询到的知识帮助用户进行工艺规划
-        在你进行规划前，请先制定一个工艺规划计划，并使用plan工具创建一个工艺编写任务列表,并逐步执行直至计划完成才能结束规划
+        在你进行规划前，请先制定一个工艺规划计划。必须使用 TaskCreate 创建完整的工艺编写任务列表，使用 TaskList 和 TaskGet 检查任务，使用 TaskUpdate 标记进行中与已完成，并逐步执行直至全部任务完成才能结束规划。
         每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入当前文件夹下的文件内进行保存，注意输出文件结构的可读性
         同时你需要编写完成所有规划任务后再结束，请确保所有工序工步均保存，不能提前退出
 
         每个文件写入后必须调用 view_text_file 重新读取并核对，确认 JSON 完整且工序与工步关系一致。
+        最终答复必须包含所有 TaskCreate、TaskGet、TaskList、TaskUpdate 的实际任务状态和工具返回结果，以及 write_text_file、view_text_file 的完整工具结果；不得把未执行的计划描述为已完成。
         完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
         # 执行结果
         ## 状态
@@ -1185,36 +1229,23 @@ class AgentExtensionTools:
         按文件分别给出完整 JSON 内容，每个文件都使用带 json 语言标识的 Markdown 代码块，不得省略、截断或只给摘要。
         同时说明实际采用的检索知识、工艺决策依据和仍存在的不确定信息。
         ## 执行记录
-        列出计划任务、检索知识、文件写入与 view_text_file 复核结果。
+        列出全部 Task 工具操作及其返回结果、检索知识、文件写入与 view_text_file 复核结果。
         ## 警告与未完成项
         没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因；中间文件仍须列出。
         """,
-            model=OpenAIChatModel(
-                model_name=self._vlm_name,
-                api_key=os.environ["VLM_API_KEY"],
-                stream=True,
-                enable_thinking=False,
-                client_kwargs={"base_url": os.environ["VLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 30720, "max_completion_tokens": 30720},
+            model=_build_model(
+                "openai",
+                self._vlm_name,
+                os.environ["VLM_BASE_URL"],
+                os.environ["VLM_API_KEY"],
             ),
-            formatter=OpenAIMultiAgentFormatter(),
             toolkit=toolkit,
-            memory=InMemoryMemory(),
-            plan_notebook=plan_notebook,
-            max_iters=60
+            react_config=ReActConfig(max_iters=60),
         )
 
         # ---- 6. 执行 ----
-        msg_res = await process_agent(msg)
-        content = msg_res.get_content_blocks("text") if msg_res is not None and hasattr(msg_res, 'get_content_blocks') else None
-        if not content:
-            content = process_agent.memory.content if hasattr(process_agent, 'memory') and process_agent.memory else []
-
-        if not content:
-            return "工艺规划 Agent 未返回结果"
-        return "".join(
-            each["text"] if isinstance(each, dict) else str(each) for each in content
-        )
+        msg_res = await process_agent.reply(msg)
+        return _message_text(msg_res) or "工艺规划 Agent 未返回结果"
 
     # ==================== 4. ComfyUI 图像生成 ====================
 

@@ -1379,16 +1379,189 @@ async def test_blender_cleanup_error_does_not_hide_primary_error(
     assert events.count("close") == 1
 
 
+def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
+    target = tmp_path / "nested" / "工序100.json"
+    content = '{\n  "工序": "反推堵盖",\n  "说明": "完整内容"\n}\n'
+
+    write_response = agent_extensions.write_text_file(str(target), content)
+    absolute_path = str(target.resolve())
+
+    assert isinstance(write_response, ToolResponse)
+    assert write_response.state == ToolResultState.SUCCESS
+    assert target.read_text(encoding="utf-8") == content
+    write_result = write_response.content[0].text
+    assert absolute_path in write_result
+    assert content in write_result
+
+    read_response = agent_extensions.view_text_file(str(target))
+
+    assert isinstance(read_response, ToolResponse)
+    assert read_response.state == ToolResultState.SUCCESS
+    read_result = read_response.content[0].text
+    assert absolute_path in read_result
+    assert content in read_result
+
+
+def _install_process_recording_fakes(monkeypatch, *, reply=..., reply_error=None):
+    captured = {"task_tools": []}
+
+    def task_tool(name):
+        class FakeTaskTool:
+            def __init__(self):
+                self.name = name
+                captured["task_tools"].append(self)
+
+        return FakeTaskTool
+
+    class FakeFunctionTool:
+        def __init__(self, *, func):
+            self.func = func
+            self.name = func.__name__
+
+    class FakeToolkit:
+        def __init__(self, **kwargs):
+            captured["toolkit"] = kwargs
+            captured["toolkit_instance"] = self
+
+    class FakeReActConfig:
+        def __init__(self, **kwargs):
+            captured["react_config"] = kwargs
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured["agent"] = kwargs
+
+        async def reply(self, msg):
+            captured["message"] = msg
+            if reply_error is not None:
+                raise reply_error
+            if reply is ...:
+                return AssistantMsg(
+                    name="ProcessAgent",
+                    content="# 执行结果\n## 状态\n成功",
+                )
+            return reply
+
+    def fake_build_model(provider, model_name, base_url, api_key):
+        captured["model"] = (provider, model_name, base_url, api_key)
+        return "process-model"
+
+    real_user_msg = agent_extensions.UserMsg
+
+    def fake_user_msg(**kwargs):
+        captured["user_msg"] = kwargs
+        return real_user_msg(**kwargs)
+
+    monkeypatch.setattr(agent_extensions, "TaskCreate", task_tool("TaskCreate"), raising=False)
+    monkeypatch.setattr(agent_extensions, "TaskGet", task_tool("TaskGet"), raising=False)
+    monkeypatch.setattr(agent_extensions, "TaskList", task_tool("TaskList"), raising=False)
+    monkeypatch.setattr(agent_extensions, "TaskUpdate", task_tool("TaskUpdate"), raising=False)
+    monkeypatch.setattr(agent_extensions, "FunctionTool", FakeFunctionTool, raising=False)
+    monkeypatch.setattr(agent_extensions, "Toolkit", FakeToolkit)
+    monkeypatch.setattr(agent_extensions, "ReActConfig", FakeReActConfig, raising=False)
+    monkeypatch.setattr(agent_extensions, "Agent", FakeAgent, raising=False)
+    monkeypatch.setattr(agent_extensions, "_build_model", fake_build_model)
+    monkeypatch.setattr(agent_extensions, "UserMsg", fake_user_msg)
+    monkeypatch.setenv("VLM_API_KEY", "vlm-secret")
+    monkeypatch.setenv("VLM_BASE_URL", "http://vlm/v1")
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
+    monkeypatch,
+):
+    captured = _install_process_recording_fakes(monkeypatch)
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[{"id": 7}])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[{"id": 7}])
+    rag_data = DataBlock(
+        source=Base64Source(data="aW1hZ2U=", media_type="image/png")
+    )
+    tools._build_rag_content_blocks = MagicMock(
+        return_value=[TextBlock(text="检索知识全文"), rag_data]
+    )
+
+    result = await tools._process_agent_async("编制堵盖工艺", None, "process", 5)
+
+    assert result == "# 执行结果\n## 状态\n成功"
+    toolkit_tools = captured["toolkit"]["tools"]
+    assert [tool.name for tool in toolkit_tools] == [
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskUpdate",
+        "write_text_file",
+        "view_text_file",
+    ]
+    assert [tool.func for tool in toolkit_tools[-2:]] == [
+        agent_extensions.write_text_file,
+        agent_extensions.view_text_file,
+    ]
+    assert captured["agent"]["name"] == "ProcessAgent"
+    assert captured["agent"]["model"] == "process-model"
+    assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
+    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["model"] == (
+        "openai",
+        tools._vlm_name,
+        "http://vlm/v1",
+        "vlm-secret",
+    )
+    message = captured["message"]
+    assert message.name == "User"
+    assert message.role == "user"
+    assert rag_data in message.content
+    assert "检索知识全文" in message.get_text_content()
+    assert "编制堵盖工艺" in message.get_text_content()
+    assert '"processID"' in message.get_text_content()
+    assert '"stepID"' in message.get_text_content()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (None, "工艺规划 Agent 未返回结果"),
+        (AssistantMsg(name="ProcessAgent", content=""), "工艺规划 Agent 未返回结果"),
+    ],
+)
+async def test_process_empty_reply_uses_safe_fallback(monkeypatch, reply, expected):
+    _install_process_recording_fakes(monkeypatch, reply=reply)
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_process_reply_error_propagates(monkeypatch):
+    _install_process_recording_fakes(
+        monkeypatch,
+        reply_error=RuntimeError("process agent failed"),
+    )
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    with pytest.raises(RuntimeError, match="process agent failed"):
+        await tools._process_agent_async("task", None, "process", 5)
+
+
 def _subagent_prompt_source(agent_name: str) -> str:
     source = Path(agent_extensions.__file__).read_text(encoding="utf-8")
     runtime_name = {
         "unity_agent": "UnityAgent",
         "blender_agent": "BlenderAgent",
+        "process_agent": "ProcessAgent",
     }.get(agent_name, agent_name)
     start = source.index(f'name="{runtime_name}"')
     model_constructor = (
         "model=_build_model("
-        if agent_name in {"unity_agent", "blender_agent"}
+        if agent_name in {"unity_agent", "blender_agent", "process_agent"}
         else "model=OpenAIChatModel("
     )
     end = source.index(model_constructor, start)
@@ -1425,6 +1598,8 @@ def test_subagent_prompt_process_requires_complete_file_contents():
     assert "工序与工步" in prompt
     assert "view_text_file" in prompt
     assert "检索知识" in prompt
+    assert "完整工具结果" in prompt
+    assert "Task 工具操作及其返回结果" in prompt
 
 
 def test_subagent_prompt_image_requires_each_output_and_actual_prompt():
