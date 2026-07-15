@@ -5,6 +5,7 @@ import asyncio
 import base64
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
 import aiohttp
@@ -884,31 +885,250 @@ async def test_text_to_image_uses_configured_timeout(
     assert timeout.total == 12.5
 
 
-@pytest.mark.asyncio
-async def test_unity_client_uses_configured_timeouts(monkeypatch):
+def _install_unity_recording_fakes(
+    monkeypatch,
+    *,
+    reply=None,
+    reply_error=None,
+    connect_error=None,
+    close_error=None,
+    instances=None,
+):
+    events = []
     captured = {}
+    instances = [{"hash": "editor-1"}] if instances is None else instances
 
-    class FakeUnityClient:
+    class FakeHttpMCPConfig:
         def __init__(self, **kwargs):
-            captured.update(kwargs)
+            events.append("config")
+            captured["config"] = kwargs
+            captured["config_instance"] = self
+
+    class FakeSession:
+        async def read_resource(self, url):
+            url = str(url)
+            events.append(f"read:{url}")
+            if url == "mcpforunity://instances":
+                payload = {"instances": instances}
+            else:
+                payload = {
+                    "data": {
+                        "tools": [
+                            {"name": "addXRRig"},
+                            {"name": "ignoredTool"},
+                        ],
+                    },
+                }
+            return SimpleNamespace(
+                contents=[SimpleNamespace(text=agent_extensions.json.dumps(payload))],
+            )
+
+        async def call_tool(self, name, arguments):
+            events.append(f"call:{name}")
+            captured["active_instance"] = arguments
+
+    class FakeMCPClient:
+        def __init__(self, **kwargs):
+            events.append("client")
+            captured["client"] = kwargs
+            captured["client_instance"] = self
+            self._session = FakeSession()
+            self.connected = False
+            self.close_count = 0
+
+        @property
+        def is_connected(self):
+            return self.connected
 
         async def connect(self):
-            raise RuntimeError("stop after constructor")
+            events.append("connect")
+            if connect_error is not None:
+                raise connect_error
+            self.connected = True
 
+        async def close(self):
+            events.append("close")
+            self.close_count += 1
+            if close_error is not None:
+                raise close_error
+            self.connected = False
+
+    class FakeToolkit:
+        def __init__(self, **kwargs):
+            events.append("toolkit")
+            captured["toolkit"] = kwargs
+            captured["toolkit_instance"] = self
+            assert kwargs["mcps"][0].connected is True
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            events.append("agent")
+            captured["agent"] = kwargs
+
+        async def reply(self, msg):
+            events.append("reply")
+            captured["message"] = msg
+            if reply_error is not None:
+                raise reply_error
+            return reply or AssistantMsg(name="UnityAgent", content="unity result")
+
+    class FakeReActConfig:
+        def __init__(self, **kwargs):
+            captured["react_config"] = kwargs
+
+    def fake_build_model(provider, model_name, base_url, api_key):
+        captured["model"] = (provider, model_name, base_url, api_key)
+        return "model"
+
+    real_user_msg = agent_extensions.UserMsg
+
+    def fake_user_msg(**kwargs):
+        captured["user_msg"] = kwargs
+        return real_user_msg(**kwargs)
+
+    monkeypatch.setattr(agent_extensions, "HttpMCPConfig", FakeHttpMCPConfig, raising=False)
+    monkeypatch.setattr(agent_extensions, "MCPClient", FakeMCPClient, raising=False)
+    monkeypatch.setattr(agent_extensions, "Toolkit", FakeToolkit)
+    monkeypatch.setattr(agent_extensions, "Agent", FakeAgent, raising=False)
+    monkeypatch.setattr(agent_extensions, "ReActConfig", FakeReActConfig, raising=False)
+    monkeypatch.setattr(agent_extensions, "_build_model", fake_build_model)
+    monkeypatch.setattr(agent_extensions, "UserMsg", fake_user_msg)
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://model/v1")
+    return events, captured
+
+
+@pytest.mark.asyncio
+async def test_unity_uses_agentscope2_http_mcp_agent_and_user_message(monkeypatch):
     monkeypatch.setenv("UNITY_MCP_TIMEOUT_SECONDS", "15")
-    monkeypatch.setattr(agent_extensions, "HttpStatefulClient", FakeUnityClient)
+    events, captured = _install_unity_recording_fakes(monkeypatch)
+
+    result = await AgentExtensionTools()._unity_ar_async(
+        "build an AR guide",
+        '{"assembly": ["step one"]}',
+    )
+
+    assert result == "unity result"
+    assert captured["config"] == {
+        "url": "http://localhost:8080/mcp",
+        "timeout": 15.0,
+    }
+    assert captured["client"] == {
+        "name": "unity_mcp",
+        "is_stateful": True,
+        "mcp_config": captured["config_instance"],
+        "execution_timeout": 15.0,
+    }
+    assert events.index("connect") < events.index("toolkit")
+    assert captured["toolkit"] == {"mcps": [captured["client_instance"]]}
+    assert captured["agent"]["name"] == "UnityAgent"
+    assert captured["agent"]["model"] == "model"
+    assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
+    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["model"] == (
+        "openai",
+        AgentExtensionTools()._llm_name,
+        "http://model/v1",
+        "secret",
+    )
+    assert captured["message"].name == "User"
+    assert captured["message"].role == "user"
+    assert captured["user_msg"]["name"] == "User"
+    assert captured["user_msg"]["content"] == captured["message"].get_text_content()
+    prompt = captured["message"].get_text_content()
+    assert "build an AR guide" in prompt
+    assert "assembly" in prompt
+    assert captured["active_instance"] == {"instance": "editor-1"}
+    assert "close" == events[-1]
+    assert events.count("close") == 1
+
+
+@pytest.mark.asyncio
+async def test_unity_prompt_keeps_structured_markdown_contract(monkeypatch):
+    _, captured = _install_unity_recording_fakes(monkeypatch)
+
+    await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    prompt = captured["agent"]["system_prompt"]
+    for heading in (
+        "# 执行结果",
+        "## 状态",
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in prompt
+    assert "GameObject" in prompt
+    assert "MCP/custom tool" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply_error",
+    [RuntimeError("agent failed"), asyncio.TimeoutError(), asyncio.CancelledError()],
+)
+async def test_unity_closes_once_and_propagates_reply_errors(monkeypatch, reply_error):
+    events, _ = _install_unity_recording_fakes(
+        monkeypatch,
+        reply_error=reply_error,
+    )
+
+    with pytest.raises(type(reply_error)):
+        await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    assert events.count("close") == 1
+    assert events[-1] == "close"
+
+
+@pytest.mark.asyncio
+async def test_unity_connect_failure_does_not_close_invalid_client(monkeypatch):
+    events, _ = _install_unity_recording_fakes(
+        monkeypatch,
+        connect_error=RuntimeError("offline"),
+    )
 
     result = await AgentExtensionTools()._unity_ar_async("task", "{}")
 
-    assert "stop after constructor" in result
-    assert captured["timeout"] == 15.0
-    assert captured["sse_read_timeout"] == 15.0
+    assert "offline" in result
+    assert "close" not in events
+
+
+@pytest.mark.asyncio
+async def test_unity_no_active_instance_still_closes_once(monkeypatch):
+    events, _ = _install_unity_recording_fakes(monkeypatch, instances=[])
+
+    result = await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    assert "Unity" in result
+    assert events.count("close") == 1
+
+
+@pytest.mark.asyncio
+async def test_unity_cleanup_error_does_not_hide_agent_error(monkeypatch):
+    events, _ = _install_unity_recording_fakes(
+        monkeypatch,
+        reply_error=RuntimeError("primary failure"),
+        close_error=ValueError("cleanup failure"),
+    )
+
+    with pytest.raises(RuntimeError, match="primary failure"):
+        await AgentExtensionTools()._unity_ar_async("task", "{}")
+
+    assert events.count("close") == 1
 
 
 def _subagent_prompt_source(agent_name: str) -> str:
     source = Path(agent_extensions.__file__).read_text(encoding="utf-8")
-    start = source.index(f'name="{agent_name}"')
-    end = source.index("model=OpenAIChatModel(", start)
+    runtime_name = "UnityAgent" if agent_name == "unity_agent" else agent_name
+    start = source.index(f'name="{runtime_name}"')
+    model_constructor = (
+        "model=_build_model("
+        if agent_name == "unity_agent"
+        else "model=OpenAIChatModel("
+    )
+    end = source.index(model_constructor, start)
     return source[start:end]
 
 

@@ -26,6 +26,8 @@ try:
         DeepSeekCredential,
         OpenAICredential,
     )
+    from agentscope.agent import Agent, ReActConfig
+    from agentscope.mcp import HttpMCPConfig, MCPClient
     from agentscope.message import (
         AssistantMsg,
         Base64Source,
@@ -45,10 +47,6 @@ try:
     AGENTSCOPE_AVAILABLE = True
 except ImportError:
     AGENTSCOPE_AVAILABLE = False
-
-# Task 2 replaces the remaining Unity construction directly.  Keep its legacy
-# injection point available until then without importing a removed 1.x client.
-HttpStatefulClient = None
 
 try:
     from pydantic.networks import AnyUrl
@@ -802,46 +800,74 @@ class AgentExtensionTools:
         if not AGENTSCOPE_AVAILABLE:
             return "AgentScope 未安装，无法使用 Unity MCP 功能"
 
-        # 严格对应 main.py unity_agent_tool
-        toolkit = Toolkit()
         unity_timeout = _get_timeout_seconds("UNITY_MCP_TIMEOUT_SECONDS", 600.0)
-        unity_mcp = HttpStatefulClient(
-            name="unity_mcp",
-            transport="streamable_http",
+        unity_config = HttpMCPConfig(
             url="http://localhost:8080/mcp",
             timeout=unity_timeout,
-            sse_read_timeout=unity_timeout,
+        )
+        unity_mcp = MCPClient(
+            name="unity_mcp",
+            is_stateful=True,
+            mcp_config=unity_config,
+            execution_timeout=unity_timeout,
         )
 
+        connected = False
+        primary_error = None
         try:
-            await unity_mcp.connect()
-        except Exception as e:
-            return f"无法连接 Unity MCP 服务(请确保 Unity 编辑器已启动且 MCP 服务运行中): {e}"
+            try:
+                await unity_mcp.connect()
+            except Exception as e:
+                return f"无法连接 Unity MCP 服务(请确保 Unity 编辑器已启动且 MCP 服务运行中): {e}"
+            connected = True
+            return await self._unity_ar_connected(unity_mcp, task, info)
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            if connected:
+                try:
+                    await unity_mcp.close()
+                except BaseException as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    _logger.warning(
+                        "Unity MCP cleanup failed while propagating %s: %s",
+                        type(primary_error).__name__,
+                        cleanup_error,
+                    )
+
+    async def _unity_ar_connected(self, unity_mcp: Any, task: str, info: str) -> str:
+        # AgentScope 2.0.4 does not yet publish resource operations on MCPClient.
+        # Its connected ClientSession is the only API capable of preserving the
+        # Unity instance-selection and custom-tool metadata protocol.
+        session = getattr(unity_mcp, "_session", None)
+        if session is None:
+            raise RuntimeError("Unity MCP connected without an accessible session")
 
         # 激活当前 unity editor instance
-        instances_response = await unity_mcp.session.read_resource(AnyUrl("mcpforunity://instances"))
+        instances_response = await session.read_resource(AnyUrl("mcpforunity://instances"))
         instances = json.loads(instances_response.contents[0].text)["instances"]
         if not instances:
-            await unity_mcp.close()
             return "未找到运行中的 Unity 编辑器实例"
         instance_hash = instances[0]["hash"]
         _logger.info(f"Unity instance hash: {instance_hash}")
-        await unity_mcp.session.call_tool("set_active_instance", {"instance": instance_hash})
+        await session.call_tool("set_active_instance", {"instance": instance_hash})
 
-        custom_tools_response = await unity_mcp.session.read_resource(AnyUrl("mcpforunity://custom-tools"))
+        custom_tools_response = await session.read_resource(AnyUrl("mcpforunity://custom-tools"))
         custom_tools = json.loads(custom_tools_response.contents[0].text)["data"]["tools"]
 
         useful_tools = ["addXRRig", "addXRSimulator", "addMainCanvas", "addProcess"]
         custom_tools = [tool for tool in custom_tools if tool["name"] in useful_tools]
         _logger.info(f"Unity custom tools: {custom_tools}")
 
-        await toolkit.register_mcp_client(unity_mcp)
+        toolkit = Toolkit(mcps=[unity_mcp])
 
         info_dict = json.loads(info) if isinstance(info, str) else info
 
-        unity_agent = ReActAgent(
-            name="unity_agent",
-            sys_prompt=f"""
+        unity_agent = Agent(
+            name="UnityAgent",
+            system_prompt=f"""
         你是顶尖的一个Unity AR程序开发助手,你的任务是使用工具直接帮助用户完成AR程序的开发，你可以使用的custom tools 包括{custom_tools},
         当你使用custom tools中的工具时，不要直接使用，必须通过调用execute_custom_tool工具来使用，execute_custom_tool工具的使用格式如下：
         {{
@@ -876,35 +902,26 @@ class AgentExtensionTools:
         ## 警告与未完成项
         没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
         """,
-            model=OpenAIChatModel(
-                model_name=self._llm_name,
-                api_key=os.environ["LLM_API_KEY"],
-                stream=True,
-                enable_thinking=False,
-                client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 10240, "max_completion_tokens": 10240},
+            model=_build_model(
+                "openai",
+                self._llm_name,
+                os.environ["LLM_BASE_URL"],
+                os.environ["LLM_API_KEY"],
             ),
-            formatter=DeepSeekChatFormatter(),
             toolkit=toolkit,
-            memory=InMemoryMemory(),
-            max_iters=60
+            react_config=ReActConfig(max_iters=60),
         )
 
-        msg = Msg(
-            name="user",
+        msg = UserMsg(
+            name="User",
             content=f"请完成以下任务：{task}，可用的工艺信息为：{info_dict}",
-            role="user",
         )
 
-        msg_res = await unity_agent(msg)
-        await unity_mcp.close()
+        msg_res = await unity_agent.reply(msg)
 
         if msg_res is None:
             return "Unity Agent 未返回结果"
-        blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        if blocks:
-            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
-        return str(msg_res.content) if msg_res.content else "Unity Agent 未返回内容"
+        return _message_text(msg_res) or "Unity Agent 未返回内容"
 
     # ==================== 2. Blender 建模 ====================
 
