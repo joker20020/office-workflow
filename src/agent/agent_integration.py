@@ -142,24 +142,24 @@ class AgentIntegration:
 
         self._agent: Optional[Any] = None
         self._toolkit: Optional[Any] = None
-        self._mcp_clients: list[Any] = []
+        self._mcp_clients: List[Any] = []
         self._api_key: str = ""
-        self._streaming_callbacks: list[StreamingCallback] = []
+        self._streaming_callbacks: List[StreamingCallback] = []
         self._initialized: bool = False
         self._provider: str = ""
         self._model_name: str = ""
         self._base_url: str = ""
         self._async_runtime = AgentAsyncRuntime()
-        self._lifecycle_lock: asyncio.Lock | None = None
-        self._current_loop: asyncio.AbstractEventLoop | None = None
-        self._active_reply_task: asyncio.Task[Any] | None = None
+        self._lifecycle_lock: Optional[asyncio.Lock] = None
+        self._current_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._active_reply_task: Optional[asyncio.Task[Any]] = None
         self._active_reply_cancel_requests: set[asyncio.Task[Any]] = set()
         self._reply_ownership_lock = threading.Lock()
-        self._active_reply_owners: list[
+        self._active_reply_owners: List[
             tuple[asyncio.Task[Any], asyncio.AbstractEventLoop]
         ] = []
-        self._parked_reply_id: str | None = None
-        self._parked_cleanup_future: concurrent.futures.Future[Any] | None = None
+        self._parked_reply_id: Optional[str] = None
+        self._parked_cleanup_future: Optional[concurrent.futures.Future[Any]] = None
         self._last_response_interrupted: bool = False
         self._exposure_change_lock = threading.Lock()
         self._exposure_rebuild_dirty = False
@@ -167,7 +167,7 @@ class AgentIntegration:
         self._exposure_rebuild_idle = threading.Event()
         self._exposure_rebuild_idle.set()
         self._exposure_subscriptions: list[tuple[Any, int]] = []
-        self._exposure_rebuild_task: asyncio.Task[Any] | None = None
+        self._exposure_rebuild_task: Optional[asyncio.Task[Any]] = None
         self._shutdown_started = False
 
         self._bind_exposure_source(AgentToolRegistry.instance())
@@ -616,7 +616,7 @@ class AgentIntegration:
         model_name: str,
         base_url: str,
         api_key: str,
-        state_seed: AgentState | None,
+        state_seed: Optional[AgentState],
     ) -> tuple[Any, Any, list[MCPClient]]:
         local_clients: list[MCPClient] = []
         try:
@@ -704,7 +704,7 @@ class AgentIntegration:
             self._publish_agent_runtime(constructed_agent, toolkit, local_clients)
             return True
 
-    def _build_registry_function_tools(self) -> list[Any]:
+    def _build_registry_function_tools(self) -> List[Any]:
         """Wrap unique registry callables for Toolkit construction."""
         if not AGENTSCOPE_AVAILABLE:
             return []
@@ -749,7 +749,7 @@ class AgentIntegration:
                     continue
 
                 server_name = server["name"]
-                client: MCPClient | None = None
+                client: Optional[MCPClient] = None
                 try:
                     client = self._mcp_manager.create_agentscope_client(server_name)
                     if client is None:
@@ -773,7 +773,7 @@ class AgentIntegration:
                             await self._close_mcp_clients_cancellation_safe([client])
                         )
                         if parent_cancellation is not None:
-                            raise parent_cancellation from error
+                            raise parent_cancellation
             return clients
         except BaseException:
             await self._close_mcp_clients_cancellation_safe(clients)
@@ -798,9 +798,9 @@ class AgentIntegration:
     async def _await_mcp_client_drain(
         self,
         clients: list[MCPClient],
-    ) -> tuple[list[BaseException], asyncio.CancelledError | None]:
+    ) -> tuple[list[BaseException], Optional[asyncio.CancelledError]]:
         cleanup_task = asyncio.create_task(self._drain_mcp_clients(clients))
-        parent_cancellation: asyncio.CancelledError | None = None
+        parent_cancellation: Optional[asyncio.CancelledError] = None
         while not cleanup_task.done():
             try:
                 await asyncio.shield(cleanup_task)
@@ -812,7 +812,7 @@ class AgentIntegration:
     async def _close_mcp_clients_cancellation_safe(
         self,
         clients: list[MCPClient],
-    ) -> tuple[list[BaseException], asyncio.CancelledError | None]:
+    ) -> tuple[list[BaseException], Optional[asyncio.CancelledError]]:
         return await self._await_mcp_client_drain(clients)
 
     def _detach_published_runtime_state(self) -> list[MCPClient]:
@@ -832,7 +832,7 @@ class AgentIntegration:
             if not isinstance(error, Exception):
                 raise error
 
-    def chat(self, message: str | list[dict[str, Any]]) -> str:
+    def chat(self, message: str | List[Dict[str, Any]]) -> str:
         """Send a message through the shared async runtime."""
         _logger.info("=" * 50)
         if not self._initialized:
@@ -877,7 +877,7 @@ class AgentIntegration:
 
     async def _chat_impl(
         self,
-        message: str | list[dict[str, Any]],
+        message: str | List[Dict[str, Any]],
         *,
         timeout_as_request_timeout: bool,
     ) -> str:
@@ -919,7 +919,7 @@ class AgentIntegration:
             _logger.error(f"Agent对话失败: {error}", exc_info=True)
             return f"错误: {error}"
 
-    def _create_user_message(self, message: str | list[dict[str, Any]]) -> Msg:
+    def _create_user_message(self, message: str | List[Dict[str, Any]]) -> Msg:
         if isinstance(message, str):
             return UserMsg(name="User", content=message)
 
@@ -932,7 +932,7 @@ class AgentIntegration:
                 content_blocks.append(self._create_data_block(block, block_type))
         return UserMsg(name="User", content=content_blocks)
 
-    def _create_data_block(self, block: dict[str, Any], media_kind: str) -> Any:
+    def _create_data_block(self, block: Dict[str, Any], media_kind: str) -> Any:
         default_media_types = {
             "image": "image/png",
             "audio": "audio/mpeg",
@@ -952,7 +952,7 @@ class AgentIntegration:
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """Thread-safely cancel active work or clean up a parked reply."""
-        cleanup: concurrent.futures.Future[Any] | None = None
+        cleanup: Optional[concurrent.futures.Future[Any]] = None
         try:
             with self._reply_ownership_lock:
                 task = self._active_reply_task
@@ -1068,7 +1068,7 @@ class AgentIntegration:
             _logger.error(f"切换会话失败: {error}")
             return False
 
-    def _snapshot_history_selection(self) -> tuple[str | None, bool, list[Any]]:
+    def _snapshot_history_selection(self) -> tuple[Optional[str], bool, list[Any]]:
         with self._history._lock:
             return (
                 self._history._session_id,
@@ -1078,7 +1078,7 @@ class AgentIntegration:
 
     def _restore_history_selection(
         self,
-        snapshot: tuple[str | None, bool, list[Any]],
+        snapshot: tuple[Optional[str], bool, list[Any]],
     ) -> None:
         session_id, is_new_session, messages = snapshot
         with self._history._lock:

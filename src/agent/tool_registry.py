@@ -27,7 +27,7 @@ class AgentToolRegistry:
     _lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._tools: dict[str, list[Callable]] = {}
+        self._tools: Dict[str, List[Callable]] = {}
         self._owners: Dict[str, str | None] = {}
         self._registry_lock = threading.RLock()
         self._change_notifier = ChangeNotifier("tools")
@@ -49,7 +49,7 @@ class AgentToolRegistry:
     def register(
         self,
         group_name: str,
-        tools: list[Callable],
+        tools: List[Callable],
         *,
         owner_name: str | None = None,
     ) -> None:
@@ -74,7 +74,7 @@ class AgentToolRegistry:
         _logger.info("注销工具组 '%s': %s 个工具", group_name, len(removed))
         self._change_notifier.notify(action="unregistered", name=group_name)
 
-    def get_group_snapshots(self) -> list[ToolGroupSnapshot]:
+    def get_group_snapshots(self) -> List[ToolGroupSnapshot]:
         with self._registry_lock:
             return [
                 ToolGroupSnapshot(name, self._owners.get(name), tuple(tools))
