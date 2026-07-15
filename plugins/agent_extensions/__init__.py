@@ -21,19 +21,34 @@ from src.core.plugin_base import PluginBase
 from src.utils.logger import get_logger
 
 try:
-    from agentscope.agent import ReActAgent
-    from agentscope.model import OpenAIChatModel
+    from agentscope.credential import (
+        DashScopeCredential,
+        DeepSeekCredential,
+        OpenAICredential,
+    )
+    from agentscope.message import (
+        AssistantMsg,
+        Base64Source,
+        DataBlock,
+        Msg,
+        TextBlock,
+        ToolResultState,
+        UserMsg,
+    )
+    from agentscope.model import (
+        DashScopeChatModel,
+        DeepSeekChatModel,
+        OpenAIChatModel,
+    )
     from agentscope.tool import Toolkit, ToolResponse
-    from agentscope.mcp import HttpStatefulClient, StdIOStatefulClient
-    from agentscope.formatter import OpenAIMultiAgentFormatter, DeepSeekChatFormatter
-    from agentscope.message import Msg, TextBlock, ImageBlock, Base64Source
-    from agentscope.memory import InMemoryMemory
-    from agentscope.plan import PlanNotebook
-    from agentscope.tool import write_text_file, view_text_file
 
     AGENTSCOPE_AVAILABLE = True
 except ImportError:
     AGENTSCOPE_AVAILABLE = False
+
+# Task 2 replaces the remaining Unity construction directly.  Keep its legacy
+# injection point available until then without importing a removed 1.x client.
+HttpStatefulClient = None
 
 try:
     from pydantic.networks import AnyUrl
@@ -54,9 +69,55 @@ TOOL_GROUP_NAME = "agent_extensions"
 def _make_response(content: str, success: bool = True) -> Any:
     if content is None:
         content = "(无返回结果)"
-    if AGENTSCOPE_AVAILABLE and ToolResponse is not None:
-        return ToolResponse(content=[{"type": "text", "text": str(content)}])
-    return str(content)
+    return ToolResponse(
+        content=[TextBlock(text=str(content))],
+        state=ToolResultState.SUCCESS if success else ToolResultState.ERROR,
+    )
+
+
+def _message_text(msg: Msg) -> str:
+    if msg is None:
+        return ""
+    return msg.get_text_content() or ""
+
+
+def _build_model(
+    provider: str,
+    model_name: str,
+    base_url: str,
+    api_key: str,
+) -> Any:
+    if provider == "openai":
+        credential = OpenAICredential(
+            api_key=api_key,
+            base_url=base_url or "https://api.openai.com/v1",
+        )
+        return OpenAIChatModel(
+            credential=credential,
+            model=model_name or "gpt-4o",
+            stream=True,
+        )
+    if provider == "deepseek":
+        credential = DeepSeekCredential(
+            api_key=api_key,
+            base_url=base_url or "https://api.deepseek.com",
+        )
+        return DeepSeekChatModel(
+            credential=credential,
+            model=model_name or "deepseek-chat",
+            stream=True,
+        )
+    if provider == "dashscope":
+        credential = DashScopeCredential(
+            api_key=api_key,
+            base_url=base_url or "https://api.dashscope.com",
+        )
+        return DashScopeChatModel(
+            credential=credential,
+            model=model_name or "qwen-turbo",
+            stream=True,
+        )
+    raise ValueError(f"unsupported provider: {provider}")
 
 
 def _get_timeout_seconds(name: str, default: float) -> float:
@@ -686,7 +747,7 @@ class AgentExtensionTools:
                 f"{index + 1}.{candidate.get('text', '')}"
                 f"(来源为{candidate.get('path', '')})\n"
             )
-            blocks.append(TextBlock(type="text", text=description))
+            blocks.append(TextBlock(text=description))
             if candidate.get("type") != "image":
                 continue
             local_path = candidate.get("_local_asset_path")
@@ -699,10 +760,8 @@ class AgentExtensionTools:
                 continue
             image_data = image_loader(local_path)
             blocks.append(
-                ImageBlock(
-                    type="image",
+                DataBlock(
                     source=Base64Source(
-                        type="base64",
                         media_type=_APIRequester._image_content_type(local_path),
                         data=base64.b64encode(image_data).decode("utf-8"),
                     ),

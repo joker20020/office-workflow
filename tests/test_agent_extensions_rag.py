@@ -2,6 +2,7 @@
 """agent_extensions 的 ProcessGen RAG HTTP 契约测试。"""
 
 import asyncio
+import base64
 import hashlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call
@@ -15,6 +16,25 @@ from plugins.agent_extensions import (
     AgentExtensionTools,
     _APIRequester,
 )
+
+from agentscope.credential import (
+    DashScopeCredential,
+    DeepSeekCredential,
+    OpenAICredential,
+)
+from agentscope.message import (
+    AssistantMsg,
+    Base64Source,
+    DataBlock,
+    TextBlock,
+    ToolResultState,
+)
+from agentscope.model import (
+    DashScopeChatModel,
+    DeepSeekChatModel,
+    OpenAIChatModel,
+)
+from agentscope.tool import ToolResponse
 
 
 class FakeResponse:
@@ -556,7 +576,92 @@ async def test_asset_cache_sanitizes_remote_basename_for_local_file(tmp_path):
     assert Path(local_path).name.endswith("_bad_name_.png")
 
 
-def test_rag_content_blocks_preserve_webp_mime_and_skip_missing_asset():
+def test_response_uses_agentscope_2_text_blocks_and_state():
+    success = agent_extensions._make_response("ok")
+    error = agent_extensions._make_response("bad", success=False)
+    empty = agent_extensions._make_response(None)
+
+    assert agent_extensions.AGENTSCOPE_AVAILABLE is True
+    assert isinstance(success, ToolResponse)
+    assert success.state is ToolResultState.SUCCESS
+    assert len(success.content) == 1
+    assert isinstance(success.content[0], TextBlock)
+    assert success.content[0].text == "ok"
+    assert error.state is ToolResultState.ERROR
+    assert error.content[0].text == "bad"
+    assert empty.content[0].text == "(无返回结果)"
+
+
+def test_message_text_joins_multiple_text_blocks_and_handles_empty_replies():
+    reply = AssistantMsg(
+        name="Agent",
+        content=[TextBlock(text="a"), TextBlock(text="b")],
+    )
+
+    assert agent_extensions._message_text(reply) == "a\nb"
+    assert agent_extensions._message_text(
+        AssistantMsg(name="Agent", content=[]),
+    ) == ""
+    assert agent_extensions._message_text(None) == ""
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_type", "credential_type", "model_name", "base_url"),
+    [
+        (
+            "openai",
+            OpenAIChatModel,
+            OpenAICredential,
+            "gpt-4o",
+            "https://api.openai.com/v1",
+        ),
+        (
+            "deepseek",
+            DeepSeekChatModel,
+            DeepSeekCredential,
+            "deepseek-chat",
+            "https://api.deepseek.com",
+        ),
+        (
+            "dashscope",
+            DashScopeChatModel,
+            DashScopeCredential,
+            "qwen-turbo",
+            "https://api.dashscope.com",
+        ),
+    ],
+)
+def test_build_model_uses_project_provider_defaults_and_secret_credentials(
+    provider,
+    model_type,
+    credential_type,
+    model_name,
+    base_url,
+):
+    model = agent_extensions._build_model(provider, "", "", "raw-secret")
+
+    assert isinstance(model, model_type)
+    assert isinstance(model.credential, credential_type)
+    assert model.model == model_name
+    assert model.credential.base_url == base_url
+    assert model.credential.api_key.get_secret_value() == "raw-secret"
+    assert "raw-secret" not in repr(model.credential)
+
+
+def test_build_model_preserves_openai_compatible_endpoint():
+    model = agent_extensions._build_model(
+        "openai",
+        "compatible-vlm",
+        "http://localhost:8000/v1",
+        "secret",
+    )
+
+    assert isinstance(model, OpenAIChatModel)
+    assert model.model == "compatible-vlm"
+    assert model.credential.base_url == "http://localhost:8000/v1"
+
+
+def test_rag_content_blocks_preserve_webp_mime_and_skip_missing_asset(caplog):
     tools = AgentExtensionTools()
     loaded = []
 
@@ -586,8 +691,35 @@ def test_rag_content_blocks_preserve_webp_mime_and_skip_missing_asset():
 
     assert loaded == ["cached/one.webp"]
     assert len(blocks) == 3
-    assert blocks[1]["source"]["media_type"] == "image/webp"
-    assert blocks[2]["type"] == "text"
+    assert isinstance(blocks[0], TextBlock)
+    assert isinstance(blocks[1], DataBlock)
+    assert isinstance(blocks[1].source, Base64Source)
+    assert blocks[1].source.media_type == "image/webp"
+    assert blocks[1].source.data == base64.b64encode(b"webp").decode("utf-8")
+    assert isinstance(blocks[2], TextBlock)
+    assert "missing image" in blocks[2].text
+    assert "asset_path" not in caplog.text
+
+
+def test_rag_content_blocks_reload_cached_image_bytes_on_every_call(tmp_path):
+    tools = AgentExtensionTools()
+    image = tmp_path / "cached.png"
+    candidate = {
+        "id": 1,
+        "type": "image",
+        "text": "cached image",
+        "path": "remote.png",
+        "_local_asset_path": str(image),
+    }
+    image.write_bytes(b"first")
+
+    first = tools._build_rag_content_blocks([candidate])
+    image.write_bytes(b"second")
+    second = tools._build_rag_content_blocks([candidate])
+
+    assert isinstance(first[1], DataBlock)
+    assert first[1].source.data == base64.b64encode(b"first").decode("utf-8")
+    assert second[1].source.data == base64.b64encode(b"second").decode("utf-8")
 
 
 def test_rag_content_blocks_do_not_use_misleading_asset_path_warning():
