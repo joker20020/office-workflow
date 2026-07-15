@@ -22,8 +22,10 @@ from src.core.permission_proxy import (
     GuardedDatabase,
     GuardedEventBus,
     GuardedNodeEngine,
+    GuardedToolRegistry,
     PermissionProxy,
 )
+from src.agent.tool_registry import AgentToolRegistry, ToolGroupSnapshot
 from src.core.plugin_base import PluginBase
 from src.core.plugin_manager import PluginInfo, PluginManager
 from src.engine.node_engine import NodeEngine
@@ -77,6 +79,85 @@ def granted_permissions() -> Set[Permission]:
         Permission.NODE_REGISTER,
         Permission.STORAGE_READ,
     }
+
+
+def test_tool_registry_snapshots_preserve_owner_order_and_immutability():
+    registry = AgentToolRegistry()
+
+    def first_tool():
+        pass
+
+    def second_tool():
+        pass
+
+    original = [first_tool]
+    registry.register("core", original)
+    original.append(second_tool)
+    registry.register("plugin", [second_tool], owner_name="workflow_tools")
+
+    snapshots = registry.get_group_snapshots()
+
+    assert snapshots == [
+        ToolGroupSnapshot("core", None, (first_tool,)),
+        ToolGroupSnapshot("plugin", "workflow_tools", (second_tool,)),
+    ]
+    assert isinstance(snapshots[0].tools, tuple)
+    with pytest.raises(AttributeError):
+        snapshots[0].owner_name = "changed"
+    assert registry.get_all_tools() == [first_tool, second_tool]
+
+
+def test_tool_registry_overwrite_updates_owner_and_tools_and_publishes_events():
+    registry = AgentToolRegistry()
+    events = []
+    token = registry.subscribe_changes(events.append)
+
+    def first_tool():
+        pass
+
+    def second_tool():
+        pass
+
+    registry.register("workflow", [first_tool], owner_name="first_owner")
+    registry.register("workflow", [second_tool], owner_name="second_owner")
+    assert registry.get_group_snapshots() == [
+        ToolGroupSnapshot("workflow", "second_owner", (second_tool,)),
+    ]
+    registry.unregister("missing")
+    registry.unregister("workflow")
+    registry.unsubscribe_changes(token)
+    registry.register("after-unsubscribe", [first_tool])
+
+    assert [(event.source, event.action, event.name) for event in events] == [
+        ("tools", "registered", "workflow"),
+        ("tools", "registered", "workflow"),
+        ("tools", "unregistered", "workflow"),
+    ]
+    assert registry.get_group_snapshots() == [
+        ToolGroupSnapshot("after-unsubscribe", None, (first_tool,)),
+    ]
+
+
+def test_guarded_registry_records_plugin_owner():
+    registry = AgentToolRegistry()
+    guarded = GuardedToolRegistry(
+        registry,
+        {Permission.AGENT_TOOL},
+        "workflow_tools",
+    )
+
+    def first_tool():
+        pass
+
+    guarded.register("workflow", [first_tool])
+
+    assert registry.get_group_snapshots() == [
+        ToolGroupSnapshot(
+            group_name="workflow",
+            owner_name="workflow_tools",
+            tools=(first_tool,),
+        ),
+    ]
 
 
 # ==================== GuardedEventBus Tests ====================

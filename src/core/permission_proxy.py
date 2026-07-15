@@ -471,7 +471,11 @@ class GuardedToolRegistry:
                 Permission.AGENT_TOOL,
                 f"插件 '{self._plugin_name}' 需要 AGENT_TOOL 权限才能注册工具",
             )
-        self._tool_registry.register(group_name, tools)
+        self._tool_registry.register(
+            group_name,
+            tools,
+            owner_name=self._plugin_name,
+        )
 
     def unregister(self, group_name: str) -> None:
         """

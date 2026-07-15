@@ -1,98 +1,100 @@
 # -*- coding: utf-8 -*-
-"""
-Agent工具注册中心
+"""Registry for callable tools exposed to the main AgentScope agent."""
 
-提供插件向Agent注册工具函数的统一入口。
-AgentIntegration在初始化时从此注册中心拉取所有已注册的工具。
-
-使用方式:
-    from src.agent.tool_registry import AgentToolRegistry
-
-    registry = AgentToolRegistry.instance()
-    registry.register("my_plugin", [tool_func1, tool_func2])
-    all_tools = registry.get_all_tools()
-"""
-
+from dataclasses import dataclass
 import threading
 from typing import Callable, Dict, List, Optional
 
+from src.core.change_notifier import ChangeCallback, ChangeNotifier
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
 
 
-class AgentToolRegistry:
-    """
-    Agent工具注册中心（单例）
+@dataclass(frozen=True, slots=True)
+class ToolGroupSnapshot:
+    """Immutable view of one registered tool group."""
 
-    插件通过此注册中心向Agent提供工具函数：
-    - register(): 注册一组工具函数
-    - unregister(): 注销一组工具函数
-    - get_all_tools(): 获取所有已注册的工具函数
-    """
+    group_name: str
+    owner_name: str | None
+    tools: tuple[Callable, ...]
+
+
+class AgentToolRegistry:
+    """Singleton registry populated by application plugins."""
 
     _instance: Optional["AgentToolRegistry"] = None
     _lock = threading.Lock()
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: Dict[str, List[Callable]] = {}
+        self._owners: Dict[str, str | None] = {}
+        self._registry_lock = threading.RLock()
+        self._change_notifier = ChangeNotifier("tools")
 
     @classmethod
     def instance(cls) -> "AgentToolRegistry":
-        """获取单例实例"""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls()
         return cls._instance
 
-    def register(self, group_name: str, tools: List[Callable]) -> None:
-        """
-        注册一组工具函数
+    def subscribe_changes(self, callback: ChangeCallback) -> int:
+        return self._change_notifier.subscribe(callback)
 
-        Args:
-            group_name: 工具组名称（通常为插件名称）
-            tools: 工具函数列表
-        """
-        if group_name in self._tools:
-            _logger.warning(f"工具组 '{group_name}' 已存在，将被覆盖")
-        self._tools[group_name] = list(tools)
-        _logger.info(f"注册工具组 '{group_name}': {len(tools)} 个工具")
+    def unsubscribe_changes(self, token: int) -> None:
+        self._change_notifier.unsubscribe(token)
+
+    def register(
+        self,
+        group_name: str,
+        tools: List[Callable],
+        *,
+        owner_name: str | None = None,
+    ) -> None:
+        """Register or atomically replace a group while preserving its position."""
+        with self._registry_lock:
+            overwriting = group_name in self._tools
+            self._tools[group_name] = list(tools)
+            self._owners[group_name] = owner_name
+        if overwriting:
+            _logger.warning("工具组 '%s' 已存在，将被覆盖", group_name)
+        _logger.info("注册工具组 '%s': %s 个工具", group_name, len(tools))
+        self._change_notifier.notify(action="registered", name=group_name)
 
     def unregister(self, group_name: str) -> None:
-        """
-        注销一组工具函数
+        with self._registry_lock:
+            removed = self._tools.pop(group_name, None)
+            if removed is not None:
+                self._owners.pop(group_name, None)
+        if removed is None:
+            _logger.debug("工具组 '%s' 不存在，跳过注销", group_name)
+            return
+        _logger.info("注销工具组 '%s': %s 个工具", group_name, len(removed))
+        self._change_notifier.notify(action="unregistered", name=group_name)
 
-        Args:
-            group_name: 工具组名称
-        """
-        removed = self._tools.pop(group_name, None)
-        if removed is not None:
-            _logger.info(f"注销工具组 '{group_name}': {len(removed)} 个工具")
-        else:
-            _logger.debug(f"工具组 '{group_name}' 不存在，跳过注销")
+    def get_group_snapshots(self) -> List[ToolGroupSnapshot]:
+        with self._registry_lock:
+            return [
+                ToolGroupSnapshot(name, self._owners.get(name), tuple(tools))
+                for name, tools in self._tools.items()
+            ]
 
     def get_all_tools(self) -> List[Callable]:
-        """
-        获取所有已注册的工具函数
-
-        Returns:
-            所有工具函数列表
-        """
         all_tools: List[Callable] = []
-        for tools in self._tools.values():
-            all_tools.extend(tools)
+        for group in self.get_group_snapshots():
+            all_tools.extend(group.tools)
         return all_tools
 
     def get_group_names(self) -> List[str]:
-        """获取所有已注册的工具组名称"""
-        return list(self._tools.keys())
+        with self._registry_lock:
+            return list(self._tools.keys())
 
     def has_group(self, group_name: str) -> bool:
-        """检查工具组是否已注册"""
-        return group_name in self._tools
+        with self._registry_lock:
+            return group_name in self._tools
 
     @classmethod
     def _reset_for_testing(cls) -> None:
-        """测试用：重置单例"""
         cls._instance = None

@@ -82,6 +82,7 @@ from src.agent.api_key_manager import ApiKeyManager
 from src.agent.async_runtime import AgentAsyncRuntime
 from src.agent.chat_history import ChatHistory, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
+from src.core.permission_manager import Permission
 from src.engine.node_engine import NodeEngine
 from src.core.config_manager import get_config_manager
 from src.utils.logger import get_logger
@@ -89,6 +90,7 @@ from src.utils.logger import get_logger
 if TYPE_CHECKING:
     from src.agent.mcp_server_manager import McpServerManager
     from src.agent.skill_manager import SkillManager
+    from src.core.permission_manager import PermissionManager
     from src.storage.repositories import ChatHistoryRepository
 
 _logger = get_logger(__name__)
@@ -121,6 +123,7 @@ class AgentIntegration:
         skill_manager: Optional["SkillManager"] = None,
         history_repository: Optional["ChatHistoryRepository"] = None,
         session_id: Optional[str] = None,
+        permission_manager: Optional["PermissionManager"] = None,
     ):
         _logger.info("=" * 50)
         _logger.info("AgentIntegration 开始初始化")
@@ -131,6 +134,7 @@ class AgentIntegration:
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
+        self._permission_manager = permission_manager
         self.config = get_config_manager()
 
         self._agent: Optional[Any] = None
@@ -503,14 +507,24 @@ class AgentIntegration:
 
         function_tools = []
         seen_ids = set()
-        for tool_func in AgentToolRegistry.instance().get_all_tools():
-            tool_id = id(tool_func)
-            if tool_id in seen_ids:
+        for group in AgentToolRegistry.instance().get_group_snapshots():
+            if (
+                group.owner_name is not None
+                and self._permission_manager is not None
+                and not self._permission_manager.check(
+                    group.owner_name,
+                    Permission.AGENT_TOOL,
+                )
+            ):
                 continue
-            seen_ids.add(tool_id)
-            function_tools.append(
-                FunctionTool(func=tool_func, is_concurrency_safe=False),
-            )
+            for tool_func in group.tools:
+                tool_id = id(tool_func)
+                if tool_id in seen_ids:
+                    continue
+                seen_ids.add(tool_id)
+                function_tools.append(
+                    FunctionTool(func=tool_func, is_concurrency_safe=False),
+                )
 
         if function_tools:
             _logger.info(f"已从注册中心加载 {len(function_tools)} 个工具")

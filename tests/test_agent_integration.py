@@ -25,6 +25,8 @@ from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.skill_manager import SkillManager
 from src.agent.mcp_server_manager import McpServerManager
+from src.agent.tool_registry import AgentToolRegistry
+from src.core.permission_manager import Permission, PermissionManager
 from src.engine.node_engine import NodeEngine
 from src.storage.database import Database
 
@@ -327,12 +329,10 @@ def test_registry_callables_are_wrapped_once_in_order(agent, monkeypatch):
     def second_tool():
         """Second tool docs."""
 
-    registry = agent_integration.AgentToolRegistry.instance()
-    monkeypatch.setattr(
-        registry,
-        "get_all_tools",
-        Mock(return_value=[first_tool, second_tool, first_tool]),
-    )
+    AgentToolRegistry._reset_for_testing()
+    registry = AgentToolRegistry.instance()
+    registry.register("first", [first_tool, second_tool])
+    registry.register("duplicate", [first_tool])
     wrapped_funcs = []
 
     def recording_function_tool(*, func, **kwargs):
@@ -341,7 +341,10 @@ def test_registry_callables_are_wrapped_once_in_order(agent, monkeypatch):
 
     monkeypatch.setattr(agent_integration, "FunctionTool", recording_function_tool)
 
-    tools = agent._build_registry_function_tools()
+    try:
+        tools = agent._build_registry_function_tools()
+    finally:
+        AgentToolRegistry._reset_for_testing()
 
     assert all(isinstance(tool, FunctionTool) for tool in tools)
     assert wrapped_funcs == [first_tool, second_tool]
@@ -351,6 +354,83 @@ def test_registry_callables_are_wrapped_once_in_order(agent, monkeypatch):
         "Second tool docs.",
     ]
     assert [tool.is_concurrency_safe for tool in tools] == [False, False]
+
+
+def test_registry_function_tools_filter_owned_groups_before_dedup(agent, monkeypatch):
+    def allowed_tool():
+        """Allowed tool docs."""
+
+    def trusted_tool():
+        """Trusted tool docs."""
+
+    def denied_tool():
+        """Denied tool docs."""
+
+    forbidden_names = {"Bash", "Read", "Write", "Edit", "Glob", "Grep"}
+    permission_manager = PermissionManager()
+    permission_manager.grant("allowed_plugin", Permission.AGENT_TOOL)
+    agent._permission_manager = permission_manager
+    AgentToolRegistry._reset_for_testing()
+    registry = AgentToolRegistry.instance()
+    registry.register(
+        "denied",
+        [allowed_tool, denied_tool],
+        owner_name="denied_plugin",
+    )
+    registry.register(
+        "allowed",
+        [allowed_tool, trusted_tool],
+        owner_name="allowed_plugin",
+    )
+    registry.register("trusted", [trusted_tool])
+    wrapped_funcs = []
+
+    def recording_function_tool(*, func, **kwargs):
+        wrapped_funcs.append(func)
+        return FunctionTool(func=func, **kwargs)
+
+    monkeypatch.setattr(agent_integration, "FunctionTool", recording_function_tool)
+
+    try:
+        tools = agent._build_registry_function_tools()
+    finally:
+        AgentToolRegistry._reset_for_testing()
+
+    assert wrapped_funcs == [allowed_tool, trusted_tool]
+    assert [tool.name for tool in tools] == ["allowed_tool", "trusted_tool"]
+    assert denied_tool not in wrapped_funcs
+    assert forbidden_names.isdisjoint(tool.name for tool in tools)
+    assert all(tool.is_concurrency_safe is False for tool in tools)
+
+
+def test_registry_owned_groups_remain_visible_without_permission_manager(
+    api_key_manager,
+    node_engine,
+    monkeypatch,
+):
+    def owned_tool():
+        """Owned tool docs."""
+
+    agent = AgentIntegration(api_key_manager, node_engine, permission_manager=None)
+    AgentToolRegistry._reset_for_testing()
+    registry = AgentToolRegistry.instance()
+    registry.register("owned", [owned_tool], owner_name="legacy_plugin")
+    wrapped_funcs = []
+    monkeypatch.setattr(
+        agent_integration,
+        "FunctionTool",
+        lambda *, func, **kwargs: wrapped_funcs.append(func)
+        or FunctionTool(func=func, **kwargs),
+    )
+
+    try:
+        tools = agent._build_registry_function_tools()
+    finally:
+        AgentToolRegistry._reset_for_testing()
+        agent.shutdown()
+
+    assert wrapped_funcs == [owned_tool]
+    assert [tool.name for tool in tools] == ["owned_tool"]
 
 
 def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(

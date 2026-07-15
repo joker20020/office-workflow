@@ -147,6 +147,11 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
             mcp_manager=self._mcp_manager,
             skill_manager=self._skill_manager,
             history_repository=self._history_repository,
+            permission_manager=(
+                app_context.permission_manager
+                if app_context is not None and app_context.is_initialized
+                else None
+            ),
         )
 
         self._theme_manager = ThemeManager.instance()
