@@ -5,16 +5,15 @@ import asyncio
 import builtins
 import concurrent.futures
 import importlib.util
-from pathlib import Path
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
-
-from agentscope.message import AssistantMsg, SystemMsg, UserMsg
 from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
+from agentscope.message import AssistantMsg, SystemMsg, UserMsg
 from agentscope.permission import PermissionMode
 from agentscope.state import AgentState
 from agentscope.tool import FunctionTool
@@ -24,8 +23,8 @@ import src.agent.mcp_server_manager as mcp_server_manager
 import src.agent.skill_manager as skill_manager_module
 from src.agent.agent_integration import AgentIntegration
 from src.agent.api_key_manager import ApiKeyManager
-from src.agent.skill_manager import SkillManager
 from src.agent.mcp_server_manager import McpServerManager
+from src.agent.skill_manager import SkillManager
 from src.agent.tool_registry import AgentToolRegistry
 from src.core.permission_manager import Permission, PermissionManager
 from src.engine.node_engine import NodeEngine

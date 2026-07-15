@@ -1876,7 +1876,7 @@ async def test_unity_empty_reply_uses_no_content_fallback_and_closes(monkeypatch
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply_error",
-    [RuntimeError("agent failed"), asyncio.TimeoutError(), asyncio.CancelledError()],
+    [RuntimeError("agent failed"), TimeoutError(), asyncio.CancelledError()],
 )
 async def test_unity_closes_once_and_propagates_reply_errors(monkeypatch, reply_error):
     events, _ = _install_unity_recording_fakes(
@@ -2109,7 +2109,7 @@ async def test_blender_empty_results_use_fallback_and_close(monkeypatch, reply, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply_error",
-    [RuntimeError("agent failed"), asyncio.TimeoutError(), asyncio.CancelledError()],
+    [RuntimeError("agent failed"), TimeoutError(), asyncio.CancelledError()],
 )
 async def test_blender_closes_once_and_propagates_reply_errors(monkeypatch, reply_error):
     events, _ = _install_blender_recording_fakes(

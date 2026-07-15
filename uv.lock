@@ -747,6 +747,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-qt" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -774,6 +775,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-qt", specifier = ">=4.5.0" },
+    { name = "ruff", specifier = ">=0.1.0" },
 ]
 
 [[package]]

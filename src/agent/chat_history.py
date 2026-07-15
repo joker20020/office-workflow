@@ -38,7 +38,6 @@ from agentscope.message import (
     Msg,
     SystemMsg,
     TextBlock,
-    ToolCallBlock,
     URLSource,
     UserMsg,
 )

@@ -2,12 +2,11 @@
 """会话历史管理测试 - 使用 AgentScope Msg 对象"""
 
 import logging
-
-import pytest
+import tempfile
 from datetime import datetime
 from pathlib import Path
-import tempfile
 
+import pytest
 from agentscope.message import AssistantMsg, Msg, UserMsg
 
 from src.agent.chat_history import ChatHistory, deserialize_message, serialize_message

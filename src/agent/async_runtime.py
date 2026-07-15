@@ -9,7 +9,6 @@ import threading
 from collections.abc import Awaitable, Coroutine
 from typing import Any, TypeVar, cast
 
-
 T = TypeVar("T")
 
 

@@ -1855,7 +1855,7 @@ class AgentExtensionTools:
 
         blender_agent = Agent(
             name="BlenderAgent",
-            system_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+            system_prompt="""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
 
         完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
         # 执行结果
@@ -2084,7 +2084,7 @@ class AgentExtensionTools:
         try:
             process_agent = Agent(
             name="ProcessAgent",
-            system_prompt=f"""
+            system_prompt="""
         你是一个工艺规划师,你的任务是根据查询到的知识帮助用户进行工艺规划
         在你进行规划前，请先制定一个工艺规划计划。必须使用 TaskCreate 创建完整的工艺编写任务列表，使用 TaskList 和 TaskGet 检查任务，使用 TaskUpdate 标记进行中与已完成，并逐步执行直至全部任务完成才能结束规划。
         每当你完成一个工序或工步文件编写后请按照json模板输出将其完整写入输出根目录。文件路径只能是根目录下的 .json 文件名，不得包含子目录、绝对路径或路径跳转，注意输出文件结构的可读性

@@ -4,19 +4,19 @@
 import asyncio
 import threading
 from types import SimpleNamespace
-from typing import Any, AsyncGenerator, get_args
+from typing import Any, get_args
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from agentscope.agent import Agent
 from agentscope.event import (
     AgentEvent,
-    RequireExternalExecutionEvent,
-    RequireUserConfirmEvent,
     ReplyEndEvent,
     ReplyEndReason,
     ReplyStartEvent,
+    RequireExternalExecutionEvent,
+    RequireUserConfirmEvent,
     TextBlockDeltaEvent,
     TextBlockEndEvent,
     TextBlockStartEvent,
@@ -27,7 +27,6 @@ from agentscope.middleware import MiddlewareBase
 
 from src.agent.agent_integration import AgentIntegration
 from src.agent.async_runtime import AgentAsyncRuntime
-
 
 _CREATED_INTEGRATIONS: list[AgentIntegration] = []
 
