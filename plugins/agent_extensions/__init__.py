@@ -15,6 +15,8 @@ import hashlib
 import json
 import math
 import os
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 from src.core.permission_manager import Permission, PermissionSet
@@ -75,8 +77,8 @@ _logger = get_logger(__name__)
 TOOL_GROUP_NAME = "agent_extensions"
 
 
-class _ComfyUIResult(str):
-    """Markdown result carrying the programmatic ComfyUI success state."""
+class _SubagentResult(str):
+    """Structured Markdown result carrying a programmatic success state."""
 
     success: bool
 
@@ -84,6 +86,123 @@ class _ComfyUIResult(str):
         instance = super().__new__(cls, content)
         instance.success = success
         return instance
+
+
+_ComfyUIResult = _SubagentResult
+
+
+class _AgentToolTimeoutError(TimeoutError):
+    """Raised after timed-out async work has been cancelled and joined."""
+
+
+class _APIRequestError(RuntimeError):
+    """Private HTTP failure carrying the status and response body."""
+
+    def __init__(self, operation: str, status: int, body: str):
+        self.status = status
+        self.body = body
+        super().__init__(f"{operation}失败: HTTP {status} - {body}")
+
+
+def _subagent_failure(subject: str, message: str) -> _SubagentResult:
+    return _SubagentResult(
+        "# 执行结果\n"
+        "## 状态\n失败\n"
+        f"## 完成摘要\n{subject}未完成。\n"
+        "## 生成文件\n无\n"
+        f"## 具体结果\n{message}\n"
+        "## 执行记录\n未获得可验证的完整执行结果。\n"
+        f"## 警告与未完成项\n{message}",
+        success=False,
+    )
+
+
+_HANDOFF_HEADINGS = (
+    "# 执行结果",
+    "## 状态",
+    "## 完成摘要",
+    "## 生成文件",
+    "## 具体结果",
+    "## 执行记录",
+    "## 警告与未完成项",
+)
+_HANDOFF_STATUSES = {"成功", "部分成功", "失败"}
+
+
+def _validate_subagent_handoff(
+    content: str,
+    subject: str,
+    file_records: Any = None,
+) -> _SubagentResult:
+    """Validate a model handoff and attach deterministic process-file evidence."""
+    text = str(content or "")
+    missing = [heading for heading in _HANDOFF_HEADINGS if heading not in text]
+    if missing:
+        return _subagent_failure(
+            subject,
+            f"结构化交接缺少必需章节：{', '.join(missing)}",
+        )
+    status_match = re.search(r"(?m)^## 状态\s*\n([^\n]+)", text)
+    if status_match is None:
+        return _subagent_failure(subject, "结构化交接无法解析状态值")
+    status = status_match.group(1).strip()
+    if status not in _HANDOFF_STATUSES:
+        return _subagent_failure(subject, f"结构化交接状态值无效：{status}")
+
+    records = list(file_records or [])
+    has_recorded_error = any(not record["success"] for record in records)
+    if has_recorded_error and status == "成功":
+        text = (
+            text[:status_match.start(1)]
+            + "部分成功"
+            + text[status_match.end(1):]
+        )
+        status = "部分成功"
+    if records:
+        def prepend_section(heading: str, evidence: str) -> None:
+            nonlocal text
+            marker = f"{heading}\n"
+            position = text.index(marker) + len(marker)
+            text = text[:position] + evidence + "\n" + text[position:]
+
+        successful_files = []
+        seen_paths = set()
+        for record in records:
+            path = record.get("path")
+            if record["success"] and path and path not in seen_paths:
+                successful_files.append(f"- JSON 工艺文件：{path}（工具已验证）")
+                seen_paths.add(path)
+        if successful_files:
+            prepend_section("## 生成文件", "\n".join(successful_files))
+
+        contents = []
+        seen_contents = set()
+        for record in records:
+            path = record.get("path")
+            content_value = record.get("content")
+            content_key = (path, content_value)
+            if (
+                record["success"]
+                and path
+                and content_value is not None
+                and content_key not in seen_contents
+            ):
+                contents.append(f"### {path}\n```json\n{content_value}\n```")
+                seen_contents.add(content_key)
+        if contents:
+            prepend_section("## 具体结果", "\n".join(contents))
+
+        tool_evidence = []
+        for index, record in enumerate(records, 1):
+            tool_evidence.append(
+                f"### {index}. {record['operation']}\n{record['result']}",
+            )
+        prepend_section("## 执行记录", "\n".join(tool_evidence))
+
+        errors = [record["result"] for record in records if not record["success"]]
+        if errors:
+            prepend_section("## 警告与未完成项", "\n".join(errors))
+    return _SubagentResult(text, success=status == "成功" and not has_recorded_error)
 
 
 def _make_response(content: str, success: bool = True) -> Any:
@@ -95,49 +214,103 @@ def _make_response(content: str, success: bool = True) -> Any:
     )
 
 
+def _make_process_file_tools(output_root: Any, records: Any = None):
+    """Bind ProcessAgent JSON file capabilities to one resolved output root."""
+    root = Path(output_root).expanduser().resolve()
+    observations = records if records is not None else []
+
+    def resolve_json_path(file_path: str) -> Path:
+        requested = Path(file_path).expanduser()
+        resolved = (
+            requested.resolve()
+            if requested.is_absolute()
+            else (root / requested).resolve()
+        )
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"路径位于输出根目录之外：{resolved}") from exc
+        if resolved.suffix.lower() != ".json":
+            raise ValueError(f"工艺文件必须使用 .json 扩展名：{resolved}")
+        return resolved
+
+    def result_chunk(
+        operation: str,
+        success: bool,
+        text: str,
+        path: Any = None,
+        content_value: Any = None,
+    ) -> Any:
+        observations.append(
+            {
+                "operation": operation,
+                "success": success,
+                "result": text,
+                "path": str(path) if path is not None else None,
+                "content": content_value,
+            },
+        )
+        return ToolChunk(
+            content=[TextBlock(text=text)],
+            state=ToolResultState.SUCCESS if success else ToolResultState.ERROR,
+        )
+
+    def write_text_file(file_path: str, content: str) -> Any:
+        """将完整 UTF-8 JSON 文本写入本次工艺输出根目录。"""
+        try:
+            target = resolve_json_path(file_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8", newline="")
+        except Exception as exc:
+            return result_chunk(
+                "write_text_file",
+                False,
+                "# 文件写入结果\n## 状态\n失败\n"
+                f"## 错误\n{exc}",
+            )
+        return result_chunk(
+            "write_text_file",
+            True,
+            "# 文件写入结果\n## 状态\n成功\n"
+            f"## 绝对路径\n{target}\n## 完整内容\n{content}",
+            target,
+            content,
+        )
+
+    def view_text_file(file_path: str) -> Any:
+        """读取本次工艺输出根目录中的完整 UTF-8 JSON 文本。"""
+        try:
+            target = resolve_json_path(file_path)
+            content = target.read_text(encoding="utf-8")
+        except Exception as exc:
+            return result_chunk(
+                "view_text_file",
+                False,
+                "# 文件读取结果\n## 状态\n失败\n"
+                f"## 错误\n{exc}",
+            )
+        return result_chunk(
+            "view_text_file",
+            True,
+            "# 文件读取结果\n## 状态\n成功\n"
+            f"## 绝对路径\n{target}\n## 完整内容\n{content}",
+            target,
+            content,
+        )
+
+    return write_text_file, view_text_file
+
+
 def write_text_file(file_path: str, content: str) -> Any:
-    """将完整 UTF-8 文本写入文件，并返回绝对路径与未截断内容。"""
-    absolute_path = os.path.abspath(os.path.expanduser(file_path))
-    parent_dir = os.path.dirname(absolute_path)
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-    with open(absolute_path, "w", encoding="utf-8", newline="") as file_handle:
-        file_handle.write(content)
-    return ToolChunk(
-        content=[
-            TextBlock(
-                text=(
-                    "# 文件写入结果\n"
-                    "## 状态\n成功\n"
-                    f"## 绝对路径\n{absolute_path}\n"
-                    "## 完整内容\n"
-                    f"{content}"
-                ),
-            ),
-        ],
-        state=ToolResultState.SUCCESS,
-    )
+    """Compatibility helper safely rooted to the current working directory."""
+    bound_write, _ = _make_process_file_tools(Path.cwd())
+    return bound_write(file_path, content)
 
 
 def view_text_file(file_path: str) -> Any:
-    """读取 UTF-8 文本文件，并返回绝对路径与未截断完整内容。"""
-    absolute_path = os.path.abspath(os.path.expanduser(file_path))
-    with open(absolute_path, "r", encoding="utf-8") as file_handle:
-        content = file_handle.read()
-    return ToolChunk(
-        content=[
-            TextBlock(
-                text=(
-                    "# 文件读取结果\n"
-                    "## 状态\n成功\n"
-                    f"## 绝对路径\n{absolute_path}\n"
-                    "## 完整内容\n"
-                    f"{content}"
-                ),
-            ),
-        ],
-        state=ToolResultState.SUCCESS,
-    )
+    """Compatibility helper safely rooted to the current working directory."""
+    _, bound_view = _make_process_file_tools(Path.cwd())
+    return bound_view(file_path)
 
 
 def _message_text(msg: Any) -> str:
@@ -206,34 +379,55 @@ def _get_timeout_seconds(name: str, default: float) -> float:
 
 
 def _run_async(coro):
-    """在同步环境中运行异步协程（供tool函数使用）"""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        import threading
-        result = [None, None]
+    """Run a coroutine in an owned loop, cancelling and joining on timeout."""
+    import threading
 
-        def _target():
+    result = [None, None]
+    worker_state = {}
+    task_ready = threading.Event()
+
+    def _target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        task = loop.create_task(coro)
+        worker_state.update(loop=loop, task=task)
+        task_ready.set()
+        try:
+            result[0] = loop.run_until_complete(task)
+        except BaseException as exc:
+            result[1] = exc
+        finally:
             try:
-                result[0] = asyncio.run(coro)
-            except Exception as e:
-                result[1] = e
+                pending = [
+                    pending_task
+                    for pending_task in asyncio.all_tasks(loop)
+                    if not pending_task.done()
+                ]
+                for pending_task in pending:
+                    pending_task.cancel()
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True),
+                    )
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                asyncio.set_event_loop(None)
+                loop.close()
 
-        t = threading.Thread(target=_target)
-        t.start()
-        timeout = _get_timeout_seconds("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0)
-        t.join(timeout=timeout)
-        if t.is_alive():
-            return f"(执行超时：工具运行超过 {timeout:g} 秒)"
-        if result[1]:
-            raise result[1]
-        if result[0] is None:
-            return "(工具执行完成但无返回结果)"
-        return result[0]
-    else:
-        return asyncio.run(coro)
+    worker = threading.Thread(target=_target)
+    worker.start()
+    task_ready.wait()
+    timeout = _get_timeout_seconds("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0)
+    worker.join(timeout=timeout)
+    if worker.is_alive():
+        worker_state["loop"].call_soon_threadsafe(worker_state["task"].cancel)
+        worker.join()
+        raise _AgentToolTimeoutError(f"执行超时：工具运行超过 {timeout:g} 秒")
+    if result[1] is not None:
+        raise result[1]
+    if result[0] is None:
+        return "(工具执行完成但无返回结果)"
+    return result[0]
 
 
 class _APIRequester:
@@ -654,7 +848,7 @@ class _APIRequester:
                 else:
                     error = await response.text()
                     _logger.error(f"文生图失败: {response.status} - {error}")
-                    return False
+                    raise _APIRequestError("文生图", response.status, error)
 
 
 # ============================================================
@@ -859,13 +1053,18 @@ class AgentExtensionTools:
         """
         try:
             result = _run_async(self._unity_ar_async(task, info))
-            return _make_response(result)
+            result = _validate_subagent_handoff(result, "Unity操作")
+            return _make_response(str(result), success=result.success)
         except Exception as e:
-            return _make_response(f"Unity操作失败: {e}", success=False)
+            result = _subagent_failure("Unity操作", f"Unity操作失败：{e}")
+            return _make_response(str(result), success=False)
 
     async def _unity_ar_async(self, task: str, info: str) -> str:
         if not AGENTSCOPE_AVAILABLE:
-            return "AgentScope 未安装，无法使用 Unity MCP 功能"
+            return _subagent_failure(
+                "Unity操作",
+                "AgentScope 未安装，无法使用 Unity MCP 功能",
+            )
 
         unity_timeout = _get_timeout_seconds("UNITY_MCP_TIMEOUT_SECONDS", 600.0)
         unity_config = HttpMCPConfig(
@@ -885,7 +1084,11 @@ class AgentExtensionTools:
             try:
                 await unity_mcp.connect()
             except Exception as e:
-                return f"无法连接 Unity MCP 服务(请确保 Unity 编辑器已启动且 MCP 服务运行中): {e}"
+                return _subagent_failure(
+                    "Unity操作",
+                    "无法连接 Unity MCP 服务"
+                    f"(请确保 Unity 编辑器已启动且 MCP 服务运行中)：{e}",
+                )
             connected = True
             return await self._unity_ar_connected(unity_mcp, task, info)
         except BaseException as exc:
@@ -916,7 +1119,7 @@ class AgentExtensionTools:
         instances_response = await session.read_resource(AnyUrl("mcpforunity://instances"))
         instances = json.loads(instances_response.contents[0].text)["instances"]
         if not instances:
-            return "未找到运行中的 Unity 编辑器实例"
+            return _subagent_failure("Unity操作", "未找到运行中的 Unity 编辑器实例")
         instance_hash = instances[0]["hash"]
         _logger.info(f"Unity instance hash: {instance_hash}")
         await session.call_tool("set_active_instance", {"instance": instance_hash})
@@ -987,8 +1190,14 @@ class AgentExtensionTools:
         msg_res = await unity_agent.reply(msg)
 
         if msg_res is None:
-            return "Unity Agent 未返回结果"
-        return _message_text(msg_res) or "Unity Agent 未返回内容"
+            return _subagent_failure("Unity操作", "Unity Agent 未返回结果")
+        reply_text = _message_text(msg_res)
+        if not reply_text:
+            return _subagent_failure("Unity操作", "Unity Agent 未返回内容")
+        return _validate_subagent_handoff(
+            reply_text,
+            "Unity操作",
+        )
 
     # ==================== 2. Blender 建模 ====================
 
@@ -1003,13 +1212,18 @@ class AgentExtensionTools:
         """
         try:
             result = _run_async(self._blender_model_async(task))
-            return _make_response(result)
+            result = _validate_subagent_handoff(result, "Blender操作")
+            return _make_response(str(result), success=result.success)
         except Exception as e:
-            return _make_response(f"Blender操作失败: {e}", success=False)
+            result = _subagent_failure("Blender操作", f"Blender操作失败：{e}")
+            return _make_response(str(result), success=False)
 
     async def _blender_model_async(self, task: str) -> str:
         if not AGENTSCOPE_AVAILABLE:
-            return "AgentScope 未安装，无法使用 Blender MCP 功能"
+            return _subagent_failure(
+                "Blender操作",
+                "AgentScope 未安装，无法使用 Blender MCP 功能",
+            )
 
         blender_timeout = _get_timeout_seconds(
             "BLENDER_MCP_TIMEOUT_SECONDS",
@@ -1032,7 +1246,11 @@ class AgentExtensionTools:
             try:
                 await blender_mcp.connect()
             except Exception as e:
-                return f"无法连接 Blender MCP 服务(请确保 Blender 已启动且插件已安装): {e}"
+                return _subagent_failure(
+                    "Blender操作",
+                    "无法连接 Blender MCP 服务"
+                    f"(请确保 Blender 已启动且插件已安装)：{e}",
+                )
             connected = True
             return await self._blender_model_connected(blender_mcp, task)
         except BaseException as exc:
@@ -1089,8 +1307,14 @@ class AgentExtensionTools:
         msg_res = await blender_agent.reply(msg)
 
         if msg_res is None:
-            return "Blender Agent 未返回结果"
-        return _message_text(msg_res) or "Blender Agent 未返回内容"
+            return _subagent_failure("Blender操作", "Blender Agent 未返回结果")
+        reply_text = _message_text(msg_res)
+        if not reply_text:
+            return _subagent_failure("Blender操作", "Blender Agent 未返回内容")
+        return _validate_subagent_handoff(
+            reply_text,
+            "Blender操作",
+        )
 
     # ==================== 3. 工艺规划 ====================
 
@@ -1117,9 +1341,11 @@ class AgentExtensionTools:
             result = _run_async(
                 self._process_agent_async(task, image_path or None, collection_name, limit)
             )
-            return _make_response(result)
+            result = _validate_subagent_handoff(result, "工艺规划")
+            return _make_response(str(result), success=result.success)
         except Exception as e:
-            return _make_response(f"工艺规划失败: {e}", success=False)
+            result = _subagent_failure("工艺规划", f"工艺规划失败：{e}")
+            return _make_response(str(result), success=False)
 
     async def _process_agent_async(
         self,
@@ -1133,7 +1359,10 @@ class AgentExtensionTools:
         再由带 Task 工具的 AgentScope 2 Agent 执行工艺规划。
         """
         if not AGENTSCOPE_AVAILABLE:
-            return "AgentScope 未安装，无法使用工艺规划功能"
+            return _subagent_failure(
+                "工艺规划",
+                "AgentScope 未安装，无法使用工艺规划功能",
+            )
 
         candidates = await self._search_rag_candidates(
             task,
@@ -1222,14 +1451,22 @@ class AgentExtensionTools:
         )
 
         # ---- 5. 创建带任务与文件工具的 AgentScope 2 工艺规划 Agent ----
+        process_output_root = Path(
+            os.environ.get("PROCESS_OUTPUT_ROOT", os.getcwd()),
+        ).expanduser().resolve()
+        file_records = []
+        process_write_file, process_view_file = _make_process_file_tools(
+            process_output_root,
+            file_records,
+        )
         toolkit = Toolkit(
             tools=[
                 TaskCreate(),
                 TaskGet(),
                 TaskList(),
                 TaskUpdate(),
-                FunctionTool(func=write_text_file),
-                FunctionTool(func=view_text_file),
+                FunctionTool(func=process_write_file),
+                FunctionTool(func=process_view_file),
             ],
         )
         process_state = AgentState(
@@ -1277,7 +1514,14 @@ class AgentExtensionTools:
 
         # ---- 6. 执行 ----
         msg_res = await process_agent.reply(msg)
-        return _message_text(msg_res) or "工艺规划 Agent 未返回结果"
+        reply_text = _message_text(msg_res)
+        if not reply_text:
+            return _subagent_failure("工艺规划", "工艺规划 Agent 未返回结果")
+        return _validate_subagent_handoff(
+            reply_text,
+            "工艺规划",
+            file_records,
+        )
 
     # ==================== 4. ComfyUI 图像生成 ====================
 
@@ -1309,6 +1553,7 @@ class AgentExtensionTools:
             result = wrapper_failure(f"图像生成异常：{exc}")
         if not isinstance(result, _ComfyUIResult):
             result = wrapper_failure(str(result))
+        result = _validate_subagent_handoff(result, "图像生成")
         return _make_response(str(result), success=result.success)
 
     async def _comfyui_agent_async(self, task: str) -> _ComfyUIResult:

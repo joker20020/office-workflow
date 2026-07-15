@@ -4,6 +4,7 @@
 import asyncio
 import base64
 import hashlib
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
@@ -118,6 +119,18 @@ class FakeFormData:
             self.fields[name] = current
         else:
             self.fields[name] = stored
+
+
+def _valid_handoff(details: str) -> str:
+    return (
+        "# 执行结果\n"
+        "## 状态\n成功\n"
+        "## 完成摘要\n已完成。\n"
+        "## 生成文件\n无\n"
+        f"## 具体结果\n{details}\n"
+        "## 执行记录\n已执行。\n"
+        "## 警告与未完成项\n无"
+    )
 
 
 @pytest.fixture
@@ -867,10 +880,59 @@ async def test_run_async_reports_real_thread_timeout(monkeypatch):
         await asyncio.sleep(0.05)
         return "finished"
 
-    result = agent_extensions._run_async(slow_result())
-    await asyncio.sleep(0.06)
+    with pytest.raises(
+        agent_extensions._AgentToolTimeoutError,
+        match="执行超时：工具运行超过 0.01 秒",
+    ):
+        agent_extensions._run_async(slow_result())
 
-    assert result == "(执行超时：工具运行超过 0.01 秒)"
+
+@pytest.mark.asyncio
+async def test_unity_public_timeout_cancels_work_and_closes_before_return(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+    cancelled = threading.Event()
+    post_timeout_mutation = threading.Event()
+    events, captured = _install_unity_recording_fakes(monkeypatch)
+    tools = AgentExtensionTools()
+
+    async def wait_for_cancellation(unity_mcp, task, info):
+        try:
+            await asyncio.sleep(10)
+            post_timeout_mutation.set()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(tools, "_unity_ar_connected", wait_for_cancellation)
+
+    response = tools.tool_unity_ar("task")
+
+    assert response.state is ToolResultState.ERROR
+    assert "执行超时" in response.content[0].text
+    assert cancelled.is_set()
+    assert captured["client_instance"].close_count == 1
+    assert events[-1] == "close"
+    assert not post_timeout_mutation.is_set()
+
+
+@pytest.mark.asyncio
+async def test_run_async_timeout_cancels_spawned_tasks_before_loop_close(monkeypatch):
+    monkeypatch.setenv("AGENT_TOOL_TIMEOUT_SECONDS", "0.01")
+    child_cancelled = threading.Event()
+
+    async def child_work():
+        try:
+            await asyncio.sleep(10)
+        finally:
+            child_cancelled.set()
+
+    async def parent_work():
+        asyncio.create_task(child_work())
+        await asyncio.sleep(10)
+
+    with pytest.raises(agent_extensions._AgentToolTimeoutError):
+        agent_extensions._run_async(parent_work())
+
+    assert child_cancelled.is_set()
 
 
 @pytest.mark.asyncio
@@ -1202,6 +1264,130 @@ def test_comfyui_sync_wrapper_marks_timeout_as_structured_error(monkeypatch):
     assert "执行超时" in response.content[0].text
 
 
+def test_comfyui_public_response_preserves_non_2xx_status_and_body(
+    monkeypatch,
+    tmp_path,
+    fake_session,
+):
+    tools, _ = _install_comfyui_recording_fakes(monkeypatch, tmp_path)
+    tools._requester = _APIRequester(data_dir=str(tmp_path), workflow_path=None)
+    fake_session.queue_bytes(
+        b"",
+        status=503,
+        text='{"error":"queue full"}',
+    )
+
+    response = tools.tool_generate_image("draw an assembly guide")
+
+    assert response.state is ToolResultState.ERROR
+    assert "HTTP 503" in response.content[0].text
+    assert '{"error":"queue full"}' in response.content[0].text
+    details = response.content[0].text.split("## 具体结果\n", 1)[1].split(
+        "## 执行记录",
+        1,
+    )[0]
+    warnings = response.content[0].text.split("## 警告与未完成项\n", 1)[1]
+    assert "HTTP 503" in details
+    assert "queue full" in warnings
+
+
+@pytest.mark.parametrize(
+    ("call_tool", "expected"),
+    [
+        (lambda tools: tools.tool_unity_ar("task"), "Unity"),
+        (lambda tools: tools.tool_blender_model("task"), "Blender"),
+        (lambda tools: tools.tool_generate_process("task"), "工艺规划"),
+    ],
+)
+def test_public_subagent_wrappers_mark_agentscope_unavailable_as_error(
+    monkeypatch,
+    call_tool,
+    expected,
+):
+    monkeypatch.setattr(agent_extensions, "AGENTSCOPE_AVAILABLE", False)
+
+    response = call_tool(AgentExtensionTools())
+
+    assert response.state is ToolResultState.ERROR
+    assert "## 状态\n失败" in response.content[0].text
+    assert expected in response.content[0].text
+    for heading in (
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in response.content[0].text
+
+
+@pytest.mark.parametrize(
+    "call_tool",
+    [
+        lambda tools: tools.tool_unity_ar("task"),
+        lambda tools: tools.tool_blender_model("task"),
+        lambda tools: tools.tool_generate_process("task"),
+        lambda tools: tools.tool_generate_image("task"),
+    ],
+)
+def test_public_subagent_wrappers_reject_invalid_handoff_status(
+    monkeypatch,
+    call_tool,
+):
+    invalid = agent_extensions._SubagentResult(
+        "# 执行结果\n"
+        "## 状态\n完成\n"
+        "## 完成摘要\nsummary\n"
+        "## 生成文件\n无\n"
+        "## 具体结果\ndetails\n"
+        "## 执行记录\nrecord\n"
+        "## 警告与未完成项\n无",
+        success=True,
+    )
+
+    def fake_run_async(coro):
+        coro.close()
+        return invalid
+
+    monkeypatch.setattr(agent_extensions, "_run_async", fake_run_async)
+
+    response = call_tool(AgentExtensionTools())
+
+    assert response.state is ToolResultState.ERROR
+    assert "状态值无效" in response.content[0].text
+    assert "完成" in response.content[0].text
+
+
+@pytest.mark.parametrize(
+    "call_tool",
+    [
+        lambda tools: tools.tool_unity_ar("task"),
+        lambda tools: tools.tool_blender_model("task"),
+        lambda tools: tools.tool_generate_process("task"),
+        lambda tools: tools.tool_generate_image("task"),
+    ],
+)
+def test_public_subagent_wrappers_reject_missing_handoff_headings(
+    monkeypatch,
+    call_tool,
+):
+    malformed = agent_extensions._SubagentResult(
+        "# 执行结果\n## 状态\n成功",
+        success=True,
+    )
+
+    def fake_run_async(coro):
+        coro.close()
+        return malformed
+
+    monkeypatch.setattr(agent_extensions, "_run_async", fake_run_async)
+
+    response = call_tool(AgentExtensionTools())
+
+    assert response.state is ToolResultState.ERROR
+    assert "缺少必需章节" in response.content[0].text
+
+
 def _install_unity_recording_fakes(
     monkeypatch,
     *,
@@ -1290,7 +1476,10 @@ def _install_unity_recording_fakes(
             return (
                 reply
                 if reply is not None
-                else AssistantMsg(name="UnityAgent", content="unity result")
+                else AssistantMsg(
+                    name="UnityAgent",
+                    content=_valid_handoff("unity result"),
+                )
             )
 
     class FakeReActConfig:
@@ -1329,7 +1518,7 @@ async def test_unity_uses_agentscope2_http_mcp_agent_and_user_message(monkeypatc
         '{"assembly": ["step one"]}',
     )
 
-    assert result == "unity result"
+    assert result == _valid_handoff("unity result")
     assert captured["config"] == {
         "url": "http://localhost:8080/mcp",
         "timeout": 15.0,
@@ -1396,7 +1585,8 @@ async def test_unity_empty_reply_uses_no_content_fallback_and_closes(monkeypatch
 
     result = await AgentExtensionTools()._unity_ar_async("task", "{}")
 
-    assert result == "Unity Agent 未返回内容"
+    assert result.success is False
+    assert "Unity Agent 未返回内容" in result
     assert events.count("close") == 1
     assert events[-1] == "close"
 
@@ -1515,7 +1705,10 @@ def _install_blender_recording_fakes(
             if reply_error is not None:
                 raise reply_error
             if reply is ...:
-                return AssistantMsg(name="BlenderAgent", content="blender result")
+                return AssistantMsg(
+                    name="BlenderAgent",
+                    content=_valid_handoff("blender result"),
+                )
             return reply
 
     class FakeReActConfig:
@@ -1556,7 +1749,7 @@ async def test_blender_uses_agentscope2_stdio_mcp_agent_and_user_message(monkeyp
 
     result = await AgentExtensionTools()._blender_model_async("build a fixture")
 
-    assert result == "blender result"
+    assert result == _valid_handoff("blender result")
     assert captured["config"] == {
         "command": "uvx",
         "args": ["blender-mcp"],
@@ -1625,7 +1818,8 @@ async def test_blender_empty_results_use_fallback_and_close(monkeypatch, reply, 
 
     result = await AgentExtensionTools()._blender_model_async("task")
 
-    assert result == expected
+    assert result.success is False
+    assert expected in result
     assert events.count("close") == 1
     assert events[-1] == "close"
 
@@ -1700,7 +1894,8 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
     target = tmp_path / "nested" / "工序100.json"
     content = '{\n  "工序": "反推堵盖",\n  "说明": "完整内容"\n}\n'
 
-    write_response = agent_extensions.write_text_file(str(target), content)
+    write_file, view_file = agent_extensions._make_process_file_tools(tmp_path)
+    write_response = write_file(str(target), content)
     absolute_path = str(target.resolve())
 
     assert isinstance(write_response, ToolChunk)
@@ -1710,7 +1905,7 @@ def test_process_file_tools_write_and_read_complete_utf8_content(tmp_path):
     assert absolute_path in write_result
     assert content in write_result
 
-    read_response = agent_extensions.view_text_file(str(target))
+    read_response = view_file(str(target))
 
     assert isinstance(read_response, ToolChunk)
     assert read_response.state == ToolResultState.SUCCESS
@@ -1726,7 +1921,8 @@ async def test_process_file_tools_keep_markdown_through_real_function_tool_and_t
     target = tmp_path / "real-tool" / "工步1.json"
     content = '{\n  "stepName": "安装堵盖",\n  "detail": "完整工步内容"\n}\n'
     absolute_path = str(target.resolve())
-    write_tool = RealFunctionTool(func=agent_extensions.write_text_file)
+    write_file, view_file = agent_extensions._make_process_file_tools(tmp_path)
+    write_tool = RealFunctionTool(func=write_file)
 
     direct_chunk = await write_tool(file_path=str(target), content=content)
 
@@ -1739,7 +1935,7 @@ async def test_process_file_tools_keep_markdown_through_real_function_tool_and_t
     assert "content=[TextBlock" not in direct_text
 
     toolkit = RealToolkit(
-        tools=[RealFunctionTool(func=agent_extensions.view_text_file)]
+        tools=[RealFunctionTool(func=view_file)]
     )
     results = [
         result
@@ -1764,6 +1960,50 @@ async def test_process_file_tools_keep_markdown_through_real_function_tool_and_t
     assert absolute_path in response_text
     assert content in response_text
     assert "content=[TextBlock" not in response_text
+
+
+@pytest.mark.asyncio
+async def test_bound_process_function_tools_allow_nested_json_inside_root(tmp_path):
+    output_root = tmp_path / "output"
+    write_file, view_file = agent_extensions._make_process_file_tools(output_root)
+    content = '{"stepName": "安装堵盖"}'
+
+    write_chunk = await RealFunctionTool(func=write_file)(
+        file_path="nested/工步1.json",
+        content=content,
+    )
+    view_chunk = await RealFunctionTool(func=view_file)(
+        file_path="nested/工步1.json",
+    )
+
+    target = (output_root / "nested" / "工步1.json").resolve()
+    assert write_chunk.state is ToolResultState.SUCCESS
+    assert view_chunk.state is ToolResultState.SUCCESS
+    assert target.read_text(encoding="utf-8") == content
+    assert str(target) in write_chunk.content[0].text
+    assert content in view_chunk.content[0].text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["write", "view"])
+async def test_bound_process_function_tools_reject_outside_root_without_mutation(
+    tmp_path,
+    operation,
+):
+    output_root = tmp_path / "output"
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel", encoding="utf-8")
+    write_file, view_file = agent_extensions._make_process_file_tools(output_root)
+    tool = RealFunctionTool(func=write_file if operation == "write" else view_file)
+    kwargs = {"file_path": str(outside)}
+    if operation == "write":
+        kwargs["content"] = "overwritten"
+
+    chunk = await tool(**kwargs)
+
+    assert chunk.state is ToolResultState.ERROR
+    assert "输出根目录之外" in chunk.content[0].text
+    assert outside.read_text(encoding="utf-8") == "sentinel"
 
 
 @pytest.mark.asyncio
@@ -1796,8 +2036,14 @@ async def test_process_file_tools_are_allowed_by_explicit_bypass_state(
     assert decision.behavior == PermissionBehavior.ALLOW
 
 
-def _install_process_recording_fakes(monkeypatch, *, reply=..., reply_error=None):
-    captured = {"task_tools": []}
+def _install_process_recording_fakes(
+    monkeypatch,
+    *,
+    reply=...,
+    reply_error=None,
+    file_calls=(),
+):
+    captured = {"task_tools": [], "file_results": []}
 
     def task_tool(name):
         class FakeTaskTool:
@@ -1829,10 +2075,24 @@ def _install_process_recording_fakes(monkeypatch, *, reply=..., reply_error=None
             captured["message"] = msg
             if reply_error is not None:
                 raise reply_error
+            tools_by_name = {
+                tool.name: tool for tool in captured["toolkit"]["tools"]
+            }
+            for tool_name, kwargs in file_calls:
+                captured["file_results"].append(
+                    tools_by_name[tool_name].func(**kwargs),
+                )
             if reply is ...:
                 return AssistantMsg(
                     name="ProcessAgent",
-                    content="# 执行结果\n## 状态\n成功",
+                    content=(
+                        "# 执行结果\n## 状态\n成功\n"
+                        "## 完成摘要\n已完成。\n"
+                        "## 生成文件\n无\n"
+                        "## 具体结果\n模型未列出文件内容。\n"
+                        "## 执行记录\n已调用工具。\n"
+                        "## 警告与未完成项\n无"
+                    ),
                 )
             return reply
 
@@ -1878,7 +2138,7 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
 
     result = await tools._process_agent_async("编制堵盖工艺", None, "process", 5)
 
-    assert result == "# 执行结果\n## 状态\n成功"
+    assert "## 状态\n成功" in result
     toolkit_tools = captured["toolkit"]["tools"]
     assert [tool.name for tool in toolkit_tools] == [
         "TaskCreate",
@@ -1888,9 +2148,9 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
         "write_text_file",
         "view_text_file",
     ]
-    assert [tool.func for tool in toolkit_tools[-2:]] == [
-        agent_extensions.write_text_file,
-        agent_extensions.view_text_file,
+    assert [tool.func.__name__ for tool in toolkit_tools[-2:]] == [
+        "write_text_file",
+        "view_text_file",
     ]
     assert captured["agent"]["name"] == "ProcessAgent"
     assert captured["agent"]["model"] == "process-model"
@@ -1918,6 +2178,68 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
 
 
 @pytest.mark.asyncio
+async def test_process_handoff_normalizes_observed_file_path_and_content_into_sections(
+    monkeypatch,
+    tmp_path,
+):
+    output_root = tmp_path / "output"
+    content = '{"processName": "反推堵盖"}'
+    _install_process_recording_fakes(
+        monkeypatch,
+        file_calls=(
+            (
+                "write_text_file",
+                {"file_path": "nested/工序100.json", "content": content},
+            ),
+            ("view_text_file", {"file_path": "nested/工序100.json"}),
+        ),
+    )
+    monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    absolute_path = str((output_root / "nested" / "工序100.json").resolve())
+    generated_files = result.split("## 生成文件\n", 1)[1].split(
+        "## 具体结果",
+        1,
+    )[0]
+    details = result.split("## 具体结果\n", 1)[1].split("## 执行记录", 1)[0]
+    assert absolute_path in generated_files
+    assert content in details
+
+
+@pytest.mark.asyncio
+async def test_process_handoff_includes_recorded_file_error_and_marks_error(
+    monkeypatch,
+    tmp_path,
+):
+    output_root = tmp_path / "output"
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel", encoding="utf-8")
+    _install_process_recording_fakes(
+        monkeypatch,
+        file_calls=((
+            "write_text_file",
+            {"file_path": str(outside), "content": "overwritten"},
+        ),),
+    )
+    monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    assert result.success is False
+    assert "## 状态\n部分成功" in result
+    assert "输出根目录之外" in result
+    assert outside.read_text(encoding="utf-8") == "sentinel"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
@@ -1933,7 +2255,8 @@ async def test_process_empty_reply_uses_safe_fallback(monkeypatch, reply, expect
 
     result = await tools._process_agent_async("task", None, "process", 5)
 
-    assert result == expected
+    assert result.success is False
+    assert expected in result
 
 
 @pytest.mark.asyncio
