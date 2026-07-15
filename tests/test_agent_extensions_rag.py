@@ -917,6 +917,8 @@ def _install_comfyui_recording_fakes(
     class FakeReActConfig:
         def __init__(self, **kwargs):
             captured["react_config"] = kwargs
+            captured["react_config_instance"] = self
+            self.max_iters = kwargs["max_iters"]
 
     class FakeAgent:
         def __init__(self, **kwargs):
@@ -988,6 +990,11 @@ async def test_comfyui_uses_agentscope2_agent_and_reports_written_image(
     assert captured["agent"]["model"] == "comfyui-model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
     assert captured["react_config"] == {"max_iters": 60}
+    assert captured["react_config_instance"].max_iters == 60
+    assert (
+        captured["agent"]["react_config"]
+        is captured["react_config_instance"]
+    )
     assert captured["model"] == (
         "openai",
         tools._llm_name,
@@ -1097,10 +1104,17 @@ async def test_comfyui_image_failures_never_report_success(
     assert "## 状态\n成功" not in result
 
 
-def test_comfyui_sync_wrapper_preserves_tool_response(monkeypatch):
+@pytest.mark.asyncio
+async def test_comfyui_sync_wrapper_preserves_success_tool_response(
+    monkeypatch,
+    tmp_path,
+):
+    tools, _ = _install_comfyui_recording_fakes(monkeypatch, tmp_path)
+    internal_result = await tools._comfyui_agent_async("task")
+
     def fake_run_async(coro):
         coro.close()
-        return "# 执行结果\n## 状态\n成功"
+        return internal_result
 
     monkeypatch.setattr(
         agent_extensions,
@@ -1108,11 +1122,84 @@ def test_comfyui_sync_wrapper_preserves_tool_response(monkeypatch):
         fake_run_async,
     )
 
-    response = AgentExtensionTools().tool_generate_image("task")
+    response = tools.tool_generate_image("task")
 
     assert isinstance(response, ToolResponse)
     assert response.state == ToolResultState.SUCCESS
-    assert response.content[0].text == "# 执行结果\n## 状态\n成功"
+    assert response.content[0].text == internal_result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "api_result", "api_error", "write_file", "expected"),
+    [
+        (None, True, None, True, "未返回"),
+        ("refined prompt", False, None, False, "API 返回：False"),
+        (
+            "refined prompt",
+            True,
+            RuntimeError("backend offline"),
+            False,
+            "backend offline",
+        ),
+        ("refined prompt", True, None, False, "预期文件不存在"),
+    ],
+)
+async def test_comfyui_sync_wrapper_marks_structured_failures_as_error(
+    monkeypatch,
+    tmp_path,
+    reply,
+    api_result,
+    api_error,
+    write_file,
+    expected,
+):
+    tools, _ = _install_comfyui_recording_fakes(
+        monkeypatch,
+        tmp_path,
+        reply=reply,
+        api_result=api_result,
+        api_error=api_error,
+        write_file=write_file,
+    )
+    internal_result = await tools._comfyui_agent_async("task")
+
+    def fake_run_async(coro):
+        coro.close()
+        return internal_result
+
+    monkeypatch.setattr(agent_extensions, "_run_async", fake_run_async)
+
+    response = tools.tool_generate_image("task")
+
+    assert response.state == ToolResultState.ERROR
+    assert response.content[0].text == internal_result
+    assert "## 状态\n失败" in response.content[0].text
+    assert expected in response.content[0].text
+
+
+def test_comfyui_sync_wrapper_marks_timeout_as_structured_error(monkeypatch):
+    def fake_run_async(coro):
+        coro.close()
+        return "(执行超时：工具运行超过 1 秒)"
+
+    monkeypatch.setattr(agent_extensions, "_run_async", fake_run_async)
+
+    response = AgentExtensionTools().tool_generate_image("task")
+
+    assert response.state == ToolResultState.ERROR
+    for heading in (
+        "# 执行结果",
+        "## 状态",
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in response.content[0].text
+    assert "## 状态\n失败" in response.content[0].text
+    assert "执行超时" in response.content[0].text
 
 
 def _install_unity_recording_fakes(

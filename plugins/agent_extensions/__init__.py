@@ -75,6 +75,17 @@ _logger = get_logger(__name__)
 TOOL_GROUP_NAME = "agent_extensions"
 
 
+class _ComfyUIResult(str):
+    """Markdown result carrying the programmatic ComfyUI success state."""
+
+    success: bool
+
+    def __new__(cls, content: str, *, success: bool):
+        instance = super().__new__(cls, content)
+        instance.success = success
+        return instance
+
+
 def _make_response(content: str, success: bool = True) -> Any:
     if content is None:
         content = "(无返回结果)"
@@ -1280,35 +1291,54 @@ class AgentExtensionTools:
         Returns:
             图像生成结果
         """
+        def wrapper_failure(message: str) -> _ComfyUIResult:
+            return _ComfyUIResult(
+                "# 执行结果\n"
+                "## 状态\n失败\n"
+                "## 完成摘要\n图像生成未完成。\n"
+                "## 生成文件\n无\n"
+                f"## 具体结果\n{message}\n"
+                "## 执行记录\n同步图像工具未获得结构化内部结果。\n"
+                f"## 警告与未完成项\n{message}",
+                success=False,
+            )
+
         try:
             result = _run_async(self._comfyui_agent_async(task))
-            return _make_response(result)
-        except Exception as e:
-            return _make_response(f"图像生成失败: {e}", success=False)
+        except Exception as exc:
+            result = wrapper_failure(f"图像生成异常：{exc}")
+        if not isinstance(result, _ComfyUIResult):
+            result = wrapper_failure(str(result))
+        return _make_response(str(result), success=result.success)
 
-    async def _comfyui_agent_async(self, task: str) -> str:
+    async def _comfyui_agent_async(self, task: str) -> _ComfyUIResult:
         """Refine a prompt with AgentScope 2 and generate one verified image."""
 
         def format_result(
+            success: bool,
             status: str,
             summary: str,
             files: str,
             details: str,
             record: str,
             warnings: str,
-        ) -> str:
-            return (
-                "# 执行结果\n"
-                f"## 状态\n{status}\n"
-                f"## 完成摘要\n{summary}\n"
-                f"## 生成文件\n{files}\n"
-                f"## 具体结果\n{details}\n"
-                f"## 执行记录\n{record}\n"
-                f"## 警告与未完成项\n{warnings}"
+        ) -> _ComfyUIResult:
+            return _ComfyUIResult(
+                (
+                    "# 执行结果\n"
+                    f"## 状态\n{status}\n"
+                    f"## 完成摘要\n{summary}\n"
+                    f"## 生成文件\n{files}\n"
+                    f"## 具体结果\n{details}\n"
+                    f"## 执行记录\n{record}\n"
+                    f"## 警告与未完成项\n{warnings}"
+                ),
+                success=success,
             )
 
         if not AGENTSCOPE_AVAILABLE:
             return format_result(
+                False,
                 "失败",
                 "未生成图片。",
                 "无",
@@ -1354,6 +1384,7 @@ class AgentExtensionTools:
             )
         except Exception as exc:
             return format_result(
+                False,
                 "失败",
                 "提示词细化失败，未生成图片。",
                 "无",
@@ -1366,6 +1397,7 @@ class AgentExtensionTools:
         if not positive_prompt:
             reason = "ComfyUI Agent 未返回结果" if msg_res is None else "ComfyUI Agent 返回内容为空"
             return format_result(
+                False,
                 "失败",
                 "未获得可用正向提示词，未生成图片。",
                 "无",
@@ -1427,6 +1459,7 @@ class AgentExtensionTools:
         )
         if succeeded:
             return format_result(
+                True,
                 "成功",
                 "图像 API 返回成功，且生成文件已在本地验证存在。",
                 f"- PNG 图像：{output_path}（已验证）",
@@ -1442,6 +1475,7 @@ class AgentExtensionTools:
         else:
             warning = f"图像 API 返回：{api_result}"
         return format_result(
+            False,
             "失败",
             "图像生成未通过 API 与本地文件双重验证。",
             "无",
