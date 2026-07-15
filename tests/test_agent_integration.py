@@ -15,6 +15,7 @@ import pytest
 
 from agentscope.message import AssistantMsg, SystemMsg, UserMsg
 from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
+from agentscope.permission import PermissionMode
 from agentscope.state import AgentState
 from agentscope.tool import FunctionTool
 
@@ -497,8 +498,232 @@ def test_initialize_constructs_toolkit_with_wrapped_tools_and_agent_state(
     assert kwargs["toolkit"] is toolkit
     assert isinstance(kwargs["state"], AgentState)
     assert kwargs["state"].context == history_messages
+    assert kwargs["state"].permission_context.mode is PermissionMode.BYPASS
     assert kwargs["react_config"].max_iters == 50
     assert kwargs["react_config"].interruption_raise_cancelled_error is False
+
+
+def test_initialize_builds_complete_filtered_toolkit_before_bypass_agent(
+    agent,
+    monkeypatch,
+):
+    events = []
+    wrapped_tools = [object()]
+    prepared_clients = [SimpleNamespace(is_stateful=False)]
+    skill_paths = ["C:\\skills\\validated"]
+    toolkit = SimpleNamespace()
+
+    def build_tools():
+        events.append("tools")
+        return wrapped_tools
+
+    async def connect_clients():
+        events.append("mcps")
+        return prepared_clients
+
+    def load_skills():
+        events.append("skills")
+        return skill_paths
+
+    def construct_toolkit(**kwargs):
+        events.append(("toolkit", kwargs))
+        return toolkit
+
+    def construct_agent(**kwargs):
+        events.append(("agent", kwargs["state"].permission_context.mode))
+        return SimpleNamespace(state=kwargs["state"])
+
+    monkeypatch.setattr(agent, "_build_registry_function_tools", build_tools)
+    monkeypatch.setattr(agent, "_connect_mcp_clients", connect_clients)
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        load_skills,
+    )
+    monkeypatch.setattr(agent_integration, "Toolkit", construct_toolkit)
+    monkeypatch.setattr(agent_integration, "Agent", construct_agent)
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(agent._api_manager, "get_config", Mock(return_value=None))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+    assert events[:3] == ["tools", "mcps", "skills"]
+    assert events[3] == (
+        "toolkit",
+        {
+            "tools": wrapped_tools,
+            "mcps": prepared_clients,
+            "skills_or_loaders": skill_paths,
+        },
+    )
+    assert events[4] == ("agent", PermissionMode.BYPASS)
+
+
+def test_successful_rebuild_preserves_deep_copied_state_and_closes_old_clients_first(
+    agent,
+    monkeypatch,
+):
+    events = []
+    previous_client = _LifecycleClient(
+        "previous",
+        stateful=True,
+        events=events,
+    )
+    previous_state = AgentState(
+        session_id="fixed-session",
+        summary="fixed summary",
+        context=[UserMsg(name="User", content="keep me", metadata={"nested": [1]})],
+    )
+    previous_agent = SimpleNamespace(state=previous_state)
+    agent._agent = previous_agent
+    agent._toolkit = object()
+    agent._mcp_clients = [previous_client]
+    agent._initialized = True
+    agent._provider = "openai"
+    agent._model_name = "model"
+    agent._base_url = "https://example.test/v1"
+    replacement_client = SimpleNamespace(is_stateful=False)
+
+    async def connect_replacement():
+        events.append("connect:replacement")
+        return [replacement_client]
+
+    def construct_agent(**kwargs):
+        events.append("publish:replacement")
+        return SimpleNamespace(state=kwargs["state"])
+
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="raw-secret"))
+    monkeypatch.setattr(agent, "_connect_mcp_clients", connect_replacement)
+    monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        Mock(return_value=[]),
+    )
+    monkeypatch.setattr(agent_integration, "Toolkit", Mock(return_value=object()))
+    monkeypatch.setattr(agent_integration, "Agent", construct_agent)
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
+
+    assert agent._rebuild_agent_runtime() is True
+
+    assert events == ["close:previous", "connect:replacement", "publish:replacement"]
+    assert agent._agent is not previous_agent
+    replacement_state = agent._agent.state
+    assert replacement_state is not previous_state
+    assert replacement_state.session_id == previous_state.session_id
+    assert replacement_state.summary == previous_state.summary
+    assert replacement_state.context == previous_state.context
+    assert replacement_state.context is not previous_state.context
+    assert replacement_state.context[0] is not previous_state.context[0]
+    assert replacement_state.permission_context.mode is PermissionMode.BYPASS
+    assert agent._mcp_clients == [replacement_client]
+    assert all(value != "raw-secret" for value in vars(agent).values())
+
+
+def test_rebuild_missing_key_preserves_published_runtime(agent, monkeypatch):
+    previous_agent = SimpleNamespace(state=AgentState())
+    previous_toolkit = object()
+    previous_client = _LifecycleClient(
+        "previous",
+        stateful=True,
+        events=[],
+    )
+    agent._agent = previous_agent
+    agent._toolkit = previous_toolkit
+    agent._mcp_clients = [previous_client]
+    agent._initialized = True
+    agent._provider = "openai"
+    agent._model_name = "model"
+    agent._base_url = "https://example.test/v1"
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value=""))
+
+    assert agent._rebuild_agent_runtime() is False
+
+    assert agent._agent is previous_agent
+    assert agent._toolkit is previous_toolkit
+    assert agent._mcp_clients == [previous_client]
+    assert agent._initialized is True
+    assert previous_client.close_calls == 0
+
+
+def test_rebuild_failure_after_detach_drains_local_clients_and_leaves_empty_state(
+    agent,
+    monkeypatch,
+):
+    events = []
+    previous_client = _LifecycleClient("previous", stateful=True, events=events)
+    replacement_client = _LifecycleClient("replacement", stateful=True, events=events)
+    agent._agent = SimpleNamespace(state=AgentState(context=[]))
+    agent._toolkit = object()
+    agent._mcp_clients = [previous_client]
+    agent._initialized = True
+    agent._provider = "openai"
+    agent._model_name = "model"
+    agent._base_url = "https://example.test/v1"
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value="secret"))
+    monkeypatch.setattr(
+        agent,
+        "_connect_mcp_clients",
+        AsyncMock(return_value=[replacement_client]),
+    )
+    monkeypatch.setattr(agent, "_build_registry_function_tools", Mock(return_value=[]))
+    monkeypatch.setattr(
+        agent._skill_manager,
+        "get_enabled_skill_paths",
+        Mock(return_value=[]),
+    )
+    monkeypatch.setattr(agent_integration, "Toolkit", Mock(return_value=object()))
+    monkeypatch.setattr(
+        agent_integration,
+        "Agent",
+        Mock(side_effect=RuntimeError("replacement boom")),
+    )
+    monkeypatch.setattr(agent, "_create_model", Mock(return_value=object()))
+    monkeypatch.setattr(agent.config, "get", Mock(return_value="configured prompt"))
+
+    assert agent._rebuild_agent_runtime() is False
+
+    assert events == ["close:previous", "close:replacement"]
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._mcp_clients == []
+    assert agent._initialized is False
+
+
+def test_sync_rebuild_runtime_thread_reentry_is_rejected_without_mutation(agent):
+    previous_agent = SimpleNamespace(state=AgentState())
+    previous_toolkit = object()
+    agent._agent = previous_agent
+    agent._toolkit = previous_toolkit
+    agent._initialized = True
+    agent._provider = "openai"
+    agent._model_name = "model"
+
+    async def call_sync_rebuild():
+        agent._rebuild_agent_runtime()
+
+    with pytest.raises(RuntimeError, match="_rebuild_agent_runtime"):
+        agent._async_runtime.run(call_sync_rebuild())
+
+    assert agent._agent is previous_agent
+    assert agent._toolkit is previous_toolkit
+    assert agent._initialized is True
+
+
+@pytest.mark.parametrize("api_key", ["short", "a-very-long-raw-api-key"])
+def test_initialize_never_stores_raw_api_key(agent, monkeypatch, api_key):
+    _configure_successful_initialize(agent, monkeypatch)
+    monkeypatch.setattr(agent._api_manager, "get_key", Mock(return_value=api_key))
+    monkeypatch.setattr(agent, "_connect_mcp_clients", AsyncMock(return_value=[]))
+
+    assert agent.initialize("openai", "model", "https://example.test/v1") is True
+
+    assert agent._api_key != api_key
+    assert api_key not in agent._api_key
+    assert all(value != api_key for value in vars(agent).values())
 
 
 def test_initialize_without_skill_manager_uses_empty_constructor_skills(

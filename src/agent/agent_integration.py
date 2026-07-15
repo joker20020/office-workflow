@@ -45,6 +45,7 @@ try:
         RequireUserConfirmEvent,
         UserInterruptEvent,
     )
+    from agentscope.permission import PermissionMode
     from agentscope.state import AgentState
     from agentscope.tool import FunctionTool, Toolkit
 
@@ -71,6 +72,7 @@ except ImportError as e:
     RequireExternalExecutionEvent = None
     RequireUserConfirmEvent = None
     UserInterruptEvent = None
+    PermissionMode = None
     _logger_agent = None
 
 try:
@@ -438,7 +440,47 @@ class AgentIntegration:
     ) -> bool:
         await self._settle_reply_work()
         await self._close_published_mcp_clients()
+        constructed_agent, toolkit, local_clients = await self._construct_agent_runtime(
+            provider=provider,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            state_seed=None,
+        )
 
+        self._api_key = "<redacted>"
+        self._provider = provider
+        self._model_name = model_name
+        self._base_url = base_url
+        self._publish_agent_runtime(constructed_agent, toolkit, local_clients)
+        _logger.info(f"Agent初始化成功: provider={provider}, model={model_name}")
+        _logger.info("=" * 50)
+        return True
+
+    def _system_prompt(self) -> str:
+        return self.config.get(
+            "system_prompt",
+            """
+                            你是一个智能工作流助手。
+
+                            你的能力:
+                            1. 理解用户需求，分析需要哪些节点
+                            2. 使用工具创建和配置节点
+                            3. 连接节点形成工作流
+                            4. 执行工作流
+
+                            请用自然语言与用户交流。使用工具完成工作流设计。""",
+        )
+
+    async def _construct_agent_runtime(
+        self,
+        *,
+        provider: str,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        state_seed: Optional[AgentState],
+    ) -> tuple[Any, Any, list[MCPClient]]:
         local_clients: list[MCPClient] = []
         try:
             function_tools = self._build_registry_function_tools()
@@ -453,52 +495,77 @@ class AgentIntegration:
                 mcps=local_clients,
                 skills_or_loaders=skill_paths,
             )
-            model = self._create_model(provider, model_name, base_url, api_key)
-            system_prompt = self.config.get(
-                "system_prompt",
-                """
-                            你是一个智能工作流助手。
-
-                            你的能力:
-                            1. 理解用户需求，分析需要哪些节点
-                            2. 使用工具创建和配置节点
-                            3. 连接节点形成工作流
-                            4. 执行工作流
-
-                            请用自然语言与用户交流。使用工具完成工作流设计。""",
+            state = (
+                state_seed.model_copy(deep=True)
+                if state_seed is not None
+                else AgentState(context=self._history.get_messages())
             )
-            state = AgentState(context=self._history.get_messages())
-            react_config = ReActConfig(
-                max_iters=50,
-                interruption_raise_cancelled_error=False,
-            )
+            state.permission_context.mode = PermissionMode.BYPASS
             constructed_agent = Agent(
                 name="WorkflowAssistant",
-                system_prompt=system_prompt,
-                model=model,
+                system_prompt=self._system_prompt(),
+                model=self._create_model(provider, model_name, base_url, api_key),
                 toolkit=toolkit,
                 state=state,
-                react_config=react_config,
+                react_config=ReActConfig(
+                    max_iters=50,
+                    interruption_raise_cancelled_error=False,
+                ),
             )
+            return constructed_agent, toolkit, local_clients
         except BaseException:
             await self._close_mcp_clients_cancellation_safe(local_clients)
-            self._agent = None
-            self._toolkit = None
-            self._mcp_clients = []
-            self._initialized = False
             raise
 
-        self._api_key = api_key[:10] + "..." if len(api_key) > 10 else api_key
-        self._provider = provider
-        self._model_name = model_name
-        self._base_url = base_url
+    def _publish_agent_runtime(
+        self,
+        agent: Any,
+        toolkit: Any,
+        clients: list[MCPClient],
+    ) -> None:
+        self._agent = agent
         self._toolkit = toolkit
-        self._agent = constructed_agent
-        self._mcp_clients = local_clients
+        self._mcp_clients = clients
         self._initialized = True
-        _logger.info(f"Agent初始化成功: provider={provider}, model={model_name}")
-        _logger.info("=" * 50)
-        return True
+
+    def _rebuild_agent_runtime(self) -> bool:
+        self._reject_sync_lifecycle_reentry("_rebuild_agent_runtime")
+        if (
+            not AGENTSCOPE_AVAILABLE
+            or not self._initialized
+            or self._agent is None
+            or not self._provider
+        ):
+            return False
+        try:
+            api_key = self._api_manager.get_key(self._provider, self._model_name)
+            if not api_key:
+                return False
+            return self._async_runtime.run(
+                self._rebuild_agent_runtime_impl(api_key=api_key),
+            )
+        except Exception:
+            _logger.exception("Agent exposure rebuild failed")
+            return False
+
+    async def _rebuild_agent_runtime_impl(self, *, api_key: str) -> bool:
+        async with self._get_lifecycle_lock():
+            if not self._initialized or self._agent is None:
+                return False
+            state_seed = self._agent.state.model_copy(deep=True)
+            await self._settle_reply_work()
+            await self._close_published_mcp_clients()
+            constructed_agent, toolkit, local_clients = (
+                await self._construct_agent_runtime(
+                    provider=self._provider,
+                    model_name=self._model_name,
+                    base_url=self._base_url,
+                    api_key=api_key,
+                    state_seed=state_seed,
+                )
+            )
+            self._publish_agent_runtime(constructed_agent, toolkit, local_clients)
+            return True
 
     def _build_registry_function_tools(self) -> List[Any]:
         """Wrap unique registry callables for Toolkit construction."""
