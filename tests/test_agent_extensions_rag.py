@@ -1139,13 +1139,256 @@ async def test_unity_cleanup_error_does_not_hide_agent_error(monkeypatch):
     assert events.count("close") == 1
 
 
+def _install_blender_recording_fakes(
+    monkeypatch,
+    *,
+    reply=...,
+    reply_error=None,
+    connect_error=None,
+    close_error=None,
+    toolkit_error=None,
+):
+    events = []
+    captured = {}
+
+    class FakeStdioMCPConfig:
+        def __init__(self, **kwargs):
+            events.append("config")
+            captured["config"] = kwargs
+            captured["config_instance"] = self
+
+    class FakeMCPClient:
+        def __init__(self, **kwargs):
+            events.append("client")
+            captured["client"] = kwargs
+            captured["client_instance"] = self
+            self.connected = False
+            self.close_count = 0
+
+        async def connect(self):
+            events.append("connect")
+            if connect_error is not None:
+                raise connect_error
+            self.connected = True
+
+        async def close(self):
+            events.append("close")
+            self.close_count += 1
+            if close_error is not None:
+                raise close_error
+            self.connected = False
+
+    class FakeToolkit:
+        def __init__(self, **kwargs):
+            events.append("toolkit")
+            if toolkit_error is not None:
+                raise toolkit_error
+            captured["toolkit"] = kwargs
+            captured["toolkit_instance"] = self
+            assert kwargs["mcps"][0].connected is True
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            events.append("agent")
+            captured["agent"] = kwargs
+
+        async def reply(self, msg):
+            events.append("reply")
+            captured["message"] = msg
+            if reply_error is not None:
+                raise reply_error
+            if reply is ...:
+                return AssistantMsg(name="BlenderAgent", content="blender result")
+            return reply
+
+    class FakeReActConfig:
+        def __init__(self, **kwargs):
+            captured["react_config"] = kwargs
+
+    def fake_build_model(provider, model_name, base_url, api_key):
+        captured["model"] = (provider, model_name, base_url, api_key)
+        return "model"
+
+    real_user_msg = agent_extensions.UserMsg
+
+    def fake_user_msg(**kwargs):
+        captured["user_msg"] = kwargs
+        return real_user_msg(**kwargs)
+
+    monkeypatch.setattr(
+        agent_extensions,
+        "StdioMCPConfig",
+        FakeStdioMCPConfig,
+        raising=False,
+    )
+    monkeypatch.setattr(agent_extensions, "MCPClient", FakeMCPClient, raising=False)
+    monkeypatch.setattr(agent_extensions, "Toolkit", FakeToolkit)
+    monkeypatch.setattr(agent_extensions, "Agent", FakeAgent, raising=False)
+    monkeypatch.setattr(agent_extensions, "ReActConfig", FakeReActConfig, raising=False)
+    monkeypatch.setattr(agent_extensions, "_build_model", fake_build_model)
+    monkeypatch.setattr(agent_extensions, "UserMsg", fake_user_msg)
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://model/v1")
+    return events, captured
+
+
+@pytest.mark.asyncio
+async def test_blender_uses_agentscope2_stdio_mcp_agent_and_user_message(monkeypatch):
+    monkeypatch.setenv("BLENDER_MCP_TIMEOUT_SECONDS", "27.5")
+    events, captured = _install_blender_recording_fakes(monkeypatch)
+
+    result = await AgentExtensionTools()._blender_model_async("build a fixture")
+
+    assert result == "blender result"
+    assert captured["config"] == {
+        "command": "uvx",
+        "args": ["blender-mcp"],
+    }
+    assert captured["client"] == {
+        "name": "blender_mcp",
+        "is_stateful": True,
+        "mcp_config": captured["config_instance"],
+        "execution_timeout": 27.5,
+    }
+    assert events.index("connect") < events.index("toolkit")
+    assert captured["toolkit"] == {"mcps": [captured["client_instance"]]}
+    assert captured["agent"]["name"] == "BlenderAgent"
+    assert captured["agent"]["model"] == "model"
+    assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
+    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["model"] == (
+        "openai",
+        AgentExtensionTools()._llm_name,
+        "http://model/v1",
+        "secret",
+    )
+    assert captured["message"].name == "User"
+    assert captured["message"].role == "user"
+    assert captured["user_msg"] == {"name": "User", "content": "build a fixture"}
+    assert events[-1] == "close"
+    assert events.count("close") == 1
+
+
+@pytest.mark.asyncio
+async def test_blender_default_timeout_and_structured_prompt_contract(monkeypatch):
+    monkeypatch.delenv("BLENDER_MCP_TIMEOUT_SECONDS", raising=False)
+    _, captured = _install_blender_recording_fakes(monkeypatch)
+
+    await AgentExtensionTools()._blender_model_async("task")
+
+    assert captured["client"]["execution_timeout"] == 600.0
+    prompt = captured["agent"]["system_prompt"]
+    for heading in (
+        "# 执行结果",
+        "## 状态",
+        "## 完成摘要",
+        "## 生成文件",
+        "## 具体结果",
+        "## 执行记录",
+        "## 警告与未完成项",
+    ):
+        assert heading in prompt
+    assert "Blender MCP" in prompt
+    assert ".blend" in prompt
+    assert "绝对路径" in prompt
+    assert "创建、修改和删除的对象" in prompt
+    assert "多个检查视角" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (None, "Blender Agent 未返回结果"),
+        (AssistantMsg(name="BlenderAgent", content=""), "Blender Agent 未返回内容"),
+    ],
+)
+async def test_blender_empty_results_use_fallback_and_close(monkeypatch, reply, expected):
+    events, _ = _install_blender_recording_fakes(monkeypatch, reply=reply)
+
+    result = await AgentExtensionTools()._blender_model_async("task")
+
+    assert result == expected
+    assert events.count("close") == 1
+    assert events[-1] == "close"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply_error",
+    [RuntimeError("agent failed"), asyncio.TimeoutError(), asyncio.CancelledError()],
+)
+async def test_blender_closes_once_and_propagates_reply_errors(monkeypatch, reply_error):
+    events, _ = _install_blender_recording_fakes(
+        monkeypatch,
+        reply_error=reply_error,
+    )
+
+    with pytest.raises(type(reply_error)):
+        await AgentExtensionTools()._blender_model_async("task")
+
+    assert events.count("close") == 1
+    assert events[-1] == "close"
+
+
+@pytest.mark.asyncio
+async def test_blender_connect_failure_does_not_close_invalid_client(monkeypatch):
+    events, _ = _install_blender_recording_fakes(
+        monkeypatch,
+        connect_error=RuntimeError("offline"),
+    )
+
+    result = await AgentExtensionTools()._blender_model_async("task")
+
+    assert "offline" in result
+    assert "close" not in events
+
+
+@pytest.mark.asyncio
+async def test_blender_toolkit_error_closes_connected_client(monkeypatch):
+    events, _ = _install_blender_recording_fakes(
+        monkeypatch,
+        toolkit_error=RuntimeError("toolkit failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="toolkit failed"):
+        await AgentExtensionTools()._blender_model_async("task")
+
+    assert events.count("close") == 1
+    assert events[-1] == "close"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "primary_error",
+    [RuntimeError("primary failure"), asyncio.CancelledError("cancelled")],
+)
+async def test_blender_cleanup_error_does_not_hide_primary_error(
+    monkeypatch,
+    primary_error,
+):
+    events, _ = _install_blender_recording_fakes(
+        monkeypatch,
+        reply_error=primary_error,
+        close_error=ValueError("cleanup failure"),
+    )
+
+    with pytest.raises(type(primary_error), match=str(primary_error)):
+        await AgentExtensionTools()._blender_model_async("task")
+
+    assert events.count("close") == 1
+
+
 def _subagent_prompt_source(agent_name: str) -> str:
     source = Path(agent_extensions.__file__).read_text(encoding="utf-8")
-    runtime_name = "UnityAgent" if agent_name == "unity_agent" else agent_name
+    runtime_name = {
+        "unity_agent": "UnityAgent",
+        "blender_agent": "BlenderAgent",
+    }.get(agent_name, agent_name)
     start = source.index(f'name="{runtime_name}"')
     model_constructor = (
         "model=_build_model("
-        if agent_name == "unity_agent"
+        if agent_name in {"unity_agent", "blender_agent"}
         else "model=OpenAIChatModel("
     )
     end = source.index(model_constructor, start)

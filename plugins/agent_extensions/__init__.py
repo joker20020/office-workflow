@@ -27,7 +27,7 @@ try:
         OpenAICredential,
     )
     from agentscope.agent import Agent, ReActConfig
-    from agentscope.mcp import HttpMCPConfig, MCPClient
+    from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
     from agentscope.message import (
         AssistantMsg,
         Base64Source,
@@ -944,24 +944,52 @@ class AgentExtensionTools:
         if not AGENTSCOPE_AVAILABLE:
             return "AgentScope 未安装，无法使用 Blender MCP 功能"
 
-        # 严格对应 main.py blender_agent_tool
-        toolkit = Toolkit()
-        blender_mcp = StdIOStatefulClient(
-            name="blender_mcp",
+        blender_timeout = _get_timeout_seconds(
+            "BLENDER_MCP_TIMEOUT_SECONDS",
+            600.0,
+        )
+        blender_config = StdioMCPConfig(
             command="uvx",
             args=["blender-mcp"],
         )
+        blender_mcp = MCPClient(
+            name="blender_mcp",
+            is_stateful=True,
+            mcp_config=blender_config,
+            execution_timeout=blender_timeout,
+        )
 
+        connected = False
+        primary_error = None
         try:
-            await blender_mcp.connect()
-        except Exception as e:
-            return f"无法连接 Blender MCP 服务(请确保 Blender 已启动且插件已安装): {e}"
+            try:
+                await blender_mcp.connect()
+            except Exception as e:
+                return f"无法连接 Blender MCP 服务(请确保 Blender 已启动且插件已安装): {e}"
+            connected = True
+            return await self._blender_model_connected(blender_mcp, task)
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            if connected:
+                try:
+                    await blender_mcp.close()
+                except BaseException as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    _logger.warning(
+                        "Blender MCP cleanup failed while propagating %s: %s",
+                        type(primary_error).__name__,
+                        cleanup_error,
+                    )
 
-        await toolkit.register_mcp_client(blender_mcp)
+    async def _blender_model_connected(self, blender_mcp: Any, task: str) -> str:
+        toolkit = Toolkit(mcps=[blender_mcp])
 
-        blender_agent = ReActAgent(
-            name="blender_agent",
-            sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+        blender_agent = Agent(
+            name="BlenderAgent",
+            system_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
 
         完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
         # 执行结果
@@ -980,30 +1008,22 @@ class AgentExtensionTools:
         ## 警告与未完成项
         没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
         """,
-            model=OpenAIChatModel(
-                model_name=self._llm_name,
-                api_key=os.environ["LLM_API_KEY"],
-                stream=True,
-                enable_thinking=False,
-                client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-                generate_kwargs={"max_tokens": 10240, "max_completion_tokens": 10240},
+            model=_build_model(
+                "openai",
+                self._llm_name,
+                os.environ["LLM_BASE_URL"],
+                os.environ["LLM_API_KEY"],
             ),
-            formatter=DeepSeekChatFormatter(),
             toolkit=toolkit,
-            memory=InMemoryMemory(),
-            max_iters=60
+            react_config=ReActConfig(max_iters=60),
         )
 
-        msg = Msg(name="user", content=task, role="user")
-        msg_res = await blender_agent(msg)
-        await blender_mcp.close()
+        msg = UserMsg(name="User", content=task)
+        msg_res = await blender_agent.reply(msg)
 
         if msg_res is None:
             return "Blender Agent 未返回结果"
-        blocks = msg_res.get_content_blocks("text") if hasattr(msg_res, 'get_content_blocks') else []
-        if blocks:
-            return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in blocks)
-        return str(msg_res.content) if msg_res.content else "Blender Agent 未返回内容"
+        return _message_text(msg_res) or "Blender Agent 未返回内容"
 
     # ==================== 3. 工艺规划 ====================
 
