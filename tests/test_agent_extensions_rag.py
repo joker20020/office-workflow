@@ -44,7 +44,7 @@ from agentscope.permission import (
     PermissionEngine,
     PermissionMode,
 )
-from agentscope.state import AgentState
+from agentscope.state import AgentState, Task
 from agentscope.tool import (
     FunctionTool as RealFunctionTool,
     Toolkit as RealToolkit,
@@ -2438,6 +2438,88 @@ async def test_bound_process_write_rejects_output_root_swap_before_temp_open(
 
 
 @pytest.mark.asyncio
+async def test_bound_process_write_rejects_output_root_swap_at_final_replace(
+    tmp_path,
+    monkeypatch,
+):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    held_root = tmp_path / "held-output"
+    replacement_root = tmp_path / "replacement-output"
+    write_file, _ = agent_extensions._make_process_file_tools(output_root)
+    real_replace = os.replace
+    escaped_artifact = replacement_root / "process.json"
+
+    def swap_root_at_final_replace(source, destination, *args, **kwargs):
+        output_root.rename(held_root)
+        replacement_root.mkdir()
+        replacement_root.rename(output_root)
+        real_replace(held_root / Path(source).name, output_root / Path(source).name)
+        return real_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(agent_extensions.os, "replace", swap_root_at_final_replace)
+    try:
+        chunk = await RealFunctionTool(func=write_file)(
+            file_path="process.json",
+            content='{"must_not_escape": true}',
+        )
+    finally:
+        close = getattr(write_file, "close", None)
+        if close is not None:
+            close()
+        if output_root.exists() and held_root.exists():
+            output_root.rename(replacement_root)
+            held_root.rename(output_root)
+
+    assert chunk.state is ToolResultState.ERROR
+    assert not escaped_artifact.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tamper",
+    ["delete", "replace", "modify", "rewrite_same", "hardlink"],
+)
+async def test_bound_process_view_rejects_post_write_tampering(tmp_path, tamper):
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    target = output_root / "process.json"
+    write_file, view_file = agent_extensions._make_process_file_tools(output_root)
+    original = '{"safe": true}'
+    write_chunk = await RealFunctionTool(func=write_file)(
+        file_path=target.name,
+        content=original,
+    )
+    assert write_chunk.state is ToolResultState.SUCCESS
+
+    if tamper == "delete":
+        target.unlink()
+    elif tamper == "replace":
+        replacement = tmp_path / "replacement.json"
+        replacement.write_text('{"replaced": true}', encoding="utf-8")
+        os.replace(replacement, target)
+    elif tamper == "modify":
+        target.write_text('{"modified": true}', encoding="utf-8")
+    elif tamper == "rewrite_same":
+        target.write_text(original, encoding="utf-8")
+    else:
+        outside = tmp_path / "outside.json"
+        outside.write_text('{"linked": true}', encoding="utf-8")
+        target.unlink()
+        os.link(outside, target)
+
+    try:
+        view_chunk = await RealFunctionTool(func=view_file)(file_path=target.name)
+    finally:
+        close = getattr(write_file, "close", None)
+        if close is not None:
+            close()
+
+    assert view_chunk.state is ToolResultState.ERROR
+    assert original not in view_chunk.content[0].text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("helper", "tool_input"),
     [
@@ -2474,6 +2556,7 @@ def _install_process_recording_fakes(
     reply_error=None,
     file_calls=(),
     task_calls=("TaskCreate", "TaskGet", "TaskList", "TaskUpdate"),
+    task_state="completed",
 ):
     captured = {"task_tools": [], "task_results": [], "file_results": []}
 
@@ -2506,11 +2589,17 @@ def _install_process_recording_fakes(
 
         async def reply(self, msg):
             captured["message"] = msg
-            if reply_error is not None:
-                raise reply_error
             tools_by_name = {
                 tool.name: tool for tool in captured["toolkit"]["tools"]
             }
+            captured["agent"]["state"].tasks_context.tasks = [
+                Task(
+                    subject="write process artifact",
+                    description="write and verify one process artifact",
+                    metadata={},
+                    state=task_state,
+                ),
+            ]
             for tool_name in task_calls:
                 tool = tools_by_name[tool_name]
 
@@ -2536,6 +2625,8 @@ def _install_process_recording_fakes(
                 captured["file_results"].append(
                     tools_by_name[tool_name].func(**kwargs),
                 )
+            if reply_error is not None:
+                raise reply_error
             if reply is ...:
                 return AssistantMsg(
                     name="ProcessAgent",
@@ -2726,8 +2817,117 @@ async def test_process_reply_error_propagates(monkeypatch):
     tools._search_rag_candidates = AsyncMock(return_value=[])
     tools._rerank_rag_candidates = AsyncMock(return_value=[])
 
-    with pytest.raises(RuntimeError, match="process agent failed"):
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    assert result.success is False
+    assert "process agent failed" in result
+    assert "TaskCreate" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_state", ["pending", "in_progress"])
+async def test_process_requires_authoritative_completed_task_state(
+    monkeypatch,
+    tmp_path,
+    task_state,
+):
+    output_root = tmp_path / "output"
+    content = '{"processName": "observed"}'
+    _install_process_recording_fakes(
+        monkeypatch,
+        task_state=task_state,
+        file_calls=(
+            ("write_text_file", {"file_path": "process.json", "content": content}),
+            ("view_text_file", {"file_path": "process.json"}),
+        ),
+    )
+    monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    assert result.success is False
+    assert task_state in result
+    assert "TaskCreate" in result
+    assert content in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "reply_error", "expected"),
+    [
+        (None, None, "Agent"),
+        (..., RuntimeError("reply exploded"), "reply exploded"),
+    ],
+)
+async def test_process_failure_after_observations_preserves_task_and_file_evidence(
+    monkeypatch,
+    tmp_path,
+    reply,
+    reply_error,
+    expected,
+):
+    output_root = tmp_path / "output"
+    content = '{"processName": "observed-before-failure"}'
+    _install_process_recording_fakes(
+        monkeypatch,
+        reply=reply,
+        reply_error=reply_error,
+        file_calls=(
+            ("write_text_file", {"file_path": "process.json", "content": content}),
+            ("view_text_file", {"file_path": "process.json"}),
+        ),
+    )
+    monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    result = await tools._process_agent_async("task", None, "process", 5)
+
+    assert result.success is False
+    assert expected in result
+    assert "TaskCreate" in result
+    assert "write_text_file" in result
+    assert "view_text_file" in result
+    assert content in result
+
+
+@pytest.mark.asyncio
+async def test_process_closes_trusted_root_when_setup_fails(monkeypatch):
+    close_root = MagicMock()
+
+    def fake_make_file_tools(output_root, records):
+        def write_text_file(file_path, content):
+            return ToolChunk(content=[TextBlock(text="write")])
+
+        def view_text_file(file_path):
+            return ToolChunk(content=[TextBlock(text="view")])
+
+        write_text_file.close = close_root
+        view_text_file.close = close_root
+        return write_text_file, view_text_file
+
+    monkeypatch.setattr(
+        agent_extensions,
+        "_make_process_file_tools",
+        fake_make_file_tools,
+    )
+    monkeypatch.setattr(
+        agent_extensions,
+        "Toolkit",
+        MagicMock(side_effect=RuntimeError("toolkit setup failed")),
+    )
+    tools = AgentExtensionTools()
+    tools._search_rag_candidates = AsyncMock(return_value=[])
+    tools._rerank_rag_candidates = AsyncMock(return_value=[])
+
+    with pytest.raises(RuntimeError, match="toolkit setup failed"):
         await tools._process_agent_async("task", None, "process", 5)
+
+    close_root.assert_called_once_with()
 
 
 def _subagent_prompt_source(agent_name: str) -> str:

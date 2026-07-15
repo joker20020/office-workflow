@@ -274,6 +274,7 @@ def _validate_subagent_handoff(
     subject: str,
     file_records: Any = None,
     task_records: Any = None,
+    authoritative_tasks: Any = None,
 ) -> _SubagentResult:
     """Validate and safely normalize a structured subagent handoff."""
     text = str(content or "")
@@ -319,6 +320,29 @@ def _validate_subagent_handoff(
             issues.append(
                 "缺少实际成功文件工具结果：" + ", ".join(missing_file_tools),
             )
+        final_tasks = (
+            list(authoritative_tasks)
+            if authoritative_tasks is not None
+            else (tasks[-1].get("tasks", []) if tasks else [])
+        )
+        active_tasks = [
+            task
+            for task in final_tasks
+            if str(task.get("state", task.get("status", ""))).lower() != "deleted"
+        ]
+        if not active_tasks:
+            issues.append("authoritative AgentState contains no planned task evidence")
+        incomplete_tasks = [
+            task
+            for task in active_tasks
+            if str(task.get("state", task.get("status", ""))).lower()
+            != "completed"
+        ]
+        if incomplete_tasks:
+            issues.append(
+                "authoritative AgentState has non-completed tasks:\n"
+                + json.dumps(incomplete_tasks, ensure_ascii=False, indent=2),
+            )
     if issues and status == "成功":
         status = "部分成功"
         sections["状态"] = status
@@ -362,8 +386,12 @@ def _validate_subagent_handoff(
                 "实际结果：\n"
                 f"{_safe_code_fence(record['result'], 'text')}",
             )
-        if tasks:
-            final_tasks = tasks[-1].get("tasks", [])
+        if tasks or authoritative_tasks is not None:
+            final_tasks = (
+                list(authoritative_tasks)
+                if authoritative_tasks is not None
+                else tasks[-1].get("tasks", [])
+            )
             tool_evidence.append(
                 "### Task 最终状态\n"
                 + _safe_code_fence(
@@ -406,16 +434,153 @@ def _make_response(content: str, success: bool = True) -> Any:
     )
 
 
+class _TrustedProcessRoot:
+    """Keep the ProcessAgent output directory bound to one opened object."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self._closed = False
+        if os.name == "nt":
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.CreateFileW.restype = ctypes.c_void_p
+            self._handle = kernel32.CreateFileW(
+                str(root),
+                0x80000000,  # GENERIC_READ
+                0x00000001 | 0x00000002,  # share READ | WRITE, never DELETE
+                None,
+                3,  # OPEN_EXISTING
+                0x02000000 | 0x00200000,  # BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+                None,
+            )
+            if self._handle in {None, ctypes.c_void_p(-1).value}:
+                raise OSError(ctypes.get_last_error(), "cannot open trusted output root")
+            try:
+                if self._final_windows_path(self._handle) != self._normalized(root):
+                    raise OSError("opened output root does not match the trusted path")
+            except Exception:
+                kernel32.CloseHandle(self._handle)
+                raise
+            self._fd = None
+        else:
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            self._fd = os.open(root, flags)
+            self._handle = None
+        self.identity = (
+            os.fstat(self._fd)
+            if self._fd is not None
+            else os.stat(root, follow_symlinks=False)
+        )
+        if not stat.S_ISDIR(self.identity.st_mode):
+            self.close()
+            raise OSError("trusted output root is not a directory")
+
+    @staticmethod
+    def _normalized(path: Any) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
+
+    @staticmethod
+    def _final_windows_path(handle: int) -> str:
+        import ctypes
+
+        get_final_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+        required = get_final_path(handle, None, 0, 0)
+        if required <= 0:
+            raise OSError(ctypes.get_last_error(), "cannot resolve opened handle")
+        buffer = ctypes.create_unicode_buffer(required + 1)
+        written = get_final_path(handle, buffer, len(buffer), 0)
+        if written <= 0 or written >= len(buffer):
+            raise OSError(ctypes.get_last_error(), "cannot read opened handle path")
+        final_path = buffer.value
+        if final_path.startswith("\\\\?\\UNC\\"):
+            final_path = "\\\\" + final_path[8:]
+        elif final_path.startswith("\\\\?\\"):
+            final_path = final_path[4:]
+        return _TrustedProcessRoot._normalized(final_path)
+
+    def verify(self) -> None:
+        if self._closed:
+            raise OSError("trusted output root is closed")
+        current = os.stat(self.root, follow_symlinks=False)
+        attributes = getattr(current, "st_file_attributes", 0)
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or bool(attributes & reparse)
+            or not os.path.samestat(current, self.identity)
+        ):
+            raise OSError("trusted output root was replaced")
+        if os.name == "nt" and self._final_windows_path(self._handle) != self._normalized(
+            self.root,
+        ):
+            raise OSError("trusted output root handle changed")
+        if self._fd is not None and not os.path.samestat(os.fstat(self._fd), self.identity):
+            raise OSError("trusted output root descriptor changed")
+
+    def replace(self, temporary_name: str, artifact_name: str) -> None:
+        self.verify()
+        if self._fd is not None:
+            os.replace(
+                temporary_name,
+                artifact_name,
+                src_dir_fd=self._fd,
+                dst_dir_fd=self._fd,
+            )
+        else:
+            os.replace(self.root / temporary_name, self.root / artifact_name)
+        self.verify()
+
+    def open_readonly(self, artifact_name: str) -> int:
+        self.verify()
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        if self._fd is not None:
+            return os.open(artifact_name, flags, dir_fd=self._fd)
+        return os.open(self.root / artifact_name, flags)
+
+    def lstat(self, artifact_name: str) -> os.stat_result:
+        self.verify()
+        if self._fd is not None:
+            return os.stat(
+                artifact_name,
+                dir_fd=self._fd,
+                follow_symlinks=False,
+            )
+        return os.lstat(self.root / artifact_name)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._fd is not None:
+            os.close(self._fd)
+        elif self._handle is not None:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(self._handle)
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 def _make_process_file_tools(output_root: Any, records: Any = None):
     """Bind ProcessAgent JSON file capabilities to one resolved output root."""
     requested_root = Path(output_root).expanduser()
     requested_root.mkdir(parents=True, exist_ok=True)
     root = requested_root.resolve()
-    root_identity = os.lstat(root)
+    trusted_root = _TrustedProcessRoot(root)
+    root_identity = trusted_root.identity
     observations = records if records is not None else []
     verified_artifacts = {}
 
     def ensure_trusted_root() -> None:
+        trusted_root.verify()
         current = os.lstat(root)
         file_attributes = getattr(current, "st_file_attributes", 0)
         reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
@@ -477,6 +642,43 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
         if proc_handle.exists():
             return Path(os.path.realpath(proc_handle))
         return fallback.resolve(strict=True)
+
+    def verified_installed_artifact(
+        artifact_name: str,
+        target: Path,
+    ) -> tuple[os.stat_result, str]:
+        descriptor = trusted_root.open_readonly(artifact_name)
+        try:
+            actual_path = opened_file_path(descriptor, target)
+            if os.path.normcase(str(actual_path)) != os.path.normcase(str(target)):
+                raise OSError("opened artifact is outside the trusted output root")
+            opened_identity = os.fstat(descriptor)
+            pathname_identity = trusted_root.lstat(artifact_name)
+            if (
+                not os.path.samestat(opened_identity, pathname_identity)
+                or not stat.S_ISREG(opened_identity.st_mode)
+                or is_link_or_reparse(pathname_identity)
+                or opened_identity.st_nlink != 1
+            ):
+                raise OSError("installed artifact is not the trusted single-link file")
+            with os.fdopen(descriptor, "rb") as file_handle:
+                descriptor = -1
+                installed_bytes = file_handle.read()
+            return opened_identity, installed_bytes.decode("utf-8")
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def artifact_signature(identity: os.stat_result) -> tuple:
+        return (
+            identity.st_dev,
+            identity.st_ino,
+            identity.st_mode,
+            identity.st_nlink,
+            identity.st_size,
+            identity.st_mtime_ns,
+            identity.st_ctime_ns,
+        )
 
     def result_chunk(
         operation: str,
@@ -545,19 +747,24 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
                 or temporary_identity.st_nlink != 1
             ):
                 raise OSError("临时工艺文件在原子替换前被更换")
-            os.replace(temporary_path, target)
+            trusted_root.replace(temporary_path.name, artifact_name)
             temporary_path = None
             cleanup_path = None
-            installed_identity = os.lstat(target)
+            installed_identity, installed_content = verified_installed_artifact(
+                artifact_name,
+                target,
+            )
             if (
-                is_link_or_reparse(installed_identity)
-                or installed_identity.st_nlink != 1
+                not os.path.samestat(opened_identity, installed_identity)
+                or installed_content != verified_content
             ):
                 target.unlink(missing_ok=True)
                 raise OSError("原子替换后的工艺文件不是独占普通文件")
             verified_artifacts[artifact_name] = {
                 "path": target,
                 "content": verified_content,
+                "identity": installed_identity,
+                "signature": artifact_signature(installed_identity),
             }
         except Exception as exc:
             if cleanup_path is not None:
@@ -587,8 +794,20 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
                 raise ValueError(
                     "只能查看本次运行写入并验证的工艺文件",
                 )
-            target = verified_artifacts[artifact_name]["path"]
-            content = verified_artifacts[artifact_name]["content"]
+            artifact = verified_artifacts[artifact_name]
+            target = artifact["path"]
+            current_identity, content = verified_installed_artifact(
+                artifact_name,
+                target,
+            )
+            if (
+                not os.path.samestat(current_identity, artifact["identity"])
+                or artifact_signature(current_identity) != artifact["signature"]
+                or content != artifact["content"]
+            ):
+                raise OSError(
+                    "verified artifact was deleted, replaced, linked, or modified",
+                )
         except Exception as exc:
             return result_chunk(
                 "view_text_file",
@@ -605,6 +824,8 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
             content,
         )
 
+    write_text_file.close = trusted_root.close
+    view_text_file.close = trusted_root.close
     return write_text_file, view_text_file
 
 
@@ -1697,14 +1918,32 @@ class AgentExtensionTools:
         Returns:
             工艺规划的执行结果
         """
+        evidence_context = {
+            "file_records": [],
+            "task_records": [],
+            "authoritative_tasks": [],
+        }
         try:
             result = _run_async(
-                self._process_agent_async(task, image_path or None, collection_name, limit)
+                self._process_agent_async(
+                    task,
+                    image_path or None,
+                    collection_name,
+                    limit,
+                    evidence_context,
+                ),
             )
             result = _validate_subagent_handoff(result, "工艺规划")
             return _make_response(str(result), success=result.success)
         except Exception as e:
-            result = _subagent_failure("工艺规划", f"工艺规划失败：{e}")
+            failure = _subagent_failure("工艺规划", f"工艺规划失败：{e}")
+            result = _validate_subagent_handoff(
+                failure,
+                "工艺规划",
+                evidence_context["file_records"],
+                evidence_context["task_records"],
+                evidence_context["authoritative_tasks"],
+            )
             return _make_response(str(result), success=False)
 
     async def _process_agent_async(
@@ -1713,6 +1952,7 @@ class AgentExtensionTools:
         image_path: str,
         collection_name: str,
         limit: int = 5,
+        evidence_context: Any = None,
     ) -> str:
         """
         通过 ProcessGen RAG 后端检索候选，重排后构建完整 prompt，
@@ -1814,28 +2054,35 @@ class AgentExtensionTools:
         process_output_root = Path(
             os.environ.get("PROCESS_OUTPUT_ROOT", os.getcwd()),
         ).expanduser().resolve()
-        file_records = []
-        task_records = []
+        context = evidence_context if evidence_context is not None else {}
+        file_records = context.setdefault("file_records", [])
+        task_records = context.setdefault("task_records", [])
+        context.setdefault("authoritative_tasks", [])
         task_observer = _TaskObservationMiddleware(task_records)
         process_write_file, process_view_file = _make_process_file_tools(
             process_output_root,
             file_records,
         )
-        toolkit = Toolkit(
-            tools=[
-                TaskCreate(middlewares=[task_observer]),
-                TaskGet(middlewares=[task_observer]),
-                TaskList(middlewares=[task_observer]),
-                TaskUpdate(middlewares=[task_observer]),
-                FunctionTool(func=process_write_file),
-                FunctionTool(func=process_view_file),
-            ],
-        )
-        process_state = AgentState(
-            permission_context={"mode": PermissionMode.BYPASS},
-        )
+        try:
+            toolkit = Toolkit(
+                tools=[
+                    TaskCreate(middlewares=[task_observer]),
+                    TaskGet(middlewares=[task_observer]),
+                    TaskList(middlewares=[task_observer]),
+                    TaskUpdate(middlewares=[task_observer]),
+                    FunctionTool(func=process_write_file),
+                    FunctionTool(func=process_view_file),
+                ],
+            )
+            process_state = AgentState(
+                permission_context={"mode": PermissionMode.BYPASS},
+            )
+        except BaseException:
+            process_write_file.close()
+            raise
 
-        process_agent = Agent(
+        try:
+            process_agent = Agent(
             name="ProcessAgent",
             system_prompt=f"""
         你是一个工艺规划师,你的任务是根据查询到的知识帮助用户进行工艺规划
@@ -1872,19 +2119,40 @@ class AgentExtensionTools:
             toolkit=toolkit,
             state=process_state,
             react_config=ReActConfig(max_iters=60),
-        )
+            )
+        except BaseException:
+            process_write_file.close()
+            raise
 
         # ---- 6. 执行 ----
-        msg_res = await process_agent.reply(msg)
-        reply_text = _message_text(msg_res)
-        if not reply_text:
-            return _subagent_failure("工艺规划", "工艺规划 Agent 未返回结果")
-        return _validate_subagent_handoff(
-            reply_text,
-            "工艺规划",
-            file_records,
-            task_records,
-        )
+        try:
+            try:
+                msg_res = await process_agent.reply(msg)
+                reply_text = _message_text(msg_res)
+                if not reply_text:
+                    reply_text = str(
+                        _subagent_failure("工艺规划", "工艺规划 Agent 未返回结果"),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                reply_text = str(
+                    _subagent_failure("工艺规划", f"工艺规划 Agent 异常：{exc}"),
+                )
+            finally:
+                context["authoritative_tasks"] = [
+                    task.model_dump(mode="json")
+                    for task in process_state.tasks_context.tasks
+                ]
+            return _validate_subagent_handoff(
+                reply_text,
+                "工艺规划",
+                file_records,
+                task_records,
+                context["authoritative_tasks"],
+            )
+        finally:
+            process_write_file.close()
 
     # ==================== 4. ComfyUI 图像生成 ====================
 
