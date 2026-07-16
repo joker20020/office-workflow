@@ -10,6 +10,7 @@
 
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import math
@@ -21,6 +22,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from src.agent.agent_integration import (
+    SUBAGENT_EVENT_PREFIX as SUBAGENT_EVENT_PREFIX,
+    encode_subagent_event,
+)
 from src.core.permission_manager import Permission, PermissionSet
 from src.core.plugin_base import PluginBase
 from src.utils.logger import get_logger
@@ -1609,13 +1614,76 @@ class AgentExtensionTools:
 
     def get_all_tools(self) -> list:
         return [
-            self.tool_unity_ar,
-            self.tool_blender_model,
-            self.tool_generate_process,
-            self.tool_generate_image,
+            self._streaming_tool(self.tool_unity_ar, "Unity Agent", "tool_unity_ar"),
+            self._streaming_tool(
+                self.tool_blender_model, "Blender Agent", "tool_blender_model"
+            ),
+            self._streaming_tool(
+                self.tool_generate_process, "Process Agent", "tool_generate_process"
+            ),
+            self._streaming_tool(
+                self.tool_generate_image, "Image Agent", "tool_generate_image"
+            ),
             self.tool_extract_json,
             self.tool_query_knowledge_base,
         ]
+
+    def _streaming_tool(self, sync_tool, title: str, tool_name: str):
+        """Expose a synchronous subagent wrapper as an AgentScope stream."""
+
+        @functools.wraps(sync_tool)
+        async def streaming(*args, **kwargs):
+            yield ToolChunk(
+                content=[
+                    TextBlock(
+                        text=encode_subagent_event(
+                            {"kind": "phase", "title": title, "text": "started"}
+                        )
+                    )
+                ],
+                is_last=False,
+            )
+            task = asyncio.create_task(asyncio.to_thread(sync_tool, *args, **kwargs))
+            elapsed = 0
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=5.0)
+                if done:
+                    break
+                elapsed += 5
+                yield ToolChunk(
+                    content=[
+                        TextBlock(
+                            text=encode_subagent_event(
+                                {
+                                    "kind": "phase",
+                                    "title": title,
+                                    "text": f"running ({elapsed}s)",
+                                }
+                            )
+                        )
+                    ],
+                    is_last=False,
+                )
+            response = await task
+            succeeded = getattr(response, "state", None) == ToolResultState.SUCCESS
+            yield ToolChunk(
+                content=[
+                    TextBlock(
+                        text=encode_subagent_event(
+                            {
+                                "kind": "complete" if succeeded else "error",
+                                "title": title,
+                                "text": "completed" if succeeded else "failed",
+                            }
+                        )
+                    )
+                ],
+                is_last=False,
+            )
+            yield response
+
+        streaming.__name__ = tool_name
+        return streaming
 
     # ==================== 1. Unity AR ====================
 

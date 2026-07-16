@@ -1423,6 +1423,23 @@ def test_public_subagent_wrappers_mark_agentscope_unavailable_as_error(
         assert heading in response.content[0].text
 
 
+@pytest.mark.asyncio
+async def test_registered_blender_tool_streams_safe_progress_and_final_response(
+    monkeypatch,
+):
+    tools = AgentExtensionTools()
+    final = agent_extensions._make_response("# final")
+    monkeypatch.setattr(tools, "tool_blender_model", lambda task: final)
+
+    registered = {tool.__name__: tool for tool in tools.get_all_tools()}
+    chunks = [chunk async for chunk in registered["tool_blender_model"]("fixture")]
+
+    assert isinstance(chunks[0], agent_extensions.ToolChunk)
+    assert chunks[0].is_last is False
+    assert chunks[0].content[0].text.startswith(agent_extensions.SUBAGENT_EVENT_PREFIX)
+    assert chunks[-1] is final
+
+
 @pytest.mark.parametrize(
     "call_tool",
     [

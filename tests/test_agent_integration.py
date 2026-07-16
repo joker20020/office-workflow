@@ -21,7 +21,10 @@ from agentscope.tool import FunctionTool
 import src.agent.agent_integration as agent_integration
 import src.agent.mcp_server_manager as mcp_server_manager
 import src.agent.skill_manager as skill_manager_module
-from src.agent.agent_integration import AgentIntegration
+from src.agent.agent_integration import (
+    AgentIntegration,
+    normalize_subagent_execution_event,
+)
 from src.agent.api_key_manager import ApiKeyManager
 from src.agent.mcp_server_manager import McpServerManager
 from src.agent.skill_manager import SkillManager
@@ -40,6 +43,25 @@ def test_migration_ruff_exceptions_are_narrow_and_reviewed():
         "plugins/agent_extensions/__init__.py": ["E501", "UP006", "UP035"],
         "src/agent/agent_integration.py": ["UP006", "UP035", "UP045"],
         "src/agent/tool_registry.py": ["UP006", "UP035"],
+    }
+
+
+def test_subagent_progress_is_nested_under_parent_tool_result():
+    state = {}
+
+    update = normalize_subagent_execution_event(
+        parent_tool_call_id="call-1",
+        event={"kind": "tool_result", "tool": "generate_image", "text": "saved image"},
+        state=state,
+    )
+
+    assert update == {
+        "type": "subagent_event",
+        "parent_tool_call_id": "call-1",
+        "event_kind": "tool_result",
+        "title": "generate_image",
+        "text": "saved image",
+        "status": "running",
     }
 
 

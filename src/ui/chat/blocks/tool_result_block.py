@@ -15,7 +15,7 @@ Tool Result Block — 卡片式折叠展示
 from typing import Any, Dict
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
 
 from src.ui.chat.blocks.animated_arrow import AnimatedArrow
 from src.ui.chat.blocks.base import BaseBlockWidget
@@ -36,6 +36,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         self._tool_id: str = ""
         self._tool_name: str = ""
         self._tool_output: str = ""
+        self._execution_events: list[Dict[str, Any]] = []
         self._is_expanded: bool = False
         self._is_error: bool = False
 
@@ -45,6 +46,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         self._tool_name_label: QLabel | None = None
         self._arrow: AnimatedArrow | None = None
         self._output_edit: QTextEdit | None = None
+        self._execution_edit: QTextEdit | None = None
         self._collapsible: CollapsibleBox | None = None
 
         super().__init__(block_data, parent)
@@ -54,10 +56,8 @@ class ToolResultBlockWidget(BaseBlockWidget):
     def _setup_ui(self) -> None:
         self._tool_id = self._block_data.get("id", "")
         self._tool_name = self._block_data.get("name", "unknown")
-        output_blocks = self._block_data.get("output", "")
-        for block in output_blocks:
-            if block.get("type", "") == "text":
-                self._tool_output += block.get("text", "")
+        self._tool_output = self._output_text(self._block_data.get("output", ""))
+        self._execution_events = list(self._block_data.get("execution_events", []))
         self._is_error = self._detect_error_state(self._tool_output)
 
         outer = QVBoxLayout(self)
@@ -110,7 +110,32 @@ class ToolResultBlockWidget(BaseBlockWidget):
         self._output_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self._output_edit.setPlainText(self._tool_output)
 
-        self._collapsible = CollapsibleBox(self._output_edit)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(6)
+        content_layout.addWidget(self._output_edit)
+
+        self._execution_edit = QTextEdit()
+        self._execution_edit.setObjectName("subagentExecutionEvents")
+        self._execution_edit.setReadOnly(True)
+        self._execution_edit.setCursorWidth(0)
+        self._execution_edit.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self._execution_edit.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._execution_edit.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._execution_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._execution_edit.setPlainText(self._execution_events_text())
+        self._execution_edit.setVisible(bool(self._execution_events))
+        content_layout.addWidget(self._execution_edit)
+
+        self._collapsible = CollapsibleBox(content)
         card_layout.addWidget(self._collapsible)
 
         outer.addWidget(self._card)
@@ -144,6 +169,13 @@ class ToolResultBlockWidget(BaseBlockWidget):
                     is_error=self._is_error,
                 )
             )
+        if self._execution_edit:
+            self._execution_edit.setStyleSheet(
+                Theme.get_block_card_content_stylesheet(
+                    content_type="code",
+                    is_error=False,
+                )
+            )
 
     # ------------------------------------------------------------------ 展开/折叠
 
@@ -166,6 +198,42 @@ class ToolResultBlockWidget(BaseBlockWidget):
         output_lower = output.lower()
         error_indicators = ["error", "failed", "exception", "traceback", "error:"]
         return any(indicator in output_lower for indicator in error_indicators)
+
+    @staticmethod
+    def _output_text(output: Any) -> str:
+        if isinstance(output, str):
+            return output
+        if isinstance(output, list):
+            return "".join(
+                str(block.get("text", ""))
+                for block in output
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        return str(output or "")
+
+    def _execution_events_text(self) -> str:
+        return "\n".join(
+            "[{status}] {title}: {text}".format(
+                status=event.get("status", "running"),
+                title=event.get("title", "Subagent"),
+                text=event.get("text", ""),
+            )
+            for event in self._execution_events
+        )
+
+    def append_execution_event(self, event: Dict[str, Any]) -> None:
+        """Render one display-safe subagent update below the final tool output."""
+        self._execution_events.append(event.copy())
+        self._block_data.setdefault("execution_events", []).append(event.copy())
+        if self._execution_edit:
+            self._execution_edit.setPlainText(self._execution_events_text())
+            self._execution_edit.setVisible(True)
+        if self._collapsible and self._collapsible.is_expanded():
+            self._collapsible.update_content_height(animate=False)
+        self.height_changed.emit()
+
+    def execution_event_count(self) -> int:
+        return len(self._execution_events)
 
     def get_content(self) -> str:
         return self._tool_output
@@ -195,7 +263,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         super().update_block_data(new_data)
         self._tool_id = new_data.get("id", self._tool_id)
         self._tool_name = new_data.get("name", self._tool_name)
-        new_output = new_data.get("output", self._tool_output)
+        new_output = self._output_text(new_data.get("output", self._tool_output))
         if new_output != self._tool_output:
             self._tool_output = new_output
             self._is_error = self._detect_error_state(self._tool_output)

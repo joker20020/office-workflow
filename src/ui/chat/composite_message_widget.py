@@ -126,6 +126,19 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
         block_type = block_data.get("type", "text")
         block_id = block_data.get("id", "")
 
+        if block_type == "subagent_event":
+            parent_id = block_data.get("parent_tool_call_id", "")
+            for widget in self._block_widgets:
+                if (
+                    widget.get_block_type() == "tool_result"
+                    and widget.get_block_id() == parent_id
+                ):
+                    append_event = getattr(widget, "append_execution_event", None)
+                    if append_event is not None:
+                        append_event(block_data)
+                    return
+            return
+
         # tool_use / tool_result: 按 id 去重，id 不匹配时始终新增，不覆盖已有块
         if block_type in ("tool_use", "tool_result"):
             if block_id:

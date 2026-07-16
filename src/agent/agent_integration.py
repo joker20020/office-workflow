@@ -2,9 +2,10 @@
 
 import asyncio
 import concurrent.futures
+import json
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional
 
 try:
     from agentscope.credential import (
@@ -98,6 +99,77 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 StreamingCallback = Callable[[Any, dict[str, Any], Any], None]
+
+_DISPLAYABLE_SUBAGENT_EVENT_KINDS = {
+    "phase",
+    "text",
+    "tool_call",
+    "tool_result",
+    "artifact",
+    "warning",
+    "error",
+    "complete",
+}
+
+SUBAGENT_EVENT_PREFIX = "\x1eagentscope-subagent-event:"
+
+
+def encode_subagent_event(event: Mapping[str, Any]) -> str:
+    """Encode one public subagent event for AgentScope tool streaming."""
+    public = {
+        key: event[key]
+        for key in ("kind", "title", "tool", "text", "artifact_id")
+        if key in event
+    }
+    return SUBAGENT_EVENT_PREFIX + json.dumps(public, ensure_ascii=False)
+
+
+def decode_subagent_event(value: str) -> dict[str, Any] | None:
+    """Decode an explicit progress marker, rejecting malformed payloads."""
+    if not value.startswith(SUBAGENT_EVENT_PREFIX):
+        return None
+    try:
+        payload = json.loads(value[len(SUBAGENT_EVENT_PREFIX) :])
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def normalize_subagent_execution_event(
+    *,
+    parent_tool_call_id: str,
+    event: Mapping[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """Convert an explicit, display-safe subagent update into a UI payload.
+
+    The normalizer deliberately accepts only the small public progress schema.
+    Private model reasoning fields are never copied into the resulting payload.
+    """
+    kind = str(event.get("kind", "progress"))
+    if kind not in _DISPLAYABLE_SUBAGENT_EVENT_KINDS:
+        kind = "progress"
+
+    result: dict[str, Any] = {
+        "type": "subagent_event",
+        "parent_tool_call_id": str(parent_tool_call_id),
+        "event_kind": kind,
+        "title": str(event.get("tool") or event.get("title") or "Subagent"),
+        "text": str(event.get("text", "")),
+        "status": (
+            "failed"
+            if kind == "error"
+            else "completed"
+            if kind == "complete"
+            else "running"
+        ),
+    }
+    artifact_id = event.get("artifact_id")
+    if artifact_id is not None:
+        result["artifact_id"] = str(artifact_id)
+
+    state[("subagent_event", parent_tool_call_id)] = result.copy()
+    return result
 
 
 class _ReplyStreamError(Exception):

@@ -44,8 +44,15 @@ from agentscope.event import (
     ToolResultTextDeltaEvent,
 )
 
-from src.agent.agent_integration import AgentIntegration
+from src.agent.agent_integration import (
+    AgentIntegration,
+    decode_subagent_event,
+    encode_subagent_event as encode_subagent_event,
+    normalize_subagent_execution_event,
+)
 from src.agent.api_key_manager import ApiKeyManager
+from src.core.artifact_paths import ArtifactPathPolicy
+from src.ui.chat.artifact_sidebar import ArtifactSidebar
 from src.ui.chat.settings_panel import AgentSettingsDialog
 from src.ui.i18n_manager import _
 from src.ui.language_aware import LanguageAwareMixin
@@ -147,6 +154,13 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
     elif isinstance(event, ToolResultTextDeltaEvent):
         key = ("tool_result", event.tool_call_id)
         current = state.setdefault(key, {"name": "", "output": ""})
+        progress = decode_subagent_event(event.delta)
+        if progress is not None:
+            return normalize_subagent_execution_event(
+                parent_tool_call_id=event.tool_call_id,
+                event=progress,
+                state=state,
+            )
         current["output"] += event.delta
         return {
             "type": "tool_result",
@@ -616,6 +630,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         mcp_manager: Optional["McpServerManager"] = None,
         skill_manager: Optional["SkillManager"] = None,
         history_repository: Optional["ChatHistoryRepository"] = None,
+        artifact_repository: Any | None = None,
+        artifact_path_policy: ArtifactPathPolicy | None = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -626,6 +642,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._mcp_manager = mcp_manager
         self._skill_manager = skill_manager
         self._history_repository = history_repository
+        self._artifact_repository = artifact_repository
+        self._artifact_path_policy = artifact_path_policy
         self._messages: list[MarkdownMessageWidget | CompositeMessageWidget] = []
         self._current_provider: Optional[str] = None
         self._worker: Optional[AgentWorker] = None
@@ -643,14 +661,17 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         # 如果有持久化存储，加载会话列表
         if self._history_repository:
             self._load_sessions()
+            if self._agent and hasattr(self._agent, "current_session_id"):
+                self._current_session_id = self._agent.current_session_id
+                self._set_artifact_session(self._current_session_id)
 
     def _setup_ui(self) -> None:
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet(Theme.get_splitter_stylesheet())
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setStyleSheet(Theme.get_splitter_stylesheet())
 
         # 左侧：会话列表（如果有持久化存储）
         if self._history_repository:
@@ -658,7 +679,13 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._session_list.session_selected.connect(self._on_session_selected)
             self._session_list.session_delete_requested.connect(self._on_session_delete)
             self._session_list.new_session_requested.connect(self._on_new_session)
-            splitter.addWidget(self._session_list)
+            self._splitter.addWidget(self._session_list)
+
+        if self._artifact_repository is not None and self._artifact_path_policy is not None:
+            self._artifact_sidebar = ArtifactSidebar(
+                self._artifact_repository,
+                self._artifact_path_policy,
+            )
 
         # 右侧：聊天区域
         self._chat_widget = QWidget()
@@ -687,12 +714,15 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         chat_layout.addWidget(self._input_area)
 
         self._chat_widget.setStyleSheet(Theme.get_chat_panel_stylesheet())
-        splitter.addWidget(self._chat_widget)
+        self._splitter.addWidget(self._chat_widget)
+
+        if hasattr(self, "_artifact_sidebar"):
+            self._splitter.addWidget(self._artifact_sidebar)
 
         # 设置分割比例
-        splitter.setSizes([200, 600])
+        self._splitter.setSizes([200, 600, 36])
 
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self._splitter)
 
     def _create_header(self) -> QWidget:
         self._header_frame = QFrame()
@@ -732,6 +762,13 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         layout.addWidget(self._settings_btn)
         layout.addWidget(self._clear_btn)
+
+        self._artifacts_btn = QPushButton("Artifacts")
+        self._artifacts_btn.setFixedHeight(28)
+        self._artifacts_btn.clicked.connect(self._toggle_artifact_sidebar)
+        self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
+        self._artifacts_btn.setVisible(hasattr(self, "_artifact_sidebar"))
+        layout.addWidget(self._artifacts_btn)
 
         return self._header_frame
 
@@ -1123,6 +1160,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         success = self._agent.switch_session(session_id)
         if success:
             self._current_session_id = session_id
+            self._set_artifact_session(session_id)
             self._load_session_messages()
             self._load_sessions()
             self._session_list.select_session(session_id)
@@ -1152,6 +1190,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             if is_current_session:
                 self._clear_messages_ui()
                 self._current_session_id = None
+                self._set_artifact_session(None)
                 sessions = self._history_repository.list_sessions(limit=1)
                 if sessions:
                     self._on_session_selected(sessions[0]["id"])
@@ -1167,6 +1206,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         if self._history_repository and self._agent.is_persisted:
             new_session_id = self._agent.create_new_session()
             self._current_session_id = new_session_id
+            self._set_artifact_session(new_session_id)
             self._load_sessions()
             self._agent._sync_history_to_memory()
             _logger.info("重置为新的内存会话")
@@ -1402,6 +1442,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._streaming_message.add_or_update_block(block_data)
         elif block_type == "tool_result":
             self._streaming_message.add_or_update_block(block_data)
+        elif block_type == "subagent_event":
+            self._streaming_message.add_or_update_block(block_data)
         elif block_type == "text":
             text_content = block_data.get("text", "")
             # Try to update existing text block, if not found, add new one
@@ -1419,7 +1461,11 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
     def _on_agent_response(self, response: str) -> None:
         _logger.info(f"Agent response received, length: {len(response)}")
-        self._set_status(_("chat.ready") if self._current_provider else _("chat.please_select_api_key"))
+        self._set_status(
+            _("chat.ready")
+            if self._current_provider
+            else _("chat.please_select_api_key"),
+        )
 
         if self._streaming_message and isinstance(self._streaming_message, CompositeMessageWidget):
             self._streaming_message = None
@@ -1523,7 +1569,14 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
                     _logger.warning(f"清空数据库会话记录失败: {e}")
             self._agent.reset()
 
-        self._set_status(_("chat.ready") if self._current_provider else _("chat.please_select_api_key"))
+        self._current_session_id = None
+        self._set_artifact_session(None)
+
+        self._set_status(
+            _("chat.ready")
+            if self._current_provider
+            else _("chat.please_select_api_key"),
+        )
         _logger.info("对话已清空")
 
     def set_agent(self, agent: AgentIntegration) -> None:
@@ -1545,6 +1598,17 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         """设置会话历史存储库"""
         self._history_repository = repository
         self._load_sessions()
+
+    def _set_artifact_session(self, session_id: str | None) -> None:
+        if hasattr(self, "_artifact_sidebar"):
+            self._artifact_sidebar.set_session(session_id)
+
+    def _toggle_artifact_sidebar(self) -> None:
+        if not hasattr(self, "_artifact_sidebar"):
+            return
+        self._artifact_sidebar.set_collapsed(
+            not self._artifact_sidebar.is_collapsed(),
+        )
 
     def _open_settings(self) -> None:
         if self._api_key_manager:

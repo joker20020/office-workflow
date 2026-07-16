@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from typing import Any
 
 from PySide6.QtCore import Signal, QThread
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
@@ -32,6 +32,7 @@ from agentscope.message import ToolResultState
 
 import src.ui.chat.chat_panel as chat_panel
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
+from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
 
 
 class MockStreamingWidget:
@@ -46,6 +47,24 @@ class MockStreamingWidget:
 
 
 class TestChatPanelStreaming:
+    def test_subagent_marker_delta_becomes_nested_event_not_tool_output(self):
+        state = {("tool_result", "call-1"): {"name": "tool_blender_model", "output": ""}}
+        marker = chat_panel.encode_subagent_event(
+            {"kind": "phase", "title": "Blender", "text": "started"}
+        )
+        event = ToolResultTextDeltaEvent(
+            reply_id="reply-1",
+            tool_call_id="call-1",
+            tool_call_name="tool_blender_model",
+            delta=marker,
+        )
+
+        update = chat_panel._event_to_block_update(event, state)
+
+        assert update["type"] == "subagent_event"
+        assert update["parent_tool_call_id"] == "call-1"
+        assert state[("tool_result", "call-1")]["output"] == ""
+
     """Test streaming output in ChatPanel"""
 
     def test_streaming_chunk_updates_message_widget(self):
@@ -432,6 +451,49 @@ class TestChatPanelStreaming:
 
         widget._add_block_widget.assert_called_once_with(block)
         assert widget._blocks == [block]
+
+    def test_subagent_event_routes_to_its_parent_tool_result(self):
+        parent = MagicMock()
+        parent.get_block_type.return_value = "tool_result"
+        parent.get_block_id.return_value = "call-1"
+        widget = MagicMock()
+        widget._block_widgets = [parent]
+        widget._blocks = []
+
+        CompositeMessageWidget.add_or_update_block(
+            widget,
+            {
+                "type": "subagent_event",
+                "parent_tool_call_id": "call-1",
+                "event_kind": "artifact",
+                "title": "Image agent",
+                "text": "saved image",
+                "status": "running",
+            },
+        )
+
+        parent.append_execution_event.assert_called_once()
+        assert widget._blocks == []
+
+    def test_tool_result_keeps_final_markdown_and_appends_execution_events(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        block = ToolResultBlockWidget(
+            {"type": "tool_result", "id": "call-1", "name": "image", "output": "# Final"}
+        )
+
+        block.append_execution_event(
+            {
+                "type": "subagent_event",
+                "event_kind": "artifact",
+                "title": "Image agent",
+                "text": "saved image",
+                "status": "running",
+            }
+        )
+
+        assert block.get_content() == "# Final"
+        assert block.execution_event_count() == 1
 
     def test_tool_end_events_preserve_completion_and_result_state(self):
         state = {}

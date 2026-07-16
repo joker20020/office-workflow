@@ -48,6 +48,7 @@ except Exception:
     _HAS_PACKAGE_MANAGER_SINGLETON = False
 from src.agent.chat_history import ChatHistory
 from src.core.app_context import AppContext
+from src.core.artifact_paths import ArtifactPathPolicy
 from src.core.permission_manager import Permission, PermissionSet
 from src.engine.node_engine import NodeEngine
 from src.ui.navigation_rail import NavigationRail
@@ -60,6 +61,7 @@ from src.nodes.package_manager import NodePackageManager
 from src.engine.node_graph import NodeGraph
 from src.storage.database import Database
 from src.storage.repositories import (
+    ArtifactRepository,
     ChatHistoryRepository,
     PluginPermissionRepository,
     PluginRepository,
@@ -110,6 +112,8 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
         self._mcp_manager = get_mcp_server_manager()
         self._skill_manager = get_skill_manager()
         self._history_repository = ChatHistoryRepository(self._db)
+        self._artifact_repository = ArtifactRepository(self._db)
+        self._artifact_path_policy = ArtifactPathPolicy(Path(__file__).resolve().parents[2])
         self._permission_repository = PluginPermissionRepository(self._db)
         self._plugin_repository = PluginRepository(self._db)
         self._node_graph = NodeGraph(name="默认工作流")
@@ -271,6 +275,8 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
             mcp_manager=self._mcp_manager,
             skill_manager=self._skill_manager,
             history_repository=self._history_repository,
+            artifact_repository=self._artifact_repository,
+            artifact_path_policy=self._artifact_path_policy,
         )
 
         return self._chat_panel
