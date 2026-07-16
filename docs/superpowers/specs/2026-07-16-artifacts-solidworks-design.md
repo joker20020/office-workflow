@@ -2,13 +2,13 @@
 
 ## Status and delivery order
 
-This design applies to the `solidworks_version` branch only. It extends the completed AgentScope 2.0.4 migration without changing the existing `main` branch.
+This design extends the completed AgentScope 2.0.4 migration. Artifact tracking, event presentation, and output-path work are implemented on the current branch. SolidWorks MCP implementation and default-modeling workflow changes are deferred to the `solidworks_version` branch so they do not affect the current branch.
 
 Implementation order is binding:
 
-1. Persistent artifact registry, right sidebar, and AgentScope event presentation.
-2. Unified, session-scoped output-path policy and migration of existing generators, including Blender.
-3. A project-local SolidWorks 2023 MCP, then replacement of the default modeling workflow.
+1. Current branch: persistent artifact registry, right sidebar, and AgentScope event presentation.
+2. Current branch: unified, session-scoped output-path policy and migration of existing generators, including Blender.
+3. `solidworks_version` branch: a project-local SolidWorks 2023 MCP, then replacement of the default modeling workflow.
 
 ## Goals
 
