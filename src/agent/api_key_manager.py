@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """API密钥管理器
 
 提供API密钥的加密存储和访问功能。
@@ -16,18 +15,17 @@
 使用方式示例请参考仓库内其他管理器的使用模式。
 """
 
-import threading
 import hashlib
+import json
 import os
 import platform
-import uuid
+import threading
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-import json
 
 from src.storage.database import Database
 from src.storage.models import ApiKeyRecord
@@ -50,7 +48,7 @@ class ApiKeyManager:
         sk-xxxxx
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize ApiKeyManager.
 
@@ -153,9 +151,9 @@ class ApiKeyManager:
         self,
         provider: str,
         api_key: str,
-        base_url: Optional[str] = None,
-        model_name: Optional[str] = None,
-        supported_types: Optional[List[str]] = None,
+        base_url: str | None = None,
+        model_name: str | None = None,
+        supported_types: list[str] | None = None,
     ) -> None:
         """
         存储API密钥（加密）
@@ -202,7 +200,7 @@ class ApiKeyManager:
 
             session.commit()
 
-    def get_key(self, provider: str, model_name: Optional[str] = None) -> Optional[str]:
+    def get_key(self, provider: str, model_name: str | None = None) -> str | None:
         with Session(self._db.engine) as session:
             if model_name is not None:
                 stmt = select(ApiKeyRecord).where(
@@ -225,7 +223,7 @@ class ApiKeyManager:
                 _logger.error(f"解密API密钥失败: {provider}/{model_name or 'default'} - {e}")
                 return None
 
-    def delete_key(self, provider: str, model_name: Optional[str] = None) -> bool:
+    def delete_key(self, provider: str, model_name: str | None = None) -> bool:
         with Session(self._db.engine) as session:
             stmt = select(ApiKeyRecord).where(
                 ApiKeyRecord.provider == provider,
@@ -259,10 +257,10 @@ class ApiKeyManager:
             result = session.execute(stmt)
             return [row[0] for row in result]
 
-    def has_key(self, provider: str, model_name: Optional[str] = None) -> bool:
+    def has_key(self, provider: str, model_name: str | None = None) -> bool:
         return self.get_key(provider, model_name) is not None
 
-    def set_enabled(self, provider: str, enabled: bool, model_name: Optional[str] = None) -> bool:
+    def set_enabled(self, provider: str, enabled: bool, model_name: str | None = None) -> bool:
         with Session(self._db.engine) as session:
             stmt = select(ApiKeyRecord).where(
                 ApiKeyRecord.provider == provider,
@@ -280,7 +278,7 @@ class ApiKeyManager:
             _logger.info(f"{status}API密钥: {provider}/{model_name or 'default'}")
             return True
 
-    def list_all_configs(self) -> List[dict]:
+    def list_all_configs(self) -> list[dict]:
         with Session(self._db.engine) as session:
             stmt = select(ApiKeyRecord)
             result = session.execute(stmt)
@@ -300,7 +298,7 @@ class ApiKeyManager:
                 for r in records
             ]
 
-    def get_config(self, provider: str, model_name: Optional[str] = None) -> Optional[dict]:
+    def get_config(self, provider: str, model_name: str | None = None) -> dict | None:
         with Session(self._db.engine) as session:
             if model_name is not None:
                 stmt = select(ApiKeyRecord).where(
@@ -327,7 +325,7 @@ class ApiKeyManager:
                 "updated_at": record.updated_at,
             }
 
-    def update_config(self, provider: str, model_name: Optional[str] = None, **kwargs) -> bool:
+    def update_config(self, provider: str, model_name: str | None = None, **kwargs) -> bool:
         allowed_fields = {"base_url", "model_name"}
         update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
@@ -353,7 +351,7 @@ class ApiKeyManager:
             return True
 
     def update_supported_types(
-        self, provider: str, supported_types: List[str], model_name: Optional[str] = None
+        self, provider: str, supported_types: list[str], model_name: str | None = None
     ) -> bool:
         """Update supported modal types for an API key.
 
@@ -385,7 +383,7 @@ class ApiKeyManager:
 
 
 # Singleton pattern implementation
-_global_ApiKeyManager_instance: Optional["ApiKeyManager"] = None
+_global_ApiKeyManager_instance: Optional["ApiKeyManager"] = None  # noqa: N816
 _global_lock = threading.Lock()
 
 
@@ -399,7 +397,7 @@ def get_api_key_manager() -> "ApiKeyManager":
     return _global_ApiKeyManager_instance
 
 
-def init_api_key_manager(db: Optional[Database] = None) -> "ApiKeyManager":
+def init_api_key_manager(db: Database | None = None) -> "ApiKeyManager":
     """Initialize the singleton ApiKeyManager with custom parameters."""
     global _global_lock, _global_ApiKeyManager_instance
     with _global_lock:

@@ -54,6 +54,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 
+[tool.ruff.lint.per-file-ignores]
+"plugins/agent_extensions/__init__.py" = ["E501", "UP006", "UP035"]
+"src/agent/agent_integration.py" = ["UP006", "UP035", "UP045"]
+"src/agent/tool_registry.py" = ["UP006", "UP035"]
+
 [[tool.uv.index]]
 url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 

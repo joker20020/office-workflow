@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Skill管理器 - 管理Agent技能包
 
 注意：该类的实例采用模块级单例模式访问。请使用以下函数获取单例：
@@ -9,9 +8,8 @@
 """
 
 import threading
-import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,7 +33,7 @@ class SkillManager:
     - 生成AgentScope配置
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize SkillManager.
 
@@ -62,7 +60,7 @@ class SkillManager:
     def unsubscribe_changes(self, token: int) -> None:
         self._change_notifier.unsubscribe(token)
 
-    def add_skill(self, name: str, path: str, description: Optional[str] = None) -> None:
+    def add_skill(self, name: str, path: str, description: str | None = None) -> None:
         """
         添加Skill到数据库
 
@@ -150,8 +148,8 @@ class SkillManager:
     def update_skill(
         self,
         name: str,
-        path: Optional[str] = None,
-        description: Optional[str] = None,
+        path: str | None = None,
+        description: str | None = None,
     ) -> bool:
         """
         更新Skill配置
@@ -187,7 +185,7 @@ class SkillManager:
             self._change_notifier.notify(action="updated", name=name)
         return True
 
-    def list_skills(self) -> List[dict]:
+    def list_skills(self) -> list[dict]:
         """
         列出所有已注册的Skill
 
@@ -210,7 +208,7 @@ class SkillManager:
                 for record in records
             ]
 
-    def get_skill(self, name: str) -> Optional[dict]:
+    def get_skill(self, name: str) -> dict | None:
         """
         获取指定Skill的配置
 
@@ -235,7 +233,7 @@ class SkillManager:
                 "enabled": record.enabled,
             }
 
-    def get_enabled_skills(self) -> List[dict]:
+    def get_enabled_skills(self) -> list[dict]:
         """
         获取所有已启用的Skill
 
@@ -243,7 +241,7 @@ class SkillManager:
             已启用的Skill列表
         """
         with Session(self._db.engine) as session:
-            result = session.execute(select(SkillRecord).where(SkillRecord.enabled == True))
+            result = session.execute(select(SkillRecord).where(SkillRecord.enabled.is_(True)))
             records = result.scalars().all()
 
             return [
@@ -289,7 +287,7 @@ class SkillManager:
 
         return paths
 
-    def discover_skills(self, directory: Path) -> List[dict]:
+    def discover_skills(self, directory: Path) -> list[dict]:
         """
         扫描目录发现Skill包
 
@@ -372,7 +370,7 @@ class SkillManager:
 
 
 # Singleton pattern implementation
-_global_SkillManager_instance: Optional["SkillManager"] = None
+_global_SkillManager_instance: Optional["SkillManager"] = None  # noqa: N816
 _global_lock = threading.Lock()
 
 
@@ -386,7 +384,7 @@ def get_skill_manager() -> "SkillManager":
     return _global_SkillManager_instance
 
 
-def init_skill_manager(db: Optional[Database] = None) -> "SkillManager":
+def init_skill_manager(db: Database | None = None) -> "SkillManager":
     """Initialize the singleton SkillManager with custom parameters."""
     global _global_SkillManager_instance, _global_lock
     with _global_lock:

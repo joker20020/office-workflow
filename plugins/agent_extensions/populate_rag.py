@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """通过 ProcessGen 后端初始化并填充 RAG 知识库。
 
 后端负责文档分块、嵌入生成、向量存储和资源管理。本脚本只上传
@@ -13,12 +12,10 @@ import os
 import sys
 from pathlib import Path
 
-
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from plugins.agent_extensions import _APIRequester
-
+from plugins.agent_extensions import _APIRequester  # noqa: E402
 
 RAG_BASE_URL = os.environ.get("RAG_BASE_URL", "http://localhost:8050/api/v1")
 COLLECTION_NAME = "process"
@@ -64,7 +61,7 @@ async def upload_sources(requester: _APIRequester):
 
     valid_sources = [
         (path, description)
-        for path, description in zip(IMAGE_PATHS, IMAGE_TEXTS)
+        for path, description in zip(IMAGE_PATHS, IMAGE_TEXTS, strict=True)
         if path.exists()
     ]
     missing_paths = [path for path in IMAGE_PATHS if not path.exists()]

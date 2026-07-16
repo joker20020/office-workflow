@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 智能体扩展插件
 
@@ -1018,8 +1017,6 @@ class _APIRequester:
                  workflow_path="./data/workflow/Flux-Dev-ComfyUI-Workflow.json"):
         self.base_url = base_url.rstrip("/")
         self.data_dir = data_dir
-        import aiohttp
-
         if workflow_path and os.path.exists(workflow_path):
             with open(workflow_path, encoding="utf-8") as f:
                 self.workflow = json.load(f)
@@ -1126,8 +1123,9 @@ class _APIRequester:
         descriptions: List[str],
         subject: str = None,
     ) -> Dict[str, Any]:
-        import aiohttp
         from contextlib import ExitStack
+
+        import aiohttp
 
         if not image_paths or len(image_paths) != len(descriptions):
             raise ValueError("图片和描述数量必须一致且不能为空")
@@ -1280,8 +1278,9 @@ class _APIRequester:
         collection_name: str,
         asset_path: str,
     ) -> bytes:
-        import aiohttp
         from urllib.parse import quote
+
+        import aiohttp
 
         name = self._collection_name(collection_name)
         async with aiohttp.ClientSession() as session:

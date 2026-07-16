@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 对话历史管理 - 支持内存和数据库持久化存储
 
@@ -27,8 +26,7 @@
 import json
 import threading
 from copy import deepcopy
-from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from agentscope.message import (
     AssistantMsg,
@@ -197,15 +195,15 @@ class ChatHistory:
     def __init__(
         self,
         max_messages: int = 100,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         repository: Optional["ChatHistoryRepository"] = None,
     ):
-        self._messages: List[Any] = []  # 存储 Msg 对象
+        self._messages: list[Any] = []  # 存储 Msg 对象
         self._max_messages = max_messages
         self._lock = threading.Lock()
 
-        self._session_id: Optional[str] = session_id
-        self._repository: Optional["ChatHistoryRepository"] = repository
+        self._session_id: str | None = session_id
+        self._repository: ChatHistoryRepository | None = repository
 
         if self._repository and not self._session_id:
             self._session_id = self._repository.create_session()
@@ -214,7 +212,7 @@ class ChatHistory:
             self._is_new_session = not bool(self._session_id)
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         return self._session_id
 
     @property
@@ -223,11 +221,11 @@ class ChatHistory:
 
     def add_message(
         self,
-        role: Optional[str] = None,
-        content: Optional[str] = None,
-        msg: Optional[Any] = None,
-        name: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        role: str | None = None,
+        content: str | None = None,
+        msg: Any | None = None,
+        name: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         添加消息
@@ -278,19 +276,19 @@ class ChatHistory:
                     msg=msg,
                 )
 
-    def get_messages(self) -> List[Any]:
+    def get_messages(self) -> list[Any]:
         """获取所有消息（返回 Msg 对象列表）"""
         with self._lock:
             return self._messages.copy()
 
-    def get_recent_messages(self, count: int = 10) -> List[Any]:
+    def get_recent_messages(self, count: int = 10) -> list[Any]:
         """获取最近N条消息（返回 Msg 对象列表）"""
         with self._lock:
             return (
                 self._messages[-count:] if len(self._messages) >= count else self._messages.copy()
             )
 
-    def get_all_messages_persisted(self) -> List[Dict[str, Any]]:
+    def get_all_messages_persisted(self) -> list[dict[str, Any]]:
         """
         获取所有持久化的消息
 
@@ -326,7 +324,7 @@ class ChatHistory:
 
             return True
 
-    def to_dict_list(self) -> List[Dict[str, Any]]:
+    def to_dict_list(self) -> list[dict[str, Any]]:
         """转换为 JSON-compatible 字典列表。"""
         with self._lock:
             result = []
@@ -376,7 +374,7 @@ class ChatHistory:
         except Exception:
             return False
 
-    def create_new_session(self, title: Optional[str] = None) -> str:
+    def create_new_session(self, title: str | None = None) -> str:
         """
         创建新会话（仅数据库模式）
 

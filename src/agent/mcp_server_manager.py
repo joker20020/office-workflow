@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MCP服务配置管理器
 
 注意：该类的实例采用模块级单例模式访问。请使用以下函数获取单例：
@@ -8,9 +7,9 @@
 - reset_mcp_server_manager_for_testing()
 """
 
-import threading
 import json
-from typing import Optional, List
+import threading
+from typing import Optional
 
 try:
     from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
@@ -33,7 +32,7 @@ _logger = get_logger(__name__)
 class McpServerManager:
     """MCP服务配置管理器"""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize McpServerManager.
 
@@ -66,8 +65,8 @@ class McpServerManager:
         self,
         name: str,
         command: str,
-        args: Optional[List[str]] = None,
-        env: Optional[dict] = None,
+        args: list[str] | None = None,
+        env: dict | None = None,
         timeout: int = 30,
     ) -> None:
         """添加stdio类型MCP服务器"""
@@ -120,7 +119,7 @@ class McpServerManager:
             _logger.info(f"添加http MCP服务器: {name}")
         self._change_notifier.notify(action="added", name=name)
 
-    def get_server(self, name: str) -> Optional[dict]:
+    def get_server(self, name: str) -> dict | None:
         """获取MCP服务器配置"""
         with Session(self._db.engine) as session:
             record = session.execute(
@@ -175,10 +174,10 @@ class McpServerManager:
     def update_stdio_server(
         self,
         name: str,
-        command: Optional[str] = None,
-        args: Optional[List[str]] = None,
-        env: Optional[dict] = None,
-        timeout: Optional[int] = None,
+        command: str | None = None,
+        args: list[str] | None = None,
+        env: dict | None = None,
+        timeout: int | None = None,
     ) -> bool:
         """更新stdio类型MCP服务器配置"""
         with Session(self._db.engine) as session:
@@ -219,8 +218,8 @@ class McpServerManager:
     def update_http_server(
         self,
         name: str,
-        url: Optional[str] = None,
-        transport: Optional[str] = None,
+        url: str | None = None,
+        transport: str | None = None,
     ) -> bool:
         """更新http类型MCP服务器配置"""
         with Session(self._db.engine) as session:
@@ -250,7 +249,7 @@ class McpServerManager:
             self._change_notifier.notify(action="updated", name=name)
         return True
 
-    def list_servers(self) -> List[dict]:
+    def list_servers(self) -> list[dict]:
         """列出所有MCP服务器"""
         with Session(self._db.engine) as session:
             result = session.execute(select(McpServerRecord))
@@ -279,7 +278,7 @@ class McpServerManager:
 
         return data
 
-    def get_agentscope_config(self, name: str) -> Optional[dict]:
+    def get_agentscope_config(self, name: str) -> dict | None:
         """生成AgentScope MCP客户端配置"""
         server = self.get_server(name)
         if not server:
@@ -338,7 +337,7 @@ class McpServerManager:
 
 
 # Singleton pattern implementation
-_global_McpServerManager_instance: Optional["McpServerManager"] = None
+_global_McpServerManager_instance: Optional["McpServerManager"] = None  # noqa: N816
 _global_lock = threading.Lock()
 
 
@@ -352,7 +351,7 @@ def get_mcp_server_manager() -> "McpServerManager":
     return _global_McpServerManager_instance
 
 
-def init_mcp_server_manager(db: Optional[Database] = None) -> "McpServerManager":
+def init_mcp_server_manager(db: Database | None = None) -> "McpServerManager":
     """Initialize the singleton McpServerManager with custom parameters."""
     global _global_lock, _global_McpServerManager_instance
     with _global_lock:

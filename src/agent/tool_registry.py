@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Registry for callable tools exposed to the main AgentScope agent."""
 
 import threading

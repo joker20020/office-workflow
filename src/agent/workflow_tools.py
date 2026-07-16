@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """工作流操作工具集 - Agent通过这些工具操作节点编辑器"""
 
 import json
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
-from PySide6.QtCore import QObject, Signal, QThread
+from PySide6.QtCore import QObject, QThread, Signal
 
 from src.agent.node_formatter import NodeFormatter
-from src.engine.node_engine import NodeEngine, ExecutionResult, _ExecutionCancelled
+from src.engine.node_engine import ExecutionResult, NodeEngine, _ExecutionCancelled
 from src.engine.node_graph import NodeGraph, NodeState
 from src.utils.logger import get_logger
 
@@ -26,7 +25,7 @@ except ImportError:
 _logger = get_logger(__name__)
 
 
-def _make_response(content: Any, success: bool = True, metadata: Optional[Dict] = None) -> Any:
+def _make_response(content: Any, success: bool = True, metadata: dict | None = None) -> Any:
     if AGENTSCOPE_AVAILABLE and ToolResponse is not None:
         content_str = (
             json.dumps(content, ensure_ascii=False) if isinstance(content, dict) else str(content)
@@ -48,8 +47,8 @@ class _AgentWorkflowRunner(QThread):
         super().__init__(parent)
         self._engine = engine
         self._graph = graph
-        self.results: Dict[str, ExecutionResult] = {}
-        self.error_message: Optional[str] = None
+        self.results: dict[str, ExecutionResult] = {}
+        self.error_message: str | None = None
         self._cancel = False
         self._sub_ids: list = []
 
@@ -129,10 +128,10 @@ class WorkflowTools(QObject):
         super().__init__(parent)
         self._graph = node_graph
         self._engine = node_engine
-        self._tools: Dict[str, callable] = {}
-        self._runner: Optional[_AgentWorkflowRunner] = None
-        self._pending_result: Optional[Dict[str, ExecutionResult]] = None
-        self._pending_error: Optional[str] = None
+        self._tools: dict[str, callable] = {}
+        self._runner: _AgentWorkflowRunner | None = None
+        self._pending_result: dict[str, ExecutionResult] | None = None
+        self._pending_error: str | None = None
         self._register_tools()
 
     def _register_tools(self) -> None:
@@ -151,14 +150,14 @@ class WorkflowTools(QObject):
             "clear_workflow": self._tool_clear_workflow,
         }
 
-    def get_all_tools(self) -> List[callable]:
+    def get_all_tools(self) -> list[callable]:
         return list(self._tools.values())
 
-    def get_tool(self, name: str) -> Optional[callable]:
+    def get_tool(self, name: str) -> Optional[callable]:  # noqa: UP045
         return self._tools.get(name)
 
     def _tool_create_node(
-        self, node_type: str, position: Optional[Tuple[float, float]] = None
+        self, node_type: str, position: tuple[float, float] | None = None
     ) -> Any:
         """创建一个新节点并添加到工作流中。
 
@@ -176,7 +175,8 @@ class WorkflowTools(QObject):
             node = self._graph.add_node(node_type, position=position)
 
             _logger.info(
-                f"[Thread: {threading.current_thread().name}] 创建节点成功: {node_type}, id={node.id[:8]}..., "
+                f"[Thread: {threading.current_thread().name}] 创建节点成功: "
+                f"{node_type}, id={node.id[:8]}..., "
                 f"graph节点数: {len(self._graph.nodes)}"
             )
             self.graph_changed.emit()
@@ -245,7 +245,10 @@ class WorkflowTools(QObject):
                 {
                     "success": True,
                     "connection_id": connection.id,
-                    "message": f"已连接: {source_node_id}:{source_port} -> {target_node_id}:{target_port}",
+                    "message": (
+                        f"已连接: {source_node_id}:{source_port} -> "
+                        f"{target_node_id}:{target_port}"
+                    ),
                 }
             )
         except Exception as e:
@@ -493,7 +496,7 @@ class WorkflowTools(QObject):
             _logger.error(f"获取节点信息失败: {e}", exc_info=True)
             return _make_response({"success": False, "error": str(e)}, success=False)
 
-    def _tool_search_nodes(self, query: str, category: Optional[str] = None) -> Any:
+    def _tool_search_nodes(self, query: str, category: str | None = None) -> Any:
         """按关键词搜索节点类型。
 
         Args:

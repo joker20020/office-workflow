@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
 """会话历史管理测试 - 使用 AgentScope Msg 对象"""
 
 import logging
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -288,7 +286,7 @@ class TestChatHistoryDatabaseMode:
         history.add_message("user", "第一个会话的消息")
         first_session_id = history.session_id
 
-        new_session_id = history.create_new_session("第二个会话")
+        history.create_new_session("第二个会话")
         history.add_message("user", "第二个会话的消息")
 
         result = history.set_session(first_session_id)

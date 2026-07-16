@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentScope 2.0 event-stream reconstruction contracts."""
 
 import asyncio

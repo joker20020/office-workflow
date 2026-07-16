@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Agent模块
 
@@ -24,14 +23,14 @@ Agent模块
     response = agent.chat("帮我创建一个文本处理工作流")
 """
 
-from src.agent.api_key_manager import ApiKeyManager
-from src.agent.node_formatter import NodeFormatter
-from src.agent.workflow_tools import WorkflowTools
 from src.agent.agent_integration import AgentIntegration
+from src.agent.api_key_manager import ApiKeyManager
 from src.agent.chat_history import ChatHistory
 from src.agent.mcp_server_manager import McpServerManager
+from src.agent.node_formatter import NodeFormatter
 from src.agent.skill_manager import SkillManager
 from src.agent.tool_registry import AgentToolRegistry
+from src.agent.workflow_tools import WorkflowTools
 
 __all__ = [
     "ApiKeyManager",

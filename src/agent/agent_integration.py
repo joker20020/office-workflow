@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentScope框架集成层"""
 
 import asyncio
@@ -52,7 +51,7 @@ try:
     AGENTSCOPE_AVAILABLE = True
     _logger_agent = __import__("src.utils.logger", fromlist=["get_logger"]).get_logger(__name__)
     _logger_agent.info("AgentScope框架加载成功")
-except ImportError as e:
+except ImportError:
     AGENTSCOPE_AVAILABLE = False
     Agent = None
     ReActConfig = None
@@ -163,6 +162,7 @@ class AgentIntegration:
         self._last_response_interrupted: bool = False
         self._exposure_change_lock = threading.Lock()
         self._exposure_rebuild_dirty = False
+        self._exposure_rebuild_fail_closed = False
         self._exposure_rebuild_in_progress = False
         self._exposure_rebuild_idle = threading.Event()
         self._exposure_rebuild_idle.set()
@@ -406,6 +406,19 @@ class AgentIntegration:
             if self._shutdown_started or not self._initialized:
                 return
             self._exposure_rebuild_dirty = True
+            self._exposure_rebuild_fail_closed = (
+                self._exposure_rebuild_fail_closed
+                or event.action
+                in {
+                    "deleted",
+                    "disabled",
+                    "removed",
+                    "replaced",
+                    "revoked",
+                    "unregistered",
+                    "updated",
+                }
+            )
             idle = self._exposure_rebuild_idle
             if self._exposure_rebuild_in_progress:
                 owns_drain = False
@@ -431,10 +444,14 @@ class AgentIntegration:
                 task = asyncio.create_task(drain)
             except Exception:
                 drain.close()
-                with self._exposure_change_lock:
-                    self._exposure_rebuild_dirty = False
-                    self._exposure_rebuild_in_progress = False
-                    self._exposure_rebuild_idle.set()
+                clients = self._reset_failed_exposure_schedule(defer_idle=True)
+                if clients:
+                    loop = asyncio.get_running_loop()
+                    cleanup_task = loop.create_task(
+                        self._close_failed_schedule_clients(clients),
+                    )
+                    self._exposure_rebuild_task = cleanup_task
+                    cleanup_task.add_done_callback(self._clear_exposure_rebuild_task)
                 _logger.exception("Agent exposure rebuild task scheduling failed")
                 return
             self._exposure_rebuild_task = task
@@ -444,11 +461,37 @@ class AgentIntegration:
         try:
             self._async_runtime.run(self._drain_exposure_rebuilds())
         except Exception:
-            with self._exposure_change_lock:
-                self._exposure_rebuild_dirty = False
-                self._exposure_rebuild_in_progress = False
-                self._exposure_rebuild_idle.set()
+            clients = self._reset_failed_exposure_schedule(defer_idle=False)
+            if any(client.is_stateful is True for client in clients):
+                _logger.error(
+                    "Stateful MCP clients detached without close because the owning "
+                    "Agent runtime is unavailable",
+                )
             _logger.exception("Agent exposure rebuild drain failed")
+
+    def _reset_failed_exposure_schedule(
+        self,
+        *,
+        defer_idle: bool,
+    ) -> list[MCPClient]:
+        with self._exposure_change_lock:
+            fail_closed = self._exposure_rebuild_fail_closed
+            clients = self._detach_published_runtime_state() if fail_closed else []
+            self._exposure_rebuild_dirty = False
+            self._exposure_rebuild_fail_closed = False
+            self._exposure_rebuild_in_progress = False
+            if not (defer_idle and clients):
+                self._exposure_rebuild_idle.set()
+            return clients
+
+    async def _close_failed_schedule_clients(
+        self,
+        clients: list[MCPClient],
+    ) -> None:
+        try:
+            await self._drain_mcp_clients(clients)
+        finally:
+            self._exposure_rebuild_idle.set()
 
     def _clear_exposure_rebuild_task(self, task: asyncio.Task[Any]) -> None:
         if self._exposure_rebuild_task is task:
@@ -466,11 +509,14 @@ class AgentIntegration:
                 with self._exposure_change_lock:
                     if self._shutdown_started:
                         self._exposure_rebuild_dirty = False
+                        self._exposure_rebuild_fail_closed = False
                         self._exposure_rebuild_in_progress = False
                         self._exposure_rebuild_idle.set()
                         transitioned_to_idle = True
                         return
                     self._exposure_rebuild_dirty = False
+                    fail_closed = self._exposure_rebuild_fail_closed
+                    self._exposure_rebuild_fail_closed = False
 
                 try:
                     api_key = self._api_manager.get_key(
@@ -481,15 +527,20 @@ class AgentIntegration:
                         _logger.error(
                             "Agent exposure rebuild skipped: current API key is unavailable"
                         )
+                        if fail_closed:
+                            await self._fail_closed_published_runtime()
                     else:
                         await self._rebuild_agent_runtime_impl(api_key=api_key)
                 except Exception:
                     _logger.exception("Agent exposure rebuild failed")
+                    if fail_closed:
+                        await self._fail_closed_published_runtime()
 
                 with self._exposure_change_lock:
                     if not self._shutdown_started and self._exposure_rebuild_dirty:
                         continue
                     self._exposure_rebuild_dirty = False
+                    self._exposure_rebuild_fail_closed = False
                     self._exposure_rebuild_in_progress = False
                     self._exposure_rebuild_idle.set()
                     transitioned_to_idle = True
@@ -498,8 +549,16 @@ class AgentIntegration:
             if not transitioned_to_idle:
                 with self._exposure_change_lock:
                     self._exposure_rebuild_dirty = False
+                    self._exposure_rebuild_fail_closed = False
                     self._exposure_rebuild_in_progress = False
                     self._exposure_rebuild_idle.set()
+
+    async def _fail_closed_published_runtime(self) -> None:
+        async with self._get_lifecycle_lock():
+            if not self._initialized:
+                return
+            await self._settle_reply_work()
+            await self._close_published_mcp_clients()
 
     def _get_lifecycle_lock(self) -> asyncio.Lock:
         lock = getattr(self, "_lifecycle_lock", None)
@@ -773,7 +832,7 @@ class AgentIntegration:
                             await self._close_mcp_clients_cancellation_safe([client])
                         )
                         if parent_cancellation is not None:
-                            raise parent_cancellation
+                            raise parent_cancellation from error
             return clients
         except BaseException:
             await self._close_mcp_clients_cancellation_safe(clients)
@@ -847,7 +906,7 @@ class AgentIntegration:
             return runtime.run(
                 self._chat_impl(message, timeout_as_request_timeout=True),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return "请求超时，请检查网络连接或API配置"
         except Exception as error:
             _logger.error(f"Agent对话失败: {error}", exc_info=True)

@@ -1,7 +1,5 @@
-# -*- coding: utf-8 -*-
 """节点信息格式化器 - 将NodeDefinition转换为Agent可理解的文本"""
 
-from typing import List, Union
 
 from src.engine.definitions import NodeDefinition
 
@@ -10,7 +8,7 @@ class NodeFormatter:
     """将节点定义格式化为Agent可理解的文本描述"""
 
     @staticmethod
-    def format_for_agent(node_def: Union[NodeDefinition, dict]) -> str:
+    def format_for_agent(node_def: NodeDefinition | dict) -> str:
         """
         格式化单个节点定义为可读文本
 
@@ -78,7 +76,7 @@ class NodeFormatter:
         return "\n".join(lines)
 
     @staticmethod
-    def format_all_for_agent(node_defs: List[NodeDefinition]) -> str:
+    def format_all_for_agent(node_defs: list[NodeDefinition]) -> str:
         """
         格式化所有节点定义为可读文本
 
@@ -98,7 +96,7 @@ class NodeFormatter:
         return "\n".join(sections)
 
     @staticmethod
-    def get_system_prompt(node_defs: List[NodeDefinition]) -> str:
+    def get_system_prompt(node_defs: list[NodeDefinition]) -> str:
         """
         生成Agent的系统提示词
 

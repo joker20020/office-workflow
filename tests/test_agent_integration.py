@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentIntegration 单元测试"""
 
 import asyncio
@@ -7,6 +6,7 @@ import concurrent.futures
 import importlib.util
 import threading
 import time
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
@@ -29,6 +29,18 @@ from src.agent.tool_registry import AgentToolRegistry
 from src.core.permission_manager import Permission, PermissionManager
 from src.engine.node_engine import NodeEngine
 from src.storage.database import Database
+
+
+def test_migration_ruff_exceptions_are_narrow_and_reviewed():
+    config = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    lint_config = config["tool"]["ruff"]["lint"]
+
+    assert "ignore" not in lint_config
+    assert lint_config["per-file-ignores"] == {
+        "plugins/agent_extensions/__init__.py": ["E501", "UP006", "UP035"],
+        "src/agent/agent_integration.py": ["UP006", "UP035", "UP045"],
+        "src/agent/tool_registry.py": ["UP006", "UP035"],
+    }
 
 
 class _LifecycleClient:
@@ -956,6 +968,25 @@ def test_exposure_submit_failure_restores_idle_state(agent):
         agent._exposure_rebuild_idle.set()
 
 
+def test_reducing_exposure_submit_failure_unpublishes_without_cross_loop_close(agent):
+    _publishable_agent_runtime(agent)
+    client = _LifecycleClient("stopped-runtime", stateful=True, events=[])
+    agent._mcp_clients = [client]
+    agent._async_runtime.stop()
+
+    agent._on_exposure_change(
+        SimpleNamespace(source="permissions", action="revoked", name="owned-plugin"),
+    )
+
+    assert agent._exposure_rebuild_idle.is_set()
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._initialized is False
+    assert agent._mcp_clients == []
+    # The owning loop is already stopped, so a cross-loop close would be unsafe.
+    assert client.close_calls == 0
+
+
 def test_runtime_thread_exposure_change_schedules_without_sync_wait(
     agent,
     monkeypatch,
@@ -1043,6 +1074,52 @@ def test_runtime_thread_task_creation_failure_restores_idle_and_isolates_callbac
         agent._exposure_rebuild_dirty = False
         agent._exposure_rebuild_in_progress = False
         agent._exposure_rebuild_idle.set()
+
+
+def test_runtime_thread_reducing_task_creation_failure_unpublishes_and_closes_clients(
+    agent,
+    monkeypatch,
+):
+    _publishable_agent_runtime(agent)
+    events = []
+    client = _LifecycleClient("runtime-owned", stateful=True, events=events)
+    agent._mcp_clients = [client]
+    real_create_task = asyncio.create_task
+    attempts = 0
+
+    def create_task(coroutine):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("task creation rejected")
+        return real_create_task(coroutine)
+
+    monkeypatch.setattr(agent_integration.asyncio, "create_task", create_task)
+
+    async def revoke_on_runtime():
+        agent._on_exposure_change(
+            SimpleNamespace(
+                source="permissions",
+                action="revoked",
+                name="owned-plugin",
+            ),
+        )
+        return "callback-isolated"
+
+    assert agent._async_runtime.submit(revoke_on_runtime()).result(timeout=2) == (
+        "callback-isolated"
+    )
+    deadline = time.time() + 2
+    while client.close_calls == 0 and time.time() < deadline:
+        time.sleep(0.001)
+
+    assert agent._exposure_rebuild_idle.is_set()
+    assert agent._agent is None
+    assert agent._toolkit is None
+    assert agent._initialized is False
+    assert agent._mcp_clients == []
+    assert events == ["close:runtime-owned"]
+    assert client.loop_observations[0][1] is agent._async_runtime._loop
 
 
 def test_manager_replacement_rebinds_exposure_subscription(
@@ -1199,6 +1276,51 @@ def test_permission_changes_automatically_filter_and_restore_owned_group(
     finally:
         integration.shutdown()
         registry.unregister("owned-automatic")
+        AgentToolRegistry._reset_for_testing()
+
+
+def test_permission_revocation_without_current_key_fails_closed(
+    api_key_manager,
+    node_engine,
+    mcp_manager,
+    skill_manager,
+    monkeypatch,
+):
+    AgentToolRegistry._reset_for_testing()
+    registry = AgentToolRegistry.instance()
+    permissions = PermissionManager()
+    permissions.grant("owned-plugin", Permission.AGENT_TOOL)
+    integration = AgentIntegration(
+        api_key_manager,
+        node_engine,
+        mcp_manager=mcp_manager,
+        skill_manager=skill_manager,
+        permission_manager=permissions,
+    )
+
+    def owned_tool():
+        return "owned"
+
+    monkeypatch.setattr(integration._api_manager, "get_key", Mock(return_value=""))
+    integration._agent = SimpleNamespace(state=AgentState())
+    integration._toolkit = SimpleNamespace(
+        tools=[SimpleNamespace(_func=owned_tool)],
+    )
+    integration._initialized = True
+    integration._provider = "openai"
+    integration._model_name = "model"
+
+    try:
+        registry.register("owned-missing-key", [owned_tool], owner_name="owned-plugin")
+
+        assert permissions.revoke("owned-plugin", Permission.AGENT_TOOL) is True
+        assert integration._exposure_rebuild_idle.is_set()
+        assert integration._agent is None
+        assert integration._toolkit is None
+        assert integration._initialized is False
+    finally:
+        integration.shutdown()
+        registry.unregister("owned-missing-key")
         AgentToolRegistry._reset_for_testing()
 
 

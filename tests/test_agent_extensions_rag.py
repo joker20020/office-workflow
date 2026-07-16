@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """agent_extensions 的 ProcessGen RAG HTTP 契约测试。"""
 
 import asyncio
@@ -13,14 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import aiohttp
 import pytest
-
-import plugins.agent_extensions as agent_extensions
-from plugins.agent_extensions import (
-    AgentExtensionsPlugin,
-    AgentExtensionTools,
-    _APIRequester,
-)
-
 from agentscope.credential import (
     DashScopeCredential,
     DeepSeekCredential,
@@ -47,9 +38,20 @@ from agentscope.permission import (
 from agentscope.state import AgentState, Task
 from agentscope.tool import (
     FunctionTool as RealFunctionTool,
-    Toolkit as RealToolkit,
+)
+from agentscope.tool import (
     ToolChunk,
     ToolResponse,
+)
+from agentscope.tool import (
+    Toolkit as RealToolkit,
+)
+
+import plugins.agent_extensions as agent_extensions
+from plugins.agent_extensions import (
+    AgentExtensionsPlugin,
+    AgentExtensionTools,
+    _APIRequester,
 )
 
 
@@ -533,16 +535,16 @@ async def test_rerank_double_404_keeps_text_and_original_score(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_agent_passes_collection_to_rerank(monkeypatch):
-    class StopAfterRerank(Exception):
+    class StopAfterRerankError(Exception):
         pass
 
     tools = AgentExtensionTools()
     candidates = [{"id": 1, "type": "text", "text": "内容"}]
     tools._search_rag_candidates = AsyncMock(return_value=candidates)
-    tools._rerank_rag_candidates = AsyncMock(side_effect=StopAfterRerank)
+    tools._rerank_rag_candidates = AsyncMock(side_effect=StopAfterRerankError)
     monkeypatch.setattr(agent_extensions, "AGENTSCOPE_AVAILABLE", True)
 
-    with pytest.raises(StopAfterRerank):
+    with pytest.raises(StopAfterRerankError):
         await tools._process_agent_async("任务", None, "process", 5)
 
     tools._rerank_rag_candidates.assert_awaited_once_with(
