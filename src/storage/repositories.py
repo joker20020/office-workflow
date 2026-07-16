@@ -37,6 +37,7 @@ from src.storage.models import (
     WorkflowRecord,
     ChatSessionRecord,
     ChatMessageRecord,
+    ArtifactRecord,
     PluginRecord,
     PluginPermissionRecord,
     SettingRecord,
@@ -45,6 +46,51 @@ from src.core.permission_manager import Permission
 from src.utils.logger import get_logger
 
 _logger = get_logger(__name__)
+
+
+class ArtifactRepository:
+    """Database-only CRUD operations for verified session artifact records."""
+
+    def __init__(self, database: Database):
+        self._database = database
+
+    def create(
+        self,
+        session_id: str,
+        category: str,
+        filename: str,
+        path: str,
+    ) -> ArtifactRecord:
+        with self._database.session() as session:
+            record = ArtifactRecord(
+                session_id=session_id,
+                category=category,
+                filename=filename,
+                path=path,
+            )
+            session.add(record)
+            session.flush()
+            session.expunge(record)
+            return record
+
+    def list_session(self, session_id: str) -> List[ArtifactRecord]:
+        with self._database.session() as session:
+            records = session.execute(
+                select(ArtifactRecord)
+                .where(ArtifactRecord.session_id == session_id)
+                .order_by(ArtifactRecord.created_at, ArtifactRecord.id)
+            ).scalars().all()
+            for record in records:
+                session.expunge(record)
+            return records
+
+    def delete_session(self, session_id: str) -> int:
+        """Delete only database records; corresponding files are deliberately retained."""
+        with self._database.session() as session:
+            result = session.execute(
+                delete(ArtifactRecord).where(ArtifactRecord.session_id == session_id)
+            )
+            return result.rowcount
 
 
 class WorkflowRepository:

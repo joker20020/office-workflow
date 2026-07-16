@@ -370,6 +370,12 @@ class ChatSessionRecord(Base):
         order_by="ChatMessageRecord.timestamp",
     )
 
+    artifacts: Mapped[List["ArtifactRecord"]] = relationship(
+        "ArtifactRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<ChatSessionRecord {self.id[:8]}...>"
 
@@ -416,3 +422,30 @@ class ChatMessageRecord(Base):
 
     def __repr__(self) -> str:
         return f"<ChatMessageRecord {self.session_id[:8]}... [{self.role}]>"
+
+
+class ArtifactRecord(Base):
+    """A verified artifact file associated with a chat session."""
+
+    __tablename__ = "artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.now,
+    )
+
+    session: Mapped["ChatSessionRecord"] = relationship(
+        "ChatSessionRecord",
+        back_populates="artifacts",
+    )
