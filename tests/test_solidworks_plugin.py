@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -263,6 +264,74 @@ async def test_cancellation_closes_client_exactly_once_and_propagates(monkeypatc
         await task
 
     assert FakeClient.instance.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_public_stream_close_cancels_work_and_closes_client_once(monkeypatch):
+    module = _module()
+    release = threading.Event()
+    cancelled = threading.Event()
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            pass
+
+    class FakeClient:
+        instance = None
+
+        def __init__(self, **kwargs):
+            self.connected = False
+            self.close_count = 0
+            FakeClient.instance = self
+
+        async def connect(self):
+            self.connected = True
+
+        async def close(self):
+            self.close_count += 1
+
+    class FakeToolkit:
+        def __init__(self, *, mcps):
+            assert mcps[0].connected
+
+    class BlockingAgent:
+        name = "SolidWorksAgent"
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def reply_stream(self, *, inputs):
+            yield TextBlockDeltaEvent(
+                reply_id="reply-1",
+                block_id="text-1",
+                delta="working",
+            )
+            try:
+                while not release.is_set():
+                    await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(module, "StdioMCPConfig", FakeConfig)
+    monkeypatch.setattr(module, "MCPClient", FakeClient)
+    monkeypatch.setattr(module, "Toolkit", FakeToolkit)
+    monkeypatch.setattr(module, "Agent", BlockingAgent)
+    monkeypatch.setattr(module, "_build_model", lambda: "model")
+
+    stream_tool = module.SolidWorksAgentTools().get_all_tools()[0]
+    stream = stream_tool("build it")
+    try:
+        await asyncio.wait_for(anext(stream), timeout=2)
+        await stream.aclose()
+        assert cancelled.wait(timeout=1)
+        assert FakeClient.instance.close_count == 1
+    finally:
+        release.set()
+        for _ in range(100):
+            if FakeClient.instance.close_count:
+                break
+            await asyncio.sleep(0.01)
 
 
 def test_public_tool_returns_tool_response_and_rejects_malformed_markdown(monkeypatch):

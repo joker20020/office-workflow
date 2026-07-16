@@ -293,8 +293,29 @@ class SolidWorksAgentTools:
         @functools.wraps(sync_tool)
         async def streaming(*args, **kwargs):
             progress: queue.Queue = queue.Queue()
-            token = _PROGRESS_SINK.set(progress.put)
-            task = asyncio.create_task(asyncio.to_thread(sync_tool, *args, **kwargs))
+
+            async def run_tool() -> ToolResponse:
+                token = _PROGRESS_SINK.set(progress.put)
+                try:
+                    try:
+                        result = await self._solidworks_model_async(*args, **kwargs)
+                        result = _validate_result(result)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        result = _failure(f"SolidWorks execution failed: {exc}")
+                    return ToolResponse(
+                        content=[TextBlock(text=str(result))],
+                        state=(
+                            ToolResultState.SUCCESS
+                            if result.success
+                            else ToolResultState.ERROR
+                        ),
+                    )
+                finally:
+                    _PROGRESS_SINK.reset(token)
+
+            task = asyncio.create_task(run_tool())
             try:
                 while not task.done() or not progress.empty():
                     while not progress.empty():
@@ -306,7 +327,12 @@ class SolidWorksAgentTools:
                         await asyncio.wait({task}, timeout=0.05)
                 yield await task
             finally:
-                _PROGRESS_SINK.reset(token)
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
         streaming.__name__ = "tool_solidworks_model"
         return [streaming]
