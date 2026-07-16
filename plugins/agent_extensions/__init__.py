@@ -8,13 +8,16 @@
 - comfyui_agent_tool: 图像生成 — AgentScope 2 Agent细化提示词后调用ComfyUI生成图像
 """
 
+import ast
 import asyncio
 import base64
+import contextvars
 import functools
 import hashlib
 import json
 import math
 import os
+import queue
 import re
 import stat
 import tempfile
@@ -24,8 +27,12 @@ from typing import Any, Dict, List
 
 from src.agent.agent_integration import (
     SUBAGENT_EVENT_PREFIX as SUBAGENT_EVENT_PREFIX,
+)
+from src.agent.agent_integration import (
     encode_subagent_event,
 )
+from src.core.artifact_context import current_artifact_context
+from src.core.artifact_paths import ArtifactCategory, ArtifactPathPolicy
 from src.core.permission_manager import Permission, PermissionSet
 from src.core.plugin_base import PluginBase
 from src.utils.logger import get_logger
@@ -37,8 +44,18 @@ try:
         DeepSeekCredential,
         OpenAICredential,
     )
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyStartEvent,
+        TextBlockDeltaEvent,
+        ToolCallDeltaEvent,
+        ToolCallStartEvent,
+        ToolResultStartEvent,
+        ToolResultTextDeltaEvent,
+    )
     from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
     from agentscope.message import (
+        AssistantMsg,
         Base64Source,
         DataBlock,
         TextBlock,
@@ -82,6 +99,77 @@ except ImportError:
 _logger = get_logger(__name__)
 
 TOOL_GROUP_NAME = "agent_extensions"
+
+_SUBAGENT_PROGRESS_SINK: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "subagent_progress_sink",
+    default=None,
+)
+_LAST_SUBAGENT_TOOL_CALL_ID: contextvars.ContextVar[str | None] = (
+    contextvars.ContextVar("last_subagent_tool_call_id", default=None)
+)
+_TOOL_CALL_ID_UNSET = object()
+
+
+async def _reply_subagent_with_progress(
+    agent,
+    inputs,
+    sink=None,
+    on_tool_result_start=None,
+):
+    """Consume a subagent reply stream and forward only public event fields."""
+    reply_stream = getattr(agent, "reply_stream", None)
+    if reply_stream is None:
+        return await agent.reply(inputs)
+    event_sink = sink or _SUBAGENT_PROGRESS_SINK.get()
+    agent_name = getattr(agent, "name", "Subagent")
+    reply = AssistantMsg(name=agent_name, content=[])
+    tool_names: dict[str, str] = {}
+    _LAST_SUBAGENT_TOOL_CALL_ID.set(None)
+    async for event in reply_stream(inputs=inputs):
+        if isinstance(event, ReplyStartEvent):
+            reply.id = event.reply_id
+        reply.append_event(event)
+        public = None
+        if isinstance(event, ToolCallStartEvent):
+            _LAST_SUBAGENT_TOOL_CALL_ID.set(event.tool_call_id)
+            tool_names[event.tool_call_id] = event.tool_call_name
+            public = {
+                "kind": "tool_call",
+                "tool": event.tool_call_name,
+                "text": "tool call started",
+            }
+        elif isinstance(event, ToolCallDeltaEvent):
+            public = {
+                "kind": "tool_call",
+                "tool": tool_names.get(event.tool_call_id, "tool"),
+                "text": event.delta,
+            }
+        elif isinstance(event, ToolResultStartEvent):
+            _LAST_SUBAGENT_TOOL_CALL_ID.set(event.tool_call_id)
+            tool_names[event.tool_call_id] = event.tool_call_name
+            if on_tool_result_start is not None:
+                on_tool_result_start(event.tool_call_id)
+        elif isinstance(event, ToolResultTextDeltaEvent):
+            public = {
+                "kind": "tool_result",
+                "tool": tool_names.get(event.tool_call_id, "tool"),
+                "text": event.delta,
+            }
+        elif isinstance(event, TextBlockDeltaEvent):
+            public = {
+                "kind": "text",
+                "title": agent_name,
+                "text": event.delta,
+            }
+        elif isinstance(event, ReplyEndEvent):
+            public = {
+                "kind": "complete",
+                "title": agent_name,
+                "text": "subagent reply completed",
+            }
+        if public is not None and event_sink is not None:
+            event_sink(public)
+    return reply
 
 
 class _SubagentResult(str):
@@ -270,6 +358,223 @@ class _TaskObservationMiddleware(ToolMiddlewareBase):
                     else [],
                 },
             )
+
+
+class _ArtifactPathGuardMiddleware(ToolMiddlewareBase):
+    """Reject Blender MCP file operations outside session artifact roots."""
+
+    _PATH_KEYS = ("path", "file", "directory", "folder", "output", "export")
+    _WRITE_HINTS = ("save", "export", "render", "write", "stl")
+    _WINDOWS_ABSOLUTE = re.compile(r"[A-Za-z]:[\\/][^\"'\r\n]+")
+    _DANGEROUS_MODULES = {
+        "builtins",
+        "ctypes",
+        "importlib",
+        "io",
+        "os",
+        "pathlib",
+        "shutil",
+        "subprocess",
+        "tempfile",
+    }
+    _DANGEROUS_CALLS = {"__import__", "compile", "eval", "exec", "open"}
+    _DANGEROUS_METHODS = {
+        "copy",
+        "copy2",
+        "copyfile",
+        "mkdir",
+        "move",
+        "popen",
+        "remove",
+        "rename",
+        "replace",
+        "rmdir",
+        "run",
+        "system",
+        "touch",
+        "unlink",
+        "write_bytes",
+        "write_text",
+    }
+
+    def __init__(self, allowed_roots: Any):
+        self._allowed_roots = tuple(Path(root).resolve() for root in allowed_roots)
+
+    def _candidate_paths(self, value: Any, key: str = "") -> list[str]:
+        candidates: list[str] = []
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                candidates.extend(self._candidate_paths(child_value, str(child_key)))
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                candidates.extend(self._candidate_paths(child, key))
+        elif isinstance(value, str):
+            if any(hint in key.lower() for hint in self._PATH_KEYS):
+                candidates.append(value)
+            candidates.extend(self._WINDOWS_ABSOLUTE.findall(value))
+        return list(dict.fromkeys(candidates))
+
+    def _validate(self, tool_name: str, input_kwargs: dict[str, Any]) -> None:
+        code = input_kwargs.get("code")
+        code_paths: list[str] = []
+        code_writes_file = False
+        if "execute_blender_code" in tool_name.lower() and isinstance(code, str):
+            code_paths, code_writes_file = self._validate_blender_code(code)
+        candidates = (
+            code_paths
+            if "execute_blender_code" in tool_name.lower()
+            else self._candidate_paths(input_kwargs)
+        )
+        serialized = json.dumps(input_kwargs, ensure_ascii=False, default=str).lower()
+        writes_file = code_writes_file or (
+            "execute_blender_code" not in tool_name.lower()
+            and any(
+                hint in tool_name.lower() or hint in serialized
+                for hint in self._WRITE_HINTS
+            )
+        )
+        if writes_file and not candidates:
+            raise ValueError(
+                "Blender output path must be an absolute path inside the active session"
+            )
+        for candidate in candidates:
+            path = Path(candidate).expanduser()
+            if not path.is_absolute():
+                raise ValueError(
+                    "Blender output path must be absolute and inside the active session"
+                )
+            resolved = path.resolve()
+            if not any(resolved.is_relative_to(root) for root in self._allowed_roots):
+                raise ValueError(
+                    f"Blender output path is outside the active session: {resolved}"
+                )
+
+    def _validate_blender_code(self, code: str) -> tuple[list[str], bool]:
+        """Validate actual Blender output arguments, not unrelated literals."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as exc:
+            raise ValueError("Blender Python code must be valid") from exc
+        output_paths: list[str] = []
+        writes_file = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                modules = (
+                    [alias.name for alias in node.names]
+                    if isinstance(node, ast.Import)
+                    else [node.module or ""]
+                )
+                if any(
+                    module.split(".", 1)[0] in self._DANGEROUS_MODULES
+                    for module in modules
+                ):
+                    raise ValueError(
+                        "Blender code may not import filesystem or process modules"
+                    )
+            if isinstance(node, ast.Call):
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in self._DANGEROUS_CALLS
+                ):
+                    raise ValueError(
+                        "Blender code may not use generic Python file execution APIs"
+                    )
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr in self._DANGEROUS_METHODS
+                ):
+                    raise ValueError(
+                        "Blender code may not use generic filesystem operations"
+                    )
+                function_name = self._attribute_name(node.func).lower()
+                output_call = any(
+                    hint in function_name for hint in self._WRITE_HINTS
+                )
+                if "render" in function_name:
+                    write_still = next(
+                        (
+                            keyword.value
+                            for keyword in node.keywords
+                            if keyword.arg == "write_still"
+                        ),
+                        None,
+                    )
+                    output_call = not (
+                        isinstance(write_still, ast.Constant)
+                        and write_still.value is False
+                    )
+                if output_call:
+                    writes_file = True
+                    path_nodes = [
+                        keyword.value
+                        for keyword in node.keywords
+                        if keyword.arg
+                        and any(
+                            key in keyword.arg.lower() for key in self._PATH_KEYS
+                        )
+                    ]
+                    if not path_nodes and "write" in function_name and node.args:
+                        path_nodes = [node.args[0]]
+                    for path_node in path_nodes:
+                        output_paths.append(self._static_output_path(path_node))
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                if any(
+                    self._attribute_name(target).lower().endswith(".render.filepath")
+                    for target in targets
+                ):
+                    writes_file = True
+                    output_paths.append(self._static_output_path(node.value))
+        if writes_file and not output_paths:
+            raise ValueError(
+                "Blender file output must use a static absolute filepath argument"
+            )
+        return list(dict.fromkeys(output_paths)), writes_file
+
+    @staticmethod
+    def _attribute_name(node: ast.AST) -> str:
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        return ".".join(reversed(parts))
+
+    @staticmethod
+    def _static_output_path(node: ast.AST) -> str:
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            raise ValueError(
+                "Blender file output path must be a static absolute string"
+            )
+        return node.value
+
+    async def on_tool_call(self, tool, input_kwargs, next_handler):
+        self._validate(getattr(tool, "name", "blender_tool"), input_kwargs)
+        async for chunk in next_handler(**input_kwargs):
+            yield chunk
+
+
+async def _blender_tools_with_path_guard(
+    client: Any,
+    allowed_roots: Any,
+) -> list[Any]:
+    """Return the client's MCP tools with session path guards attached."""
+    list_tools = getattr(client, "list_tools", None)
+    if list_tools is None:
+        return []
+    guard = _ArtifactPathGuardMiddleware(allowed_roots)
+    tools = await list_tools()
+    for tool in tools:
+        middlewares = list(getattr(tool, "_middlewares", []))
+        if not any(
+            isinstance(item, _ArtifactPathGuardMiddleware)
+            for item in middlewares
+        ):
+            tool._middlewares = [guard, *middlewares]
+    return tools
 
 
 def _validate_subagent_handoff(
@@ -572,7 +877,11 @@ class _TrustedProcessRoot:
             pass
 
 
-def _make_process_file_tools(output_root: Any, records: Any = None):
+def _make_process_file_tools(
+    output_root: Any,
+    records: Any = None,
+    on_verified: Any = None,
+):
     """Bind ProcessAgent JSON file capabilities to one resolved output root."""
     requested_root = Path(output_root).expanduser()
     requested_root.mkdir(parents=True, exist_ok=True)
@@ -769,6 +1078,8 @@ def _make_process_file_tools(output_root: Any, records: Any = None):
                 "identity": installed_identity,
                 "signature": artifact_signature(installed_identity),
             }
+            if on_verified is not None:
+                on_verified(target)
         except Exception as exc:
             if cleanup_path is not None:
                 cleanup_path.unlink(missing_ok=True)
@@ -922,7 +1233,9 @@ def _run_async(coro):
         5.0,
     )
 
-    def _target():
+    caller_context = contextvars.copy_context()
+
+    def _target_inner():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         task = loop.create_task(coro)
@@ -993,7 +1306,10 @@ def _run_async(coro):
                 asyncio.set_event_loop(None)
                 loop.close()
 
-    worker = threading.Thread(target=_target, daemon=True)
+    worker = threading.Thread(
+        target=lambda: caller_context.run(_target_inner),
+        daemon=True,
+    )
     worker.start()
     task_ready.wait()
     timeout = _get_timeout_seconds("AGENT_TOOL_TIMEOUT_SECONDS", 1800.0)
@@ -1376,9 +1692,9 @@ class _APIRequester:
             async with session.get(url) as response:
                 if response.status == 200:
                     image_data = await response.read()
-                    img_dir = os.path.join(self.data_dir, "img")
-                    os.makedirs(img_dir, exist_ok=True)
-                    with open(os.path.join(img_dir, filename), "wb") as f:
+                    cache_dir = os.path.join(self.data_dir, "tmp")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    with open(os.path.join(cache_dir, filename), "wb") as f:
                         f.write(image_data)
                     return image_data
                 else:
@@ -1388,7 +1704,8 @@ class _APIRequester:
                             width=1024, height=1024, steps=20, seed=None,
                             cfg_scale=3.5, sampler_name="dpmpp_2m",
                             scheduler="simple",
-                            checkpoint="flux1-dev.safetensors", loras=None):
+                            checkpoint="flux1-dev.safetensors", loras=None,
+                            output_path=None):
         import aiohttp
         name_split = output_name.split(".")
         if name_split[-1] not in ["png", "jpg", "jpeg"]:
@@ -1424,9 +1741,11 @@ class _APIRequester:
             ) as response:
                 if response.status == 200:
                     image_data = await response.read()
-                    img_dir = os.path.join(self.data_dir, "img")
-                    os.makedirs(img_dir, exist_ok=True)
-                    with open(os.path.join(img_dir, output_name), "wb") as f:
+                    destination = Path(output_path) if output_path else (
+                        Path(self.data_dir) / "tmp" / output_name
+                    )
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with open(destination, "wb") as f:
                         f.write(image_data)
                     return True
                 else:
@@ -1442,16 +1761,118 @@ class _APIRequester:
 class AgentExtensionTools:
     """智能体扩展工具集 — 严格对应 main.py 中的四个 agent_tool 函数"""
 
-    def __init__(self):
+    def __init__(self, project_root: str | Path | None = None):
         self._requester: _APIRequester = None
         self._llm_name = os.environ.get("LLM_MODEL_NAME", "deepseek-v4-pro")
         self._vlm_name = os.environ.get("VLM_MODEL_NAME", "qwen3-vl-plus")
+        self._artifact_paths = ArtifactPathPolicy(project_root or Path.cwd())
+        self._confirmed_artifact_paths: set[Path] = set()
+
+    def _active_artifact_context(self):
+        return current_artifact_context()
+
+    def _active_session_id(self) -> str:
+        context = self._active_artifact_context()
+        return context.session_id if context is not None else "standalone"
+
+    def _destination(
+        self,
+        category: ArtifactCategory,
+        filename: str,
+    ) -> Path:
+        context = self._active_artifact_context()
+        policy = context.path_policy if context is not None else self._artifact_paths
+        path = policy.destination(self._active_session_id(), category, filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _confirm_artifact(
+        self,
+        category: ArtifactCategory,
+        path: Path,
+        producer: str = "Agent",
+        tool_call_id: Any = _TOOL_CALL_ID_UNSET,
+    ) -> Any:
+        context = self._active_artifact_context()
+        resolved = path.resolve()
+        if context is None or resolved in self._confirmed_artifact_paths:
+            return None
+        record = context.confirm_file(
+            category,
+            resolved,
+            producer=producer,
+            tool_call_id=(
+                _LAST_SUBAGENT_TOOL_CALL_ID.get()
+                if tool_call_id is _TOOL_CALL_ID_UNSET
+                else tool_call_id
+            ),
+        )
+        self._confirmed_artifact_paths.add(resolved)
+        return record
+
+    def _blender_output_directories(self) -> Dict[ArtifactCategory, Path]:
+        directories = {
+            category: self._destination(category, ".output-root").parent
+            for category in (
+                ArtifactCategory.MODELS,
+                ArtifactCategory.EXPORTS,
+                ArtifactCategory.IMAGES,
+            )
+        }
+        for directory in directories.values():
+            directory.mkdir(parents=True, exist_ok=True)
+        return directories
+
+    def _process_output_directory(self) -> Path:
+        return self._destination(ArtifactCategory.DOCUMENTS, ".output-root").parent
+
+    def _confirm_blender_outputs(self) -> List[Any]:
+        records = []
+        for category, directory in self._blender_output_directories().items():
+            for path in sorted(directory.rglob("*")):
+                if path.is_file():
+                    record = self._confirm_artifact(category, path, "BlenderAgent")
+                    if record is not None:
+                        records.append(record)
+        return records
+
+    def _snapshot_blender_outputs(self) -> Dict[Path, tuple[int, int]]:
+        snapshot = {}
+        for directory in self._blender_output_directories().values():
+            for path in directory.rglob("*"):
+                if path.is_file():
+                    metadata = path.stat()
+                    snapshot[path.resolve()] = (metadata.st_size, metadata.st_mtime_ns)
+        return snapshot
+
+    def _confirm_changed_blender_outputs(
+        self,
+        before: Dict[Path, tuple[int, int]],
+        tool_call_id: str | None = None,
+    ) -> List[Any]:
+        records = []
+        for category, directory in self._blender_output_directories().items():
+            for path in sorted(directory.rglob("*")):
+                if not path.is_file():
+                    continue
+                metadata = path.stat()
+                if before.get(path.resolve()) == (metadata.st_size, metadata.st_mtime_ns):
+                    continue
+                record = self._confirm_artifact(
+                    category,
+                    path,
+                    "BlenderAgent",
+                    tool_call_id,
+                )
+                if record is not None:
+                    records.append(record)
+        return records
 
     def _get_requester(self) -> _APIRequester:
         if self._requester is None:
             self._requester = _APIRequester(
                 base_url=os.environ.get("RAG_BASE_URL", "http://localhost:8050/api/v1"),
-                data_dir="./data/",
+                data_dir=str(self._artifact_paths.data_root),
                 workflow_path="./data/workflow/Flux-Dev-ComfyUI-Workflow.json",
             )
         return self._requester
@@ -1500,12 +1921,13 @@ class AgentExtensionTools:
         cache_key = f"{collection_name}\0{asset_path}"
         namespace = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:12]
         filename = f"{namespace}_{safe_basename}"
-        image_dir = os.path.join(requester.data_dir, "img")
-        os.makedirs(image_dir, exist_ok=True)
-        local_path = os.path.join(image_dir, filename)
+        context = self._active_artifact_context()
+        policy = context.path_policy if context is not None else self._artifact_paths
+        local_path = policy.cache_path(filename)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, "wb") as file_handle:
             file_handle.write(image_data)
-        return local_path
+        return str(local_path)
 
     async def _rerank_rag_candidates(
         self,
@@ -1643,43 +2065,64 @@ class AgentExtensionTools:
                 ],
                 is_last=False,
             )
+            progress_queue: queue.Queue = queue.Queue()
+            token = _SUBAGENT_PROGRESS_SINK.set(progress_queue.put)
             task = asyncio.create_task(asyncio.to_thread(sync_tool, *args, **kwargs))
             elapsed = 0
-            while not task.done():
-                done, _ = await asyncio.wait({task}, timeout=5.0)
-                if done:
-                    break
-                elapsed += 5
+            terminal_seen = False
+            try:
+                while not task.done() or not progress_queue.empty():
+                    emitted = False
+                    while not progress_queue.empty():
+                        public = progress_queue.get_nowait()
+                        terminal_seen = terminal_seen or public.get("kind") in {
+                            "complete",
+                            "error",
+                        }
+                        emitted = True
+                        yield ToolChunk(
+                            content=[TextBlock(text=encode_subagent_event(public))],
+                            is_last=False,
+                        )
+                    if task.done():
+                        break
+                    done, _ = await asyncio.wait({task}, timeout=1.0)
+                    if not done and not emitted:
+                        elapsed += 1
+                        if elapsed % 5 == 0:
+                            yield ToolChunk(
+                                content=[
+                                    TextBlock(
+                                        text=encode_subagent_event(
+                                            {
+                                                "kind": "phase",
+                                                "title": title,
+                                                "text": f"running ({elapsed}s)",
+                                            }
+                                        )
+                                    )
+                                ],
+                                is_last=False,
+                            )
+                response = await task
+            finally:
+                _SUBAGENT_PROGRESS_SINK.reset(token)
+            succeeded = getattr(response, "state", None) == ToolResultState.SUCCESS
+            if not terminal_seen:
                 yield ToolChunk(
                     content=[
                         TextBlock(
                             text=encode_subagent_event(
                                 {
-                                    "kind": "phase",
+                                    "kind": "complete" if succeeded else "error",
                                     "title": title,
-                                    "text": f"running ({elapsed}s)",
+                                    "text": "completed" if succeeded else "failed",
                                 }
                             )
                         )
                     ],
                     is_last=False,
                 )
-            response = await task
-            succeeded = getattr(response, "state", None) == ToolResultState.SUCCESS
-            yield ToolChunk(
-                content=[
-                    TextBlock(
-                        text=encode_subagent_event(
-                            {
-                                "kind": "complete" if succeeded else "error",
-                                "title": title,
-                                "text": "completed" if succeeded else "failed",
-                            }
-                        )
-                    )
-                ],
-                is_last=False,
-            )
             yield response
 
         streaming.__name__ = tool_name
@@ -1834,7 +2277,7 @@ class AgentExtensionTools:
             content=f"请完成以下任务：{task}，可用的工艺信息为：{info_dict}",
         )
 
-        msg_res = await unity_agent.reply(msg)
+        msg_res = await _reply_subagent_with_progress(unity_agent, msg)
 
         if msg_res is None:
             return _subagent_failure("Unity操作", "Unity Agent 未返回结果")
@@ -1917,11 +2360,25 @@ class AgentExtensionTools:
                     )
 
     async def _blender_model_connected(self, blender_mcp: Any, task: str) -> str:
-        toolkit = Toolkit(mcps=[blender_mcp])
+        output_directories = self._blender_output_directories()
+        model_directory = output_directories[ArtifactCategory.MODELS]
+        export_directory = output_directories[ArtifactCategory.EXPORTS]
+        image_directory = output_directories[ArtifactCategory.IMAGES]
+        outputs_before = self._snapshot_blender_outputs()
+        blender_tools = await _blender_tools_with_path_guard(
+            blender_mcp,
+            output_directories.values(),
+        )
+        toolkit = Toolkit(tools=blender_tools)
 
         blender_agent = Agent(
             name="BlenderAgent",
-            system_prompt="""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+            system_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+        本次任务必须实际保存文件，并且只允许使用以下绝对目录：
+        - .blend 工程文件：{model_directory}
+        - 导出的 STL、STEP、OBJ、FBX、GLTF 等模型：{export_directory}
+        - 渲染图：{image_directory}
+        不得保存到其他目录；最终答复必须逐项给出实际存在的绝对路径。
 
         完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
         # 执行结果
@@ -1950,18 +2407,55 @@ class AgentExtensionTools:
             react_config=ReActConfig(max_iters=60),
         )
 
-        msg = UserMsg(name="User", content=task)
-        msg_res = await blender_agent.reply(msg)
+        def confirm_tool_outputs(tool_call_id: str) -> None:
+            try:
+                self._confirm_changed_blender_outputs(
+                    outputs_before,
+                    tool_call_id=tool_call_id,
+                )
+                outputs_before.clear()
+                outputs_before.update(self._snapshot_blender_outputs())
+            except BaseException as scan_error:
+                _logger.warning(
+                    "Blender artifact scan failed for tool call %s: %s",
+                    tool_call_id,
+                    scan_error,
+                )
 
-        if msg_res is None:
-            return _subagent_failure("Blender操作", "Blender Agent 未返回结果")
-        reply_text = _message_text(msg_res)
-        if not reply_text:
-            return _subagent_failure("Blender操作", "Blender Agent 未返回内容")
-        return _validate_subagent_handoff(
-            reply_text,
-            "Blender操作",
-        )
+        primary_error = None
+        try:
+            msg = UserMsg(name="User", content=task)
+            msg_res = await _reply_subagent_with_progress(
+                blender_agent,
+                msg,
+                on_tool_result_start=confirm_tool_outputs,
+            )
+
+            if msg_res is None:
+                return _subagent_failure("Blender操作", "Blender Agent 未返回结果")
+            reply_text = _message_text(msg_res)
+            if not reply_text:
+                return _subagent_failure("Blender操作", "Blender Agent 未返回内容")
+            return _validate_subagent_handoff(
+                reply_text,
+                "Blender操作",
+            )
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            try:
+                self._confirm_changed_blender_outputs(outputs_before)
+            except BaseException as scan_error:
+                _logger.warning(
+                    "Blender artifact scan failed%s: %s",
+                    (
+                        f" while propagating {type(primary_error).__name__}"
+                        if primary_error is not None
+                        else ""
+                    ),
+                    scan_error,
+                )
 
     # ==================== 3. 工艺规划 ====================
 
@@ -2117,17 +2611,24 @@ class AgentExtensionTools:
         )
 
         # ---- 5. 创建带任务与文件工具的 AgentScope 2 工艺规划 Agent ----
-        process_output_root = Path(
-            os.environ.get("PROCESS_OUTPUT_ROOT", os.getcwd()),
-        ).expanduser().resolve()
+        active_artifact_context = self._active_artifact_context()
+        process_output_root = self._process_output_directory()
         context = evidence_context if evidence_context is not None else {}
         file_records = context.setdefault("file_records", [])
         task_records = context.setdefault("task_records", [])
         context.setdefault("authoritative_tasks", [])
         task_observer = _TaskObservationMiddleware(task_records)
+        file_tool_kwargs = {}
+        if active_artifact_context is not None:
+            file_tool_kwargs["on_verified"] = lambda path: self._confirm_artifact(
+                ArtifactCategory.DOCUMENTS,
+                path,
+                "ProcessAgent",
+            )
         process_write_file, process_view_file = _make_process_file_tools(
             process_output_root,
             file_records,
+            **file_tool_kwargs,
         )
         try:
             toolkit = Toolkit(
@@ -2193,7 +2694,7 @@ class AgentExtensionTools:
         # ---- 6. 执行 ----
         try:
             try:
-                msg_res = await process_agent.reply(msg)
+                msg_res = await _reply_subagent_with_progress(process_agent, msg)
                 reply_text = _message_text(msg_res)
                 if not reply_text:
                     reply_text = str(
@@ -2321,7 +2822,8 @@ class AgentExtensionTools:
         )
 
         try:
-            msg_res = await comfyui_agent.reply(
+            msg_res = await _reply_subagent_with_progress(
+                comfyui_agent,
                 UserMsg(name="User", content=task)
             )
         except Exception as exc:
@@ -2360,27 +2862,35 @@ class AgentExtensionTools:
         ).hexdigest()[:16]
         output_name = f"comfyui-{prompt_hash}.png"
         requester = self._get_requester()
-        output_path = os.path.abspath(
-            os.path.join(requester.data_dir, "img", output_name)
-        )
+        output_path = self._destination(ArtifactCategory.IMAGES, output_name)
 
         api_result = None
         api_error = None
         try:
+            image_kwargs = {
+                "negative_prompt": negative_prompt,
+                "width": width,
+                "height": height,
+                "steps": steps,
+                "seed": seed,
+            }
+            image_kwargs["output_path"] = str(output_path)
             api_result = await requester.text_to_image(
                 positive_prompt,
                 output_name,
-                negative_prompt=negative_prompt,
-                width=width,
-                height=height,
-                steps=steps,
-                seed=seed,
+                **image_kwargs,
             )
         except Exception as exc:
             api_error = exc
 
-        file_exists = os.path.isfile(output_path)
+        file_exists = output_path.is_file()
         succeeded = api_result is True and file_exists
+        if succeeded:
+            self._confirm_artifact(
+                ArtifactCategory.IMAGES,
+                output_path,
+                "ComfyUIAgent",
+            )
         api_text = f"异常：{api_error}" if api_error else str(api_result)
         details = (
             f"- 实际正向提示词：{positive_prompt}\n"

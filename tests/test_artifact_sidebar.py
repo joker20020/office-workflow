@@ -126,3 +126,14 @@ def test_chat_panel_updates_sidebar_when_session_changes():
     ChatPanel._set_artifact_session(panel, "session-2")
 
     panel._artifact_sidebar.set_session.assert_called_once_with("session-2")
+
+
+def test_chat_panel_refreshes_artifacts_after_agent_finishes():
+    from src.ui.chat.chat_panel import ChatPanel
+
+    panel = MagicMock()
+    panel._artifact_sidebar = MagicMock()
+
+    ChatPanel._refresh_artifacts(panel)
+
+    panel._artifact_sidebar.refresh.assert_called_once_with()

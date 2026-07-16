@@ -1488,6 +1488,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         _logger.info("AgentWorker完成")
         self._set_stop_mode(False)
         self._current_block_type = "unknown"
+        self._refresh_artifacts()
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
@@ -1602,6 +1603,10 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _set_artifact_session(self, session_id: str | None) -> None:
         if hasattr(self, "_artifact_sidebar"):
             self._artifact_sidebar.set_session(session_id)
+
+    def _refresh_artifacts(self) -> None:
+        if hasattr(self, "_artifact_sidebar"):
+            self._artifact_sidebar.refresh()
 
     def _toggle_artifact_sidebar(self) -> None:
         if not hasattr(self, "_artifact_sidebar"):

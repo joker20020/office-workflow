@@ -313,22 +313,22 @@ class NodeGraphicsItem(QGraphicsObject):
         font.setPointSize(9)
         fm = QFontMetrics(font)
 
-        # 端口名称统一宽度: 最多15字符
-        max_name_chars = 15
-        char_width = fm.horizontalAdvance("M")
-        max_port_name_width = char_width * max_name_chars
-
-        # 计算实际端口名称宽度（用于调试）
+        # Measure actual labels. A fixed ``15 * width('M')`` reserve is
+        # font-dependent and made identical nodes change width after another
+        # view changed the application font.
+        max_port_name_width = 0
         for port_def in self._definition.inputs + self._definition.outputs:
             actual_width = fm.horizontalAdvance(port_def.name)
-            if actual_width > max_port_name_width:
-                _logger.debug(f"端口名 '{port_def.name}' 超过15字符，将被截断")
+            max_port_name_width = max(max_port_name_width, actual_width)
 
         # 计算输入控件的最大宽度
         max_input_widget_width = 0
         for proxy in self._widget_proxies.values():
             try:
-                w = proxy.widget.width()
+                # ``width()`` reflects transient/global Qt layout state and can
+                # retain a size assigned by another view.  The size hint is the
+                # widget's stable layout contract for a newly-created node.
+                w = proxy.widget.sizeHint().width()
                 if w > max_input_widget_width:
                     max_input_widget_width = w
             except Exception:
@@ -340,7 +340,7 @@ class NodeGraphicsItem(QGraphicsObject):
         max_output_widget_width = 0
         for proxy in self._output_widget_proxies.values():
             try:
-                w = proxy.widget.width()
+                w = proxy.widget.sizeHint().width()
                 if w > max_output_widget_width:
                     max_output_widget_width = w
             except Exception:

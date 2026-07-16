@@ -19,6 +19,9 @@ class ArtifactRegistry:
         session_id: str,
         category: ArtifactCategory | str,
         path: str | Path,
+        *,
+        producer: str = "Agent",
+        tool_call_id: str | None = None,
     ) -> ArtifactRecord:
         """Verify a final session artifact exists, then persist its metadata."""
         final_path = self._path_policy.validate_registered_path(path)
@@ -35,4 +38,6 @@ class ArtifactRegistry:
             category=category_value,
             filename=final_path.name,
             path=str(final_path),
+            producer=producer,
+            tool_call_id=tool_call_id,
         )

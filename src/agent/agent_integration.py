@@ -84,6 +84,8 @@ from src.agent.api_key_manager import ApiKeyManager
 from src.agent.async_runtime import AgentAsyncRuntime
 from src.agent.chat_history import ChatHistory, serialize_message
 from src.agent.tool_registry import AgentToolRegistry
+from src.core.artifact_context import ArtifactExecutionContext, bind_artifact_context
+from src.core.artifact_paths import ArtifactPathPolicy
 from src.core.change_notifier import ExposureChange
 from src.core.config_manager import get_config_manager
 from src.core.permission_manager import Permission
@@ -198,6 +200,8 @@ class AgentIntegration:
         history_repository: Optional["ChatHistoryRepository"] = None,
         session_id: Optional[str] = None,
         permission_manager: Optional["PermissionManager"] = None,
+        artifact_path_policy: Optional[ArtifactPathPolicy] = None,
+        artifact_registry: Any = None,
     ):
         _logger.info("=" * 50)
         _logger.info("AgentIntegration 开始初始化")
@@ -209,6 +213,8 @@ class AgentIntegration:
         self._skill_manager = skill_manager
         self._history_repository = history_repository
         self._permission_manager = permission_manager
+        self._artifact_path_policy = artifact_path_policy
+        self._artifact_registry = artifact_registry
         self.config = get_config_manager()
 
         self._agent: Optional[Any] = None
@@ -330,7 +336,20 @@ class AgentIntegration:
             self._active_reply_task = task
             self._current_loop = loop
         try:
-            return await self._consume_reply_stream(inputs)
+            session_id = getattr(self._history, "session_id", None)
+            artifact_context = None
+            if (
+                session_id
+                and self._artifact_path_policy is not None
+                and self._artifact_registry is not None
+            ):
+                artifact_context = ArtifactExecutionContext(
+                    session_id=session_id,
+                    path_policy=self._artifact_path_policy,
+                    registry=self._artifact_registry,
+                )
+            with bind_artifact_context(artifact_context):
+                return await self._consume_reply_stream(inputs)
         finally:
             with self._reply_ownership_lock:
                 self._active_reply_cancel_requests.discard(task)

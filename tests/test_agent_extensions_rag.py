@@ -1104,7 +1104,7 @@ def _install_comfyui_recording_fakes(
             if api_error is not None:
                 raise api_error
             if api_result and write_file:
-                target = tmp_path / "img" / output_name
+                target = Path(kwargs.get("output_path") or tmp_path / "img" / output_name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(b"png")
             return api_result
@@ -1126,7 +1126,7 @@ def _install_comfyui_recording_fakes(
     monkeypatch.setattr(agent_extensions, "UserMsg", fake_user_msg)
     monkeypatch.setenv("LLM_API_KEY", "secret")
     monkeypatch.setenv("LLM_BASE_URL", "http://model/v1")
-    tools = AgentExtensionTools()
+    tools = AgentExtensionTools(project_root=tmp_path)
     tools._requester = FakeRequester()
     return tools, captured
 
@@ -1148,7 +1148,9 @@ async def test_comfyui_uses_agentscope2_agent_and_reports_written_image(
     expected_name = (
         f"comfyui-{hashlib.sha256(refined_prompt.encode('utf-8')).hexdigest()[:16]}.png"
     )
-    expected_path = str((tmp_path / "img" / expected_name).resolve())
+    expected_path = str(
+        (tmp_path / "data" / "images" / "standalone" / expected_name).resolve()
+    )
     assert captured["toolkit"] == {"tools": []}
     assert captured["agent"]["name"] == "ComfyUIAgent"
     assert captured["agent"]["model"] == "comfyui-model"
@@ -1182,6 +1184,7 @@ async def test_comfyui_uses_agentscope2_agent_and_reports_written_image(
                 "height": 1024,
                 "steps": 20,
                 "seed": None,
+                "output_path": expected_path,
             },
         )
     ]
@@ -1438,6 +1441,63 @@ async def test_registered_blender_tool_streams_safe_progress_and_final_response(
     assert chunks[0].is_last is False
     assert chunks[0].content[0].text.startswith(agent_extensions.SUBAGENT_EVENT_PREFIX)
     assert chunks[-1] is final
+
+
+@pytest.mark.asyncio
+async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking():
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyStartEvent,
+        TextBlockDeltaEvent,
+        ThinkingBlockDeltaEvent,
+        ToolCallStartEvent,
+        ToolResultStartEvent,
+    )
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def reply_stream(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+            yield ThinkingBlockDeltaEvent(
+                reply_id="reply-1", block_id="thinking-1", delta="private"
+            )
+            yield ToolCallStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="create_object",
+            )
+            yield ToolResultStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="create_object",
+            )
+            yield TextBlockDeltaEvent(
+                reply_id="reply-1", block_id="text-1", delta="public output"
+            )
+            yield ReplyEndEvent(session_id="session-1", reply_id="reply-1")
+
+    public_events = []
+    completed_tool_calls = []
+    await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+        public_events.append,
+        completed_tool_calls.append,
+    )
+
+    assert {event["kind"] for event in public_events} == {
+        "tool_call",
+        "text",
+        "complete",
+    }
+    assert "private" not in str(public_events)
+    assert agent_extensions._LAST_SUBAGENT_TOOL_CALL_ID.get() == "tool-1"
+    assert completed_tool_calls == ["tool-1"]
 
 
 @pytest.mark.parametrize(
@@ -1972,6 +2032,7 @@ def _install_blender_recording_fakes(
             captured["client_instance"] = self
             self.connected = False
             self.close_count = 0
+            self.tools = [SimpleNamespace(name="execute_blender_code", _middlewares=[])]
 
         async def connect(self):
             events.append("connect")
@@ -1986,6 +2047,11 @@ def _install_blender_recording_fakes(
                 raise close_error
             self.connected = False
 
+        async def list_tools(self):
+            events.append("list_tools")
+            assert self.connected is True
+            return self.tools
+
     class FakeToolkit:
         def __init__(self, **kwargs):
             events.append("toolkit")
@@ -1993,7 +2059,11 @@ def _install_blender_recording_fakes(
                 raise toolkit_error
             captured["toolkit"] = kwargs
             captured["toolkit_instance"] = self
-            assert kwargs["mcps"][0].connected is True
+            assert kwargs["tools"] == captured["client_instance"].tools
+            assert isinstance(
+                kwargs["tools"][0]._middlewares[0],
+                agent_extensions._ArtifactPathGuardMiddleware,
+            )
 
     class FakeAgent:
         def __init__(self, **kwargs):
@@ -2062,7 +2132,7 @@ async def test_blender_uses_agentscope2_stdio_mcp_agent_and_user_message(monkeyp
         "execution_timeout": 27.5,
     }
     assert events.index("connect") < events.index("toolkit")
-    assert captured["toolkit"] == {"mcps": [captured["client_instance"]]}
+    assert captured["toolkit"] == {"tools": captured["client_instance"].tools}
     assert captured["agent"]["name"] == "BlenderAgent"
     assert captured["agent"]["model"] == "model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
@@ -2141,6 +2211,22 @@ async def test_blender_closes_once_and_propagates_reply_errors(monkeypatch, repl
 
     assert events.count("close") == 1
     assert events[-1] == "close"
+
+
+@pytest.mark.asyncio
+async def test_blender_scans_changed_outputs_when_reply_fails(monkeypatch):
+    _install_blender_recording_fakes(
+        monkeypatch,
+        reply_error=RuntimeError("agent failed"),
+    )
+    tools = AgentExtensionTools()
+    tools._snapshot_blender_outputs = MagicMock(return_value={})
+    tools._confirm_changed_blender_outputs = MagicMock()
+
+    with pytest.raises(RuntimeError, match="agent failed"):
+        await tools._blender_model_async("task")
+
+    tools._confirm_changed_blender_outputs.assert_called_once_with({})
 
 
 @pytest.mark.asyncio
@@ -2762,13 +2848,15 @@ async def test_process_handoff_normalizes_observed_file_path_and_content_into_se
         ),
     )
     monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
-    tools = AgentExtensionTools()
+    tools = AgentExtensionTools(project_root=tmp_path)
     tools._search_rag_candidates = AsyncMock(return_value=[])
     tools._rerank_rag_candidates = AsyncMock(return_value=[])
 
     result = await tools._process_agent_async("task", None, "process", 5)
 
-    absolute_path = str((output_root / "工序100.json").resolve())
+    absolute_path = str(
+        (tmp_path / "data" / "documents" / "standalone" / "工序100.json").resolve()
+    )
     generated_files = result.split("## 生成文件\n", 1)[1].split(
         "## 具体结果",
         1,
@@ -2794,7 +2882,7 @@ async def test_process_handoff_includes_recorded_file_error_and_marks_error(
         ),),
     )
     monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
-    tools = AgentExtensionTools()
+    tools = AgentExtensionTools(project_root=tmp_path)
     tools._search_rag_candidates = AsyncMock(return_value=[])
     tools._rerank_rag_candidates = AsyncMock(return_value=[])
 
@@ -2861,7 +2949,7 @@ async def test_process_requires_authoritative_completed_task_state(
         ),
     )
     monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
-    tools = AgentExtensionTools()
+    tools = AgentExtensionTools(project_root=tmp_path)
     tools._search_rag_candidates = AsyncMock(return_value=[])
     tools._rerank_rag_candidates = AsyncMock(return_value=[])
 
@@ -2900,7 +2988,7 @@ async def test_process_failure_after_observations_preserves_task_and_file_eviden
         ),
     )
     monkeypatch.setenv("PROCESS_OUTPUT_ROOT", str(output_root))
-    tools = AgentExtensionTools()
+    tools = AgentExtensionTools(project_root=tmp_path)
     tools._search_rag_candidates = AsyncMock(return_value=[])
     tools._rerank_rag_candidates = AsyncMock(return_value=[])
 

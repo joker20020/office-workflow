@@ -439,6 +439,8 @@ class ArtifactRecord(Base):
     category: Mapped[str] = mapped_column(String(100), nullable=False)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    producer: Mapped[str] = mapped_column(String(255), nullable=False, default="Agent")
+    tool_call_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

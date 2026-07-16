@@ -60,6 +60,8 @@ class ArtifactRepository:
         category: str,
         filename: str,
         path: str,
+        producer: str = "Agent",
+        tool_call_id: str | None = None,
     ) -> ArtifactRecord:
         with self._database.session() as session:
             record = ArtifactRecord(
@@ -67,6 +69,8 @@ class ArtifactRepository:
                 category=category,
                 filename=filename,
                 path=path,
+                producer=producer,
+                tool_call_id=tool_call_id,
             )
             session.add(record)
             session.flush()

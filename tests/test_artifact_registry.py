@@ -28,9 +28,17 @@ def test_confirm_file_persists_verified_file_and_session_deletion_keeps_disk_fil
     final_path.write_text("verified", encoding="utf-8")
     registry = ArtifactRegistry(policy, artifact_repository)
 
-    record = registry.confirm_file(session_id, ArtifactCategory.DOCUMENTS, final_path)
+    record = registry.confirm_file(
+        session_id,
+        ArtifactCategory.DOCUMENTS,
+        final_path,
+        producer="ProcessAgent",
+        tool_call_id="call-1",
+    )
 
     assert record.session_id == session_id
+    assert record.producer == "ProcessAgent"
+    assert record.tool_call_id == "call-1"
     assert artifact_repository.list_session(session_id)[0].path == str(final_path)
     assert chat_repository.delete_session(session_id) is True
     assert artifact_repository.list_session(session_id) == []

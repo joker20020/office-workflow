@@ -49,6 +49,7 @@ except Exception:
 from src.agent.chat_history import ChatHistory
 from src.core.app_context import AppContext
 from src.core.artifact_paths import ArtifactPathPolicy
+from src.core.artifact_registry import ArtifactRegistry
 from src.core.permission_manager import Permission, PermissionSet
 from src.engine.node_engine import NodeEngine
 from src.ui.navigation_rail import NavigationRail
@@ -114,6 +115,10 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
         self._history_repository = ChatHistoryRepository(self._db)
         self._artifact_repository = ArtifactRepository(self._db)
         self._artifact_path_policy = ArtifactPathPolicy(Path(__file__).resolve().parents[2])
+        self._artifact_registry = ArtifactRegistry(
+            self._artifact_path_policy,
+            self._artifact_repository,
+        )
         self._permission_repository = PluginPermissionRepository(self._db)
         self._plugin_repository = PluginRepository(self._db)
         self._node_graph = NodeGraph(name="默认工作流")
@@ -156,6 +161,8 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
                 if app_context is not None and app_context.is_initialized
                 else None
             ),
+            artifact_path_policy=self._artifact_path_policy,
+            artifact_registry=self._artifact_registry,
         )
 
         self._theme_manager = ThemeManager.instance()

@@ -123,6 +123,29 @@ class Database:
         with self.engine.connect() as conn:
             self._migrate_add_config_json_column(conn)
             self._migrate_add_supported_types_column(conn)
+            self._migrate_artifact_metadata_columns(conn)
+
+    def _migrate_artifact_metadata_columns(self, conn) -> None:
+        """Add artifact origin metadata to databases created by earlier builds."""
+        from sqlalchemy.exc import OperationalError
+
+        try:
+            conn.execute(text("SELECT producer FROM artifacts LIMIT 1"))
+        except OperationalError:
+            conn.execute(
+                text(
+                    "ALTER TABLE artifacts ADD COLUMN producer "
+                    "VARCHAR(255) NOT NULL DEFAULT 'Agent'"
+                )
+            )
+            conn.commit()
+        try:
+            conn.execute(text("SELECT tool_call_id FROM artifacts LIMIT 1"))
+        except OperationalError:
+            conn.execute(
+                text("ALTER TABLE artifacts ADD COLUMN tool_call_id VARCHAR(255)")
+            )
+            conn.commit()
 
     def _migrate_add_supported_types_column(self, conn) -> None:
         """
