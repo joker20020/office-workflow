@@ -2603,7 +2603,7 @@ def _install_process_recording_fakes(
             for tool_name in task_calls:
                 tool = tools_by_name[tool_name]
 
-                async def next_handler(**kwargs):
+                async def next_handler(tool_name=tool_name, **kwargs):
                     yield ToolChunk(
                         content=[TextBlock(text=f"observed {tool_name}")],
                     )

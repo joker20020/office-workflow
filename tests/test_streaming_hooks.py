@@ -3,9 +3,9 @@
 
 import asyncio
 import threading
+from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from typing import Any, get_args
-from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -163,10 +163,10 @@ def test_notify_stream_event_preserves_events_order_and_callback_shape() -> None
     assert len(failing_deliveries) == len(events)
     assert all(
         received is original
-        for received, original in zip(failing_deliveries, events)
+        for received, original in zip(failing_deliveries, events, strict=False)
     )
     assert len(delivered) == len(events)
-    for delivery, original_event in zip(delivered, events):
+    for delivery, original_event in zip(delivered, events, strict=False):
         agent, kwargs, output = delivery
         assert agent is integration._agent
         assert kwargs == {"event": original_event}
@@ -779,7 +779,8 @@ async def test_chat_async_resets_interrupted_and_persists_partial_reply_on_strea
     assert integration._history.add_message.call_count == 2
     partial_reply = integration._history.add_message.call_args_list[1].kwargs["msg"]
     assert partial_reply.get_text_content() == "Hello"
-    assert integration._agent.received_inputs is integration._history.add_message.call_args_list[0].kwargs["msg"]
+    first_history_message = integration._history.add_message.call_args_list[0].kwargs["msg"]
+    assert integration._agent.received_inputs is first_history_message
 
 
 def test_chat_persists_partial_reply_once_on_stream_error() -> None:

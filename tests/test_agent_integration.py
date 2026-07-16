@@ -726,7 +726,9 @@ def test_exposure_change_before_initialization_does_not_start_runtime(
     monkeypatch,
 ):
     registry = AgentToolRegistry.instance()
-    preinit_tool = lambda: "preinit"
+    def preinit_tool():
+        return "preinit"
+
     toolkit_factory = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
     monkeypatch.setattr(agent_integration, "Toolkit", toolkit_factory)
     monkeypatch.setattr(
@@ -853,7 +855,8 @@ def test_exposure_changes_coalesce_one_follow_up_and_all_callers_wait(
     returned = [threading.Event(), threading.Event(), threading.Event()]
 
     def notify(index):
-        agent._on_exposure_change(SimpleNamespace(source="tools", action="changed", name=str(index)))
+        change = SimpleNamespace(source="tools", action="changed", name=str(index))
+        agent._on_exposure_change(change)
         returned[index].set()
 
     threads = [threading.Thread(target=notify, args=(index,)) for index in range(3)]
@@ -1163,7 +1166,8 @@ def test_permission_changes_automatically_filter_and_restore_owned_group(
         skill_manager=skill_manager,
         permission_manager=permissions,
     )
-    tool = lambda: "owned"
+    def tool():
+        return "owned"
 
     monkeypatch.setattr(integration._api_manager, "get_key", Mock(return_value="secret"))
     monkeypatch.setattr(integration, "_connect_mcp_clients", AsyncMock(return_value=[]))
