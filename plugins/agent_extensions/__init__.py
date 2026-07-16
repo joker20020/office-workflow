@@ -27,15 +27,14 @@ from src.core.plugin_base import PluginBase
 from src.utils.logger import get_logger
 
 try:
+    from agentscope.agent import Agent, ReActConfig
     from agentscope.credential import (
         DashScopeCredential,
         DeepSeekCredential,
         OpenAICredential,
     )
-    from agentscope.agent import Agent, ReActConfig
     from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
     from agentscope.message import (
-        AssistantMsg,
         Base64Source,
         DataBlock,
         TextBlock,
@@ -55,8 +54,8 @@ try:
         TaskGet,
         TaskList,
         TaskUpdate,
-        Toolkit,
         ToolChunk,
+        Toolkit,
         ToolMiddlewareBase,
         ToolResponse,
     )
