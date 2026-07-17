@@ -238,6 +238,8 @@ class SolidWorksAgentTools:
         project_root = Path(__file__).resolve().parents[2]
         child_env = dict(os.environ)
         child_env["SOLIDWORKS_SESSION_ID"] = active_session
+        child_env["SOLIDWORKS_PROJECT_ROOT"] = str(project_root)
+        child_env["SOLIDWORKS_DATABASE_PATH"] = str(project_root / "data" / "app.db")
         config = StdioMCPConfig(
             command=sys.executable,
             args=["-m", "plugins.solidworks_agent.mcp_server"],

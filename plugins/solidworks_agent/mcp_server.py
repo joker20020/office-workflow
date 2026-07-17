@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from mcp.server.fastmcp import FastMCP
 
 from .com_adapter import SolidWorksComAdapter
+from .paths import path_bridge_from_environment
 from .types import (
     DocumentRef,
     EdgeRef,
@@ -487,7 +488,7 @@ class SolidWorksService:
         return self._write(document_id, "preview", view=view)
 
 
-service = SolidWorksService()
+service = SolidWorksService(path_service=path_bridge_from_environment())
 
 
 @asynccontextmanager

@@ -317,6 +317,11 @@ def test_missing_path_bridge_and_nonexistent_output_fail(tmp_path):
     assert "does not exist" in result.message
 
 
+def test_default_service_receives_the_environment_path_bridge():
+    module = _module()
+    assert module.service.path_service is not None
+
+
 def test_readiness_timeout_retains_owned_instance_until_policy_disconnect():
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     calls = []

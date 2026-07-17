@@ -284,3 +284,10 @@ class SolidWorksComAdapter:
         document.ViewZoomtofit2()
         if not document.SaveBMP(path, 0, 0):
             raise RuntimeError("SolidWorks preview capture failed")
+
+    def close_document(self, document: Any) -> None:
+        """Close one explicitly owned test document without exiting SolidWorks."""
+        if self._app is None:
+            return
+        title = str(document.GetTitle())
+        self._app.CloseDoc(title)

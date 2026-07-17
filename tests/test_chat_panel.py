@@ -1,15 +1,9 @@
-# -*- coding: utf-8 -*-
 """ChatPanel streaming tests"""
 
 import base64
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
-from typing import Any
-
-from PySide6.QtCore import Signal, QThread
-from PySide6.QtWidgets import QApplication, QWidget
-
 from agentscope.event import (
     DataBlockDeltaEvent,
     DataBlockEndEvent,
@@ -24,15 +18,17 @@ from agentscope.event import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     ToolResultDataDeltaEvent,
-    ToolResultStartEvent,
     ToolResultEndEvent,
+    ToolResultStartEvent,
     ToolResultTextDeltaEvent,
 )
 from agentscope.message import ToolResultState
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QApplication
 
 import src.ui.chat.chat_panel as chat_panel
-from src.ui.chat.composite_message_widget import CompositeMessageWidget
 from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
+from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
 class MockStreamingWidget:
@@ -48,14 +44,14 @@ class MockStreamingWidget:
 
 class TestChatPanelStreaming:
     def test_subagent_marker_delta_becomes_nested_event_not_tool_output(self):
-        state = {("tool_result", "call-1"): {"name": "tool_blender_model", "output": ""}}
+        state = {("tool_result", "call-1"): {"name": "tool_solidworks_model", "output": ""}}
         marker = chat_panel.encode_subagent_event(
-            {"kind": "phase", "title": "Blender", "text": "started"}
+            {"kind": "phase", "title": "SolidWorks", "text": "started"}
         )
         event = ToolResultTextDeltaEvent(
             reply_id="reply-1",
             tool_call_id="call-1",
-            tool_call_name="tool_blender_model",
+            tool_call_name="tool_solidworks_model",
             delta=marker,
         )
 
@@ -170,7 +166,9 @@ class TestChatPanelStreaming:
 
     def test_event_adapter_accumulates_text_and_thinking_deltas(self):
         state = {}
-        chat_panel._event_to_block_update(TextBlockStartEvent(reply_id="reply", block_id="text"), state)
+        chat_panel._event_to_block_update(
+            TextBlockStartEvent(reply_id="reply", block_id="text"), state
+        )
         first = chat_panel._event_to_block_update(
             TextBlockDeltaEvent(reply_id="reply", block_id="text", delta="Hello"), state
         )

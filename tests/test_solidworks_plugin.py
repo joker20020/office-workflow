@@ -14,6 +14,9 @@ from agentscope.event import (
 )
 from agentscope.message import ToolResultState
 
+from src.core.artifact_context import ArtifactExecutionContext
+from src.core.artifact_paths import ArtifactCategory, ArtifactPathPolicy
+
 VALID_RESULT = """# Execution Result
 ## Status
 Success
@@ -146,6 +149,12 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(m
     assert captured["config"]["command"] == sys.executable
     assert captured["config"]["args"] == ["-m", "plugins.solidworks_agent.mcp_server"]
     assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "active-session"
+    assert captured["config"]["env"]["SOLIDWORKS_PROJECT_ROOT"] == str(
+        Path(module.__file__).parents[2]
+    )
+    assert captured["config"]["env"]["SOLIDWORKS_DATABASE_PATH"].endswith(
+        "data\\app.db"
+    )
     assert captured["config"]["cwd"] == str(Path(module.__file__).parents[2])
     assert captured["message"].get_text_content() == "build it"
     assert {event["kind"] for event in public_events} == {"text", "complete"}
@@ -371,3 +380,54 @@ def test_plugin_registers_only_the_solidworks_streaming_tool():
     assert [tool.__name__ for tool in registered["tools"]] == [
         "tool_solidworks_model",
     ]
+
+
+class _RecordingRegistry:
+    def __init__(self):
+        self.calls = []
+
+    def confirm_file(self, session_id, category, path, **kwargs):
+        self.calls.append((session_id, category, Path(path), kwargs))
+        return SimpleNamespace(path=str(path))
+
+
+def test_solidworks_path_bridge_classifies_sanitizes_and_confirms_outputs(tmp_path):
+    paths = importlib.import_module("plugins.solidworks_agent.paths")
+    policy = ArtifactPathPolicy(tmp_path)
+    registry = _RecordingRegistry()
+    context = ArtifactExecutionContext("session-7", policy, registry)
+    bridge = paths.SolidWorksArtifactPathBridge(context, tool_call_id="call-9")
+    document = SimpleNamespace(session_id="session-7", name="Widget / unsafe", unit="mm")
+    expected = {
+        "native": (ArtifactCategory.MODELS, ".sldprt"),
+        "step": (ArtifactCategory.EXPORTS, ".step"),
+        "stl": (ArtifactCategory.EXPORTS, ".stl"),
+        "preview": (ArtifactCategory.IMAGES, ".png"),
+    }
+    for kind, (category, suffix) in expected.items():
+        output = Path(bridge.path_for(document, kind))
+        assert output.parent == policy.data_root / category / "session-7"
+        assert output.suffix.casefold() == suffix
+        assert output.name.startswith("Widget_unsafe")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"artifact")
+        assert bridge.validate_output_path(str(output))
+        assert bridge.confirm_file(str(output))
+    assert [call[1] for call in registry.calls] == [item[0] for item in expected.values()]
+    assert all(
+        call[3] == {"producer": "SolidWorksAgent", "tool_call_id": "call-9"}
+        for call in registry.calls
+    )
+
+
+def test_solidworks_path_bridge_rejects_cross_session_and_unissued_paths(tmp_path):
+    paths = importlib.import_module("plugins.solidworks_agent.paths")
+    context = ArtifactExecutionContext(
+        "session-7", ArtifactPathPolicy(tmp_path), _RecordingRegistry()
+    )
+    bridge = paths.SolidWorksArtifactPathBridge(context)
+    with pytest.raises(ValueError, match="session"):
+        bridge.path_for(SimpleNamespace(session_id="other", name="part"), "native")
+    rogue = tmp_path / "data" / "exports" / "session-7" / "rogue.step"
+    assert bridge.validate_output_path(str(rogue)) is False
+    assert bridge.validate_output_path(str(tmp_path / "outside.step")) is False
