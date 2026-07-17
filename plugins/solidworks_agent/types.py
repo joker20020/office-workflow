@@ -14,7 +14,13 @@ class ConnectionResult:
 @dataclass(frozen=True)
 class DocumentRef:
     id: str
-    title: str = "Untitled"
+    session_id: str
+    name: str
+    unit: str
+
+    @property
+    def title(self) -> str:
+        return self.name
 
 
 @dataclass(frozen=True)

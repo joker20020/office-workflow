@@ -72,9 +72,9 @@ class FakeAdapter:
         self.document = object()
         self.sketch = object()
         self.entities = [object(), object()]
-        self.feature = object()
-        self.face = object()
-        self.edge = object()
+        self.feature = SimpleNamespace(persist_key=b"feature")
+        self.face = SimpleNamespace(persist_key=b"face")
+        self.edge = SimpleNamespace(persist_key=b"edge")
 
     def connect(self, readiness_timeout=10.0):
         types = importlib.import_module("plugins.solidworks_agent.types")
@@ -110,6 +110,9 @@ class FakeAdapter:
         self.calls.append(("revolve", document, sketch, axis, angle))
         return self.feature
 
+    def persistent_reference_key(self, document, raw):
+        return raw.persist_key.hex()
+
     def cut_extrude(self, document, sketch, depth):
         self.calls.append(("cut", document, sketch, depth))
         return self.feature
@@ -118,9 +121,9 @@ class FakeAdapter:
         self.calls.append(("inspect", document))
         return {
             "title": "Part",
-            "features": [self.feature],
-            "faces": [self.face],
-            "edges": [self.edge],
+            "features": [SimpleNamespace(persist_key=b"feature")],
+            "faces": [SimpleNamespace(persist_key=b"face")],
+            "edges": [SimpleNamespace(persist_key=b"edge")],
         }
 
     def save_as(self, document, path, options=None):
@@ -151,13 +154,17 @@ def _closed_sketch(service, document):
 
 def test_new_part_arguments_and_ordered_feature_options_are_honored():
     service, adapter, document = _part()
-    sketch, _ = _closed_sketch(service, document)
+    sketch, axis = _closed_sketch(service, document)
+    assert (document.session_id, document.name, document.unit) == ("session", "Widget", "mm")
     assert service.extrude(document.id, sketch.id, 0.01, "reverse").success
-    assert service.revolve(document.id, sketch.id, "horizontal", 1.5).success
+    assert service.revolve(document.id, sketch.id, axis.id, 1.5).success
     assert service.cut_extrude(document.id, sketch.id, 0.005).success
     assert ("new_part", "Widget", "mm") in adapter.calls
     assert any(call[0] == "extrude" and call[-1] == "reverse" for call in adapter.calls)
-    assert any(call[0] == "revolve" and call[-2:] == ("horizontal", 1.5) for call in adapter.calls)
+    assert any(
+        call[0] == "revolve" and call[-2:] == (adapter.entities[0], 1.5) for call in adapter.calls
+    )
+    assert service.revolve(document.id, sketch.id, "foreign", 1.5).success is False
 
 
 def test_geometry_and_dimensions_use_stable_owned_entity_references():
@@ -228,6 +235,10 @@ def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_enti
         SketchManager=Manager(),
         ClearSelection2=lambda all_items: events.append(("clear", all_items)),
         AddDimension2=lambda *position: (events.append(("dimension", position)), dimension)[1],
+        AddDiameterDimension2=lambda *position: (events.append(("diameter", position)), dimension)[
+            1
+        ],
+        AddRadialDimension2=lambda *position: (events.append(("radius", position)), dimension)[1],
         FeatureManager=SimpleNamespace(
             FeatureExtrusion2=lambda *args: (events.append(("extrude", args)), object())[1]
         ),
@@ -239,12 +250,21 @@ def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_enti
     )
     adapter.add_dimensions(
         context,
-        [{"type": "distance", "value": 1.0, "position": [0, 0]}],
-        [[created[0]]],
+        [
+            {"type": "distance", "value": 1.0, "position": [0, 0]},
+            {"type": "diameter", "value": 1.0, "position": [0, 0]},
+            {"type": "radius", "value": 1.0, "position": [0, 0]},
+        ],
+        [[created[0]], [created[0]], [created[0]]],
     )
     adapter.extrude(document, context, 0.01, "reverse")
     assert "line" in events
     assert ("entity-select", False) in events
+    assert {event[0] for event in events if isinstance(event, tuple)} >= {
+        "dimension",
+        "diameter",
+        "radius",
+    }
     assert ("sketch-select", False, 0) in events
     extrusion_args = next(
         item[1] for item in events if isinstance(item, tuple) and item[0] == "extrude"
@@ -259,7 +279,8 @@ class FakePaths:
         self.confirm = confirm
         self.confirmed = []
 
-    def path_for(self, document_id, kind):
+    def path_for(self, document, kind):
+        self.document = document
         suffix = {"native": ".sldprt", "step": ".step", "stl": ".stl", "preview": ".png"}[kind]
         return str((self.root / f"artifact{suffix}").resolve())
 
@@ -278,6 +299,7 @@ def test_file_success_requires_absolute_boundary_existing_and_confirmed(tmp_path
     assert service.export_stl(document.id, {"quality": "fine"}).success
     assert service.capture_preview(document.id, "isometric").success
     assert len(service.path_service.confirmed) == 3
+    assert service.path_service.document.session_id == "session"
 
     service.path_service = FakePaths(tmp_path, allowed=False)
     assert service.export_step(document.id).success is False
@@ -330,3 +352,58 @@ def test_server_lifespan_disconnects_with_configured_owned_policy(monkeypatch):
 
     asyncio.run(run())
     assert adapter.disconnected == [True]
+
+
+def test_persistent_reference_key_uses_model_extension_and_survives_new_wrappers():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    extension = SimpleNamespace(GetPersistReference3=lambda raw: b"stable-key")
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    assert adapter.persistent_reference_key(SimpleNamespace(Extension=extension), object()) == (
+        b"stable-key".hex()
+    )
+
+    service, _, document = _part()
+    first = service.inspect_model(document.id).value
+    second = service.inspect_model(document.id).value
+    assert first["faces"][0].id == second["faces"][0].id
+    assert first["edges"][0].id == second["edges"][0].id
+
+
+def test_unsupported_payloads_are_strictly_validated_before_safe_failure():
+    service, _, document = _part()
+    inspected = service.inspect_model(document.id).value
+    face = inspected["faces"][0].id
+    edge = inspected["edges"][0].id
+    feature = inspected["features"][0].id
+
+    valid_cases = [
+        service.hole(
+            document.id, face, {"type": "simple", "diameter": 0.01, "depth": 0.02}, [0, 0]
+        ),
+        service.fillet(document.id, [edge], 0.001),
+        service.chamfer(
+            document.id,
+            [edge],
+            {"type": "distance_angle", "distance": 0.001, "angle": 0.75},
+        ),
+        service.mirror_feature(document.id, [feature], "Front Plane"),
+        service.pattern_feature(
+            document.id,
+            feature,
+            {"type": "linear", "direction": "x", "spacing": 0.01, "count": 3},
+        ),
+    ]
+    assert all("Unsupported operation" in result.message for result in valid_cases)
+
+    invalid_cases = [
+        service.hole(document.id, face, {"type": "simple", "diameter": -1, "depth": 1}, [0, 0]),
+        service.fillet(document.id, [edge], -1),
+        service.chamfer(document.id, [edge], {"type": "distance_angle", "distance": 1}),
+        service.mirror_feature(document.id, [feature], "arbitrary"),
+        service.pattern_feature(
+            document.id,
+            feature,
+            {"type": "linear", "direction": "x", "spacing": 1, "count": 1, "macro": "x"},
+        ),
+    ]
+    assert all("Unsupported operation" not in result.message for result in invalid_cases)

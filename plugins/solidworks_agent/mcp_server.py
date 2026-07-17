@@ -28,12 +28,11 @@ MAX_ITEMS = 100
 PLANES = {"Front Plane", "Top Plane", "Right Plane"}
 UNITS = {"mm", "cm", "m", "inch"}
 DIRECTIONS = {"forward", "reverse"}
-AXES = {"horizontal", "vertical"}
 VIEWS = {"front", "top", "right", "isometric"}
 
 
 class InternalPathService(Protocol):
-    def path_for(self, document_id: str, kind: str) -> str: ...
+    def path_for(self, document: DocumentRef, kind: str) -> str: ...
     def validate_output_path(self, path: str) -> bool: ...
     def confirm_file(self, path: str) -> bool: ...
 
@@ -125,6 +124,7 @@ class SolidWorksService:
         self.features: dict[str, tuple[FeatureRef, Any]] = {}
         self.faces: dict[str, tuple[FaceRef, Any]] = {}
         self.edges: dict[str, tuple[EdgeRef, Any]] = {}
+        self._persistent_refs: dict[tuple[str, str, str], str] = {}
 
     @staticmethod
     def _ok(message: str, value: Any = None, **kwargs: Any) -> OperationResult:
@@ -155,7 +155,7 @@ class SolidWorksService:
             if not connected.success:
                 return connected
             raw = self.adapter.new_part(name, unit)
-            ref = DocumentRef(uuid.uuid4().hex, name)
+            ref = DocumentRef(uuid.uuid4().hex, session_id, name, unit)
             self.documents[ref.id] = (ref, raw)
             return self._ok("Created a new part from the installed default template.", ref)
         except Exception as exc:
@@ -280,13 +280,15 @@ class SolidWorksService:
         return self._feature_from_sketch(document_id, sketch_id, "extrude", depth, direction)
 
     def revolve(self, document_id: str, sketch_id: str, axis: str, angle: float) -> OperationResult:
-        if axis not in AXES:
-            return self._fail("unsupported revolve axis")
         try:
             angle = _number(angle, "angle", positive=True)
+            sketch_ref, _ = self._sketch(sketch_id)
+            entity_ref, raw_axis = self._owned(self.entities, axis, document_id, "entity")
+            if entity_ref.sketch_id != sketch_id or sketch_ref.document_id != document_id:
+                raise ValueError("revolve axis does not belong to sketch")
         except Exception as exc:
             return self._fail(_safe_error(exc))
-        return self._feature_from_sketch(document_id, sketch_id, "revolve", axis, angle)
+        return self._feature_from_sketch(document_id, sketch_id, "revolve", raw_axis, angle)
 
     def cut_extrude(self, document_id: str, sketch_id: str, depth: float) -> OperationResult:
         try:
@@ -299,21 +301,19 @@ class SolidWorksService:
         self, registry: dict, cls: type, document_id: str, raws: list[Any], kind: str | None = None
     ):
         refs = []
+        _, document = self._document(document_id)
+        label = cls.__name__
         for raw in raws:
-            existing = next(
-                (
-                    ref
-                    for ref, saved in registry.values()
-                    if saved is raw and ref.document_id == document_id
-                ),
-                None,
-            )
+            key = self.adapter.persistent_reference_key(document, raw)
+            saved_id = self._persistent_refs.get((document_id, label, key))
+            existing = registry[saved_id][0] if saved_id is not None else None
             ref = existing or (
                 cls(uuid.uuid4().hex, document_id, kind)
                 if kind
                 else cls(uuid.uuid4().hex, document_id)
             )
-            registry.setdefault(ref.id, (ref, raw))
+            registry[ref.id] = (ref, raw)
+            self._persistent_refs[(document_id, label, key)] = ref.id
             refs.append(ref)
         return refs
 
@@ -341,26 +341,87 @@ class SolidWorksService:
             _point(position, "position")
             if not isinstance(specification, dict):
                 raise ValueError("invalid hole specification")
+            schemas = {
+                "simple": {"type", "diameter", "depth"},
+                "counterbore": {
+                    "type",
+                    "diameter",
+                    "depth",
+                    "counterbore_diameter",
+                    "counterbore_depth",
+                },
+                "countersink": {
+                    "type",
+                    "diameter",
+                    "depth",
+                    "countersink_diameter",
+                    "angle",
+                },
+            }
+            hole_type = specification.get("type")
+            if hole_type not in schemas or set(specification) != schemas[hole_type]:
+                raise ValueError("invalid hole specification")
+            for key, value in specification.items():
+                if key != "type":
+                    _number(value, key, positive=True)
             raise NotImplementedError("hole feature is not safely mapped")
         except Exception as exc:
             return self._fail(_safe_error(exc))
 
     def fillet(self, document_id: str, edge_refs: list[str], radius: float) -> OperationResult:
+        try:
+            _number(radius, "radius", positive=True)
+        except Exception as exc:
+            return self._fail(_safe_error(exc))
         return self._unsupported_many(document_id, self.edges, edge_refs, "edge", "fillet")
 
     def chamfer(
         self, document_id: str, edge_refs: list[str], specification: dict[str, Any]
     ) -> OperationResult:
+        try:
+            if (
+                not isinstance(specification, dict)
+                or specification.get("type") != "distance_angle"
+                or set(specification) != {"type", "distance", "angle"}
+            ):
+                raise ValueError("invalid chamfer specification")
+            _number(specification["distance"], "distance", positive=True)
+            _number(specification["angle"], "angle", positive=True)
+        except Exception as exc:
+            return self._fail(_safe_error(exc))
         return self._unsupported_many(document_id, self.edges, edge_refs, "edge", "chamfer")
 
     def mirror_feature(
         self, document_id: str, feature_refs: list[str], plane: str
     ) -> OperationResult:
+        if plane not in PLANES:
+            return self._fail("invalid mirror plane")
         return self._unsupported_many(document_id, self.features, feature_refs, "feature", "mirror")
 
     def pattern_feature(
         self, document_id: str, feature_ref: str, pattern: dict[str, Any]
     ) -> OperationResult:
+        try:
+            if not isinstance(pattern, dict):
+                raise ValueError("invalid pattern specification")
+            pattern_type = pattern.get("type")
+            schemas = {
+                "linear": {"type", "direction", "spacing", "count"},
+                "circular": {"type", "angle", "count"},
+            }
+            if pattern_type not in schemas or set(pattern) != schemas[pattern_type]:
+                raise ValueError("invalid pattern specification")
+            if pattern_type == "linear":
+                if pattern["direction"] not in {"x", "y"}:
+                    raise ValueError("invalid pattern direction")
+                _number(pattern["spacing"], "spacing", positive=True)
+            else:
+                _number(pattern["angle"], "angle", positive=True)
+            count = pattern["count"]
+            if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= 100:
+                raise ValueError("invalid pattern count")
+        except Exception as exc:
+            return self._fail(_safe_error(exc))
         return self._unsupported_many(
             document_id, self.features, [feature_ref], "feature", "pattern"
         )
@@ -385,10 +446,10 @@ class SolidWorksService:
         view: str | None = None,
     ) -> OperationResult:
         try:
-            _, document = self._document(document_id)
+            document_ref, document = self._document(document_id)
             if self.path_service is None:
                 raise RuntimeError("internal path service is unavailable")
-            path = self.path_service.path_for(document_id, kind)
+            path = self.path_service.path_for(document_ref, kind)
             if not isinstance(path, str) or not Path(path).is_absolute():
                 raise RuntimeError("internal path must be absolute")
             if not self.path_service.validate_output_path(path):

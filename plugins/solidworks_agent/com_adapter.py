@@ -136,7 +136,12 @@ class SolidWorksComAdapter:
             for index, entity in enumerate(selected):
                 if not entity.Select4(index > 0, None):
                     raise RuntimeError("SolidWorks could not select dimension entity")
-            dimension = document.AddDimension2(*item.get("position", [0.0, 0.0]), 0.0)
+            factory = {
+                "distance": document.AddDimension2,
+                "diameter": document.AddDiameterDimension2,
+                "radius": document.AddRadialDimension2,
+            }[item["type"]]
+            dimension = factory(*item.get("position", [0.0, 0.0]), 0.0)
             if dimension is None:
                 raise RuntimeError(f"SolidWorks failed to add {item['type']} dimension")
             dimension.GetDimension2(0).SystemValue = item["value"]
@@ -184,9 +189,9 @@ class SolidWorksComAdapter:
             raise RuntimeError("SolidWorks failed to create extrude feature")
         return feature
 
-    def revolve(self, document: Any, context: SketchContext, axis: str, angle: float) -> Any:
+    def revolve(self, document: Any, context: SketchContext, axis: Any, angle: float) -> Any:
         self._select_sketch(context)
-        if not document.Extension.SelectByID2(axis, "SKETCHSEGMENT", 0, 0, 0, True, 4, None, 0):
+        if not axis.Select4(True, None):
             raise RuntimeError("SolidWorks could not select revolve axis")
         feature = document.FeatureManager.FeatureRevolve2(
             True,
@@ -208,6 +213,12 @@ class SolidWorksComAdapter:
         if feature is None:
             raise RuntimeError("SolidWorks failed to create revolve feature")
         return feature
+
+    def persistent_reference_key(self, document: Any, raw: Any) -> str:
+        reference = document.Extension.GetPersistReference3(raw)
+        if not reference:
+            raise RuntimeError("SolidWorks returned no persistent reference")
+        return bytes(reference).hex()
 
     def cut_extrude(self, document: Any, context: SketchContext, depth: float) -> Any:
         self._select_sketch(context)
