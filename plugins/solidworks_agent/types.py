@@ -26,10 +26,30 @@ class SketchRef:
 
 
 @dataclass(frozen=True)
+class SketchEntityRef:
+    id: str
+    document_id: str
+    sketch_id: str
+    kind: str
+
+
+@dataclass(frozen=True)
 class FeatureRef:
     id: str
     document_id: str
     kind: str
+
+
+@dataclass(frozen=True)
+class FaceRef:
+    id: str
+    document_id: str
+
+
+@dataclass(frozen=True)
+class EdgeRef:
+    id: str
+    document_id: str
 
 
 @dataclass(frozen=True)
