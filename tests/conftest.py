@@ -107,6 +107,16 @@ def reset_all_singletons():
     except ImportError:
         pass
 
+    # Theme is a class-level palette, separate from ThemeManager's singleton.
+    # UI tests may initialise it from a persisted light setting, so restore the
+    # documented default for the next test as well.
+    try:
+        from src.ui.theme import Theme, ThemeType
+
+        Theme.set_theme(ThemeType.DARK)
+    except ImportError:
+        pass
+
 
 @pytest.fixture
 def tmp_path_fixture(tmp_path):

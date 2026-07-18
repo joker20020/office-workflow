@@ -203,6 +203,8 @@ class NavigationRail(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
     def _setup_ui(self) -> None:
         """设置UI"""
+        self.setObjectName("navigationRail")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # 固定宽度
         self.setFixedWidth(200)
 
@@ -213,6 +215,7 @@ class NavigationRail(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         # 标题区域 - 存储为实例变量以便主题刷新
         self._title_label = QLabel(_("app.title"))
+        self._title_label.setWordWrap(True)
         self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         main_layout.addWidget(self._title_label)
 

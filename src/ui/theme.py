@@ -363,7 +363,7 @@ class Theme:
     def get_navigation_rail_stylesheet(cls) -> str:
         """获取导航栏样式表"""
         return f"""
-            NavigationRail {{
+            QWidget#navigationRail {{
                 background-color: {cls.hex("background_secondary")};
                 border-right: 1px solid {cls.hex("border_primary")};
             }}

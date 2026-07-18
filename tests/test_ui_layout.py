@@ -1,6 +1,7 @@
 """Regression checks for locale-resilient PySide6 layouts."""
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QStyle
 
 from src.ui.i18n_manager import I18nManager
@@ -67,6 +68,18 @@ def test_navigation_item_renders_a_qt_icon_without_emoji_text():
     assert not icon_label.pixmap().isNull()
 
 
+def test_navigation_rail_uses_a_stable_theme_selector():
+    from src.ui.navigation_rail import NavigationRail
+    from src.ui.theme import Theme
+
+    _application()
+    rail = NavigationRail()
+
+    assert rail.objectName() == "navigationRail"
+    assert rail.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+    assert "QWidget#navigationRail" in Theme.get_navigation_rail_stylesheet()
+
+
 def test_home_quick_actions_use_qt_icons_and_wrapping_descriptions():
     from src.ui.home_page import HomePage
 
@@ -104,7 +117,10 @@ def test_management_cards_keep_long_descriptions_readable():
     from src.ui.plugins.plugin_panel import PluginItemWidget
 
     _application()
-    description = "A deliberately long localized description that must remain readable in the management list."
+    description = (
+        "A deliberately long localized description that must remain readable "
+        "in the management list."
+    )
     plugin = PluginItemWidget("demo", {"description": description})
     package = PackageItemWidget({"id": "demo", "description": description})
 
@@ -112,3 +128,35 @@ def test_management_cards_keep_long_descriptions_readable():
     assert plugin._desc_label.wordWrap() is True
     assert package._desc_label.text() == description
     assert package._desc_label.wordWrap() is True
+
+
+@pytest.mark.parametrize("locale", ["zh_CN", "en"])
+def test_main_window_primary_labels_fit_or_wrap_at_minimum_size(locale):
+    from src.ui.chat.chat_panel import ChatPanel
+    from src.ui.home_page import HomePage
+    from src.ui.navigation_rail import NavigationRail
+
+    application = _application()
+    _set_test_language(locale)
+    navigation = NavigationRail()
+    navigation.resize(200, 600)
+    home = HomePage()
+    home.resize(600, 600)
+    chat = ChatPanel()
+    chat.resize(600, 600)
+    navigation.show()
+    home.show()
+    chat.show()
+    application.processEvents()
+
+    labels = [
+        navigation._title_label,
+        chat._title_label,
+        chat._status_label,
+        home._title_label,
+        home._subtitle_label,
+    ]
+    for label in labels:
+        text_width = label.fontMetrics().horizontalAdvance(label.text())
+        text_fits = text_width <= label.contentsRect().width()
+        assert text_fits or label.wordWrap() or label.toolTip() == label.text()
