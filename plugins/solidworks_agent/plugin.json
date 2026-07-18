@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "description": "Feature-level SolidWorks modeling subagent",
   "author": "OfficeTools",
-  "permissions": ["agent.tool"],
+  "permissions": ["agent.tool", "network"],
   "entry": "SolidWorksAgentPlugin"
 }

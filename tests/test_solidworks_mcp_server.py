@@ -6,6 +6,8 @@ from dataclasses import is_dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 EXPECTED_SIGNATURES = {
     "solidworks_status": [],
     "solidworks_new_part": ["session_id", "name", "unit"],
@@ -65,6 +67,23 @@ def test_public_functions_and_fastmcp_schema_have_exact_confirmed_signatures():
         assert list(tools[name].inputSchema.get("properties", {})) == parameters
 
 
+def test_mcp_descriptions_publish_length_and_angle_unit_contracts():
+    module = _module()
+    tools = {tool.name: tool for tool in asyncio.run(module.mcp.list_tools())}
+    for name in (
+        "solidworks_add_sketch_geometry",
+        "solidworks_add_dimensions",
+        "solidworks_extrude",
+        "solidworks_cut_extrude",
+    ):
+        description = tools[name].description.casefold()
+        assert "documentref.unit" in description
+        assert "si metres" in description
+    revolve = tools["solidworks_revolve"].description.casefold()
+    assert "degrees" in revolve
+    assert "com radians" in revolve
+
+
 class FakeAdapter:
     def __init__(self):
         self.calls = []
@@ -87,8 +106,8 @@ class FakeAdapter:
         self.calls.append(("new_part", name, unit))
         return self.document
 
-    def create_sketch(self, document, plane):
-        self.calls.append(("sketch", document, plane))
+    def create_sketch(self, document, plane, unit="m"):
+        self.calls.append(("sketch", document, plane, unit))
         return self.sketch
 
     def add_sketch_geometry(self, sketch, geometry):
@@ -133,6 +152,9 @@ class FakeAdapter:
     def capture_preview(self, document, path, view):
         self.calls.append(("preview", document, path, view))
         Path(path).write_bytes(b"png")
+
+    def close_document(self, document):
+        self.calls.append(("close-document", document))
 
 
 def _part(adapter=None):
@@ -272,6 +294,149 @@ def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_enti
     assert extrusion_args[1] is True
 
 
+def test_adapter_converts_document_units_and_degrees_before_com_calls():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    events = []
+
+    class Entity:
+        def Select4(self, append, data):  # noqa: N802
+            return True
+
+    class Sketch:
+        def Select2(self, append, mark):  # noqa: N802
+            return True
+
+    class Manager:
+        def CreateLine(self, *args):  # noqa: N802
+            events.append(("line", args))
+            return Entity()
+
+        def CreateCircleByRadius(self, *args):  # noqa: N802
+            events.append(("circle", args))
+            return Entity()
+
+    dim_value = SimpleNamespace(SystemValue=0.0)
+    dimension = SimpleNamespace(GetDimension2=lambda _: dim_value)
+    features = SimpleNamespace(
+        FeatureExtrusion2=lambda *args: (events.append(("extrude", args)), object())[1],
+        FeatureCut3=lambda *args: (events.append(("cut", args)), object())[1],
+        FeatureRevolve2=lambda *args: (events.append(("revolve", args)), object())[1],
+    )
+    document = SimpleNamespace(
+        SketchManager=Manager(),
+        ClearSelection2=lambda _: None,
+        AddDimension2=lambda *position: (events.append(("dimension", position)), dimension)[1],
+        AddDiameterDimension2=lambda *position: dimension,
+        AddRadialDimension2=lambda *position: dimension,
+        FeatureManager=features,
+    )
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    context = adapter_module.SketchContext(document, Sketch(), unit="mm")
+    entities = adapter.add_sketch_geometry(
+        context,
+        [
+            {"type": "line", "start": [10, 20], "end": [30, 40]},
+            {"type": "circle", "center": [10, 20], "radius": 5},
+        ],
+    )
+    adapter.add_dimensions(
+        context,
+        [{"type": "distance", "value": 10, "position": [20, 30]}],
+        [[entities[0]]],
+    )
+    assert events[0][1] == (0.01, 0.02, 0.0, 0.03, 0.04, 0.0)
+    assert events[1][1] == (0.01, 0.02, 0.0, 0.005)
+    assert events[2][1] == (0.02, 0.03, 0.0)
+    assert dim_value.SystemValue == 0.01
+
+    adapter.extrude(document, context, 10, "forward")
+    adapter.cut_extrude(document, context, 5)
+    adapter.revolve(document, context, Entity(), 180)
+    assert next(args for name, args in events if name == "extrude")[5] == 0.01
+    assert next(args for name, args in events if name == "cut")[5] == 0.005
+    revolve_args = next(args for name, args in events if name == "revolve")
+    assert revolve_args[6] == pytest.approx(3.141592653589793)
+
+    inch = adapter_module.SketchContext(document, Sketch(), unit="inch")
+    adapter.add_sketch_geometry(
+        inch, [{"type": "circle", "center": [1, 2], "radius": 0.5}]
+    )
+    assert events[-1][1] == (0.0254, 0.0508, 0.0, 0.0127)
+
+
+def test_preview_is_real_png_and_temporary_bmp_is_removed(tmp_path):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    data = tmp_path / "data"
+    target = data / "images" / "session" / "preview.png"
+    target.parent.mkdir(parents=True)
+
+    class Document:
+        def ShowNamedView2(self, *args):  # noqa: N802
+            pass
+
+        def ViewZoomtofit2(self):  # noqa: N802
+            pass
+
+        def SaveBMP(self, path, width, height):  # noqa: N802
+            from PIL import Image
+
+            assert Path(path).suffix.casefold() == ".bmp"
+            assert Path(path).parent == data / "tmp"
+            Image.new("RGB", (2, 2), "red").save(path, format="BMP")
+            return True
+
+    adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace()).capture_preview(
+        Document(), str(target), "isometric"
+    )
+    assert target.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert not list((data / "tmp").glob("*.bmp"))
+
+
+def test_connect_uses_solidworks_2023_progid_and_rejects_other_major_versions():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    calls = []
+
+    class App:
+        IsInitialized = True
+        RevisionNumber = "31.5.0"
+
+    dispatch = SimpleNamespace(
+        get_active_object=lambda prog_id: (calls.append(("attach", prog_id)), App())[1],
+        dispatch=lambda prog_id: (calls.append(("start", prog_id)), App())[1],
+    )
+    result = adapter_module.SolidWorksComAdapter(dispatch=dispatch).connect()
+    assert result.success and result.owned is False
+    assert calls == [("attach", "SldWorks.Application.31")]
+
+    wrong = App()
+    wrong.RevisionNumber = lambda: "32.0.0"
+    dispatch = SimpleNamespace(get_active_object=lambda _: wrong, dispatch=lambda _: None)
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=dispatch)
+    result = adapter.connect()
+    assert result.success is False
+    assert "2023" in result.message
+    assert adapter._app is None
+
+
+def test_connect_starts_visible_2023_when_no_active_instance():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    calls = []
+
+    class App:
+        IsInitialized = True
+        RevisionNumber = "31.0"
+        Visible = False
+
+    app = App()
+    dispatch = SimpleNamespace(
+        get_active_object=lambda prog_id: (_ for _ in ()).throw(OSError()),
+        dispatch=lambda prog_id: (calls.append(prog_id), app)[1],
+    )
+    result = adapter_module.SolidWorksComAdapter(dispatch=dispatch).connect()
+    assert result.success and result.owned and app.Visible
+    assert calls == ["SldWorks.Application.31"]
+
+
 class FakePaths:
     def __init__(self, root, *, allowed=True, confirm=True):
         self.root = Path(root)
@@ -329,6 +494,7 @@ def test_readiness_timeout_retains_owned_instance_until_policy_disconnect():
     class App:
         IsInitialized = False
         Visible = False
+        RevisionNumber = "31.0"
 
         def ExitApp(self):  # noqa: N802
             calls.append("exit")
@@ -357,6 +523,52 @@ def test_server_lifespan_disconnects_with_configured_owned_policy(monkeypatch):
 
     asyncio.run(run())
     assert adapter.disconnected == [True]
+
+
+def test_server_lifespan_closes_held_documents_and_clears_all_references(monkeypatch):
+    module = _module()
+
+    class ClosingAdapter(FakeAdapter):
+        def close_document(self, document):
+            self.calls.append(("close-document", document))
+            if document == "bad":
+                raise RuntimeError("close failed")
+
+    adapter = ClosingAdapter()
+    scoped = module.SolidWorksService(adapter=adapter)
+    scoped.documents = {
+        "one": (SimpleNamespace(), "bad"),
+        "two": (SimpleNamespace(), "good"),
+    }
+    for registry in (
+        scoped.sketches,
+        scoped.entities,
+        scoped.features,
+        scoped.faces,
+        scoped.edges,
+    ):
+        registry["held"] = (SimpleNamespace(), object())
+    monkeypatch.setattr(module, "service", scoped)
+
+    async def run():
+        async with module.server_lifespan(module.mcp):
+            pass
+
+    asyncio.run(run())
+    assert ("close-document", "bad") in adapter.calls
+    assert ("close-document", "good") in adapter.calls
+    assert not scoped.documents
+    assert all(
+        not registry
+        for registry in (
+            scoped.sketches,
+            scoped.entities,
+            scoped.features,
+            scoped.faces,
+            scoped.edges,
+        )
+    )
+    assert adapter.disconnected == [False]
 
 
 def test_persistent_reference_key_uses_model_extension_and_survives_new_wrappers():

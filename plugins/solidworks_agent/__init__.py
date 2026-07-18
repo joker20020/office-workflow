@@ -83,10 +83,12 @@ Success, Partial Success, or Failed. Report only tool-verified work and files:
 
 class _StructuredResult(str):
     success: bool
+    artifacts_verified: bool
 
-    def __new__(cls, content: str, *, success: bool):
+    def __new__(cls, content: str, *, success: bool, artifacts_verified: bool = False):
         value = super().__new__(cls, content)
         value.success = success
+        value.artifacts_verified = artifacts_verified
         return value
 
 
@@ -153,6 +155,38 @@ def _validate_result(
         if not all(required):
             return _failure("successful result is missing a required deliverable")
     return _StructuredResult(text, success=success)
+
+
+def _verify_persisted_artifacts(
+    result: _StructuredResult,
+    records: list[Any],
+    *,
+    project_root: str | Path,
+) -> _StructuredResult:
+    """Require an exact persisted-record match for the four generated deliverables."""
+    if not result.success:
+        return result
+    root = Path(project_root).resolve()
+    positions = [result.index(heading) for heading in REQUIRED_HEADINGS]
+    generated = result[positions[3] + len(REQUIRED_HEADINGS[3]) : positions[4]]
+    expected = {
+        str(Path(line.strip()[2:].strip().strip("`")).resolve())
+        for line in generated.splitlines()
+        if line.strip().startswith("- ")
+    }
+    persisted = {str(Path(record.path).resolve()) for record in records}
+    if len(records) != 4 or len(expected) != 4 or persisted != expected:
+        return _failure(
+            "successful result requires exactly four persisted artifact records "
+            "for this SolidWorks operation"
+        )
+    data_root = (root / "data").resolve()
+    try:
+        for path in persisted:
+            Path(path).relative_to(data_root)
+    except ValueError:
+        return _failure("persisted SolidWorks artifact is outside the data boundary")
+    return _StructuredResult(str(result), success=True, artifacts_verified=True)
 
 
 def _build_model() -> Any:
@@ -253,13 +287,10 @@ class SolidWorksAgentTools:
     ) -> ToolResponse:
         try:
             result = _run_async(self._solidworks_model_async(task, session_id))
-            context = current_artifact_context()
-            root = (
-                context.path_policy.project_root
-                if context is not None and hasattr(context, "path_policy")
-                else Path(__file__).resolve().parents[2]
-            )
-            result = _validate_result(result, root)
+            if not isinstance(result, _StructuredResult):
+                result = _failure("SolidWorks execution returned an untrusted result type")
+            elif result.success and not result.artifacts_verified:
+                result = _failure("SolidWorks deliverables were not verified against persistence")
         except Exception as exc:
             result = _failure(f"SolidWorks execution failed: {exc}")
         return ToolResponse(
@@ -352,7 +383,19 @@ class SolidWorksAgentTools:
                     ),
                 ),
             )
-            return _validate_result(response.get_text_content() or "", validation_root)
+            result = _validate_result(response.get_text_content() or "", validation_root)
+            if not result.success:
+                return result
+            records = context.registry.list_session(
+                active_session,
+                producer="SolidWorksAgent",
+                tool_call_id=operation_id,
+            )
+            return _verify_persisted_artifacts(
+                result,
+                records,
+                project_root=validation_root,
+            )
         except BaseException as exc:
             primary_error = exc
             raise
@@ -380,13 +423,14 @@ class SolidWorksAgentTools:
                 try:
                     try:
                         result = await self._solidworks_model_async(*args, **kwargs)
-                        context = current_artifact_context()
-                        root = (
-                            context.path_policy.project_root
-                            if context is not None and hasattr(context, "path_policy")
-                            else Path(__file__).resolve().parents[2]
-                        )
-                        result = _validate_result(result, root)
+                        if not isinstance(result, _StructuredResult):
+                            result = _failure(
+                                "SolidWorks execution returned an untrusted result type"
+                            )
+                        elif result.success and not result.artifacts_verified:
+                            result = _failure(
+                                "SolidWorks deliverables were not verified against persistence"
+                            )
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
@@ -430,7 +474,7 @@ class SolidWorksAgentPlugin(PluginBase):
     version = "1.0.0"
     description = "Feature-level SolidWorks modeling subagent"
     author = "OfficeTools"
-    permissions = PermissionSet.from_list([Permission.AGENT_TOOL])
+    permissions = PermissionSet.from_list([Permission.AGENT_TOOL, Permission.NETWORK])
 
     def __init__(self):
         super().__init__()

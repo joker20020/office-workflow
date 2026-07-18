@@ -18,7 +18,7 @@ from src.core.artifact_context import ArtifactExecutionContext
 from src.core.artifact_paths import ArtifactCategory, ArtifactPathPolicy
 from src.core.artifact_registry import ArtifactRegistry
 from src.storage.database import Database
-from src.storage.repositories import ArtifactRepository
+from src.storage.repositories import ArtifactRepository, ChatHistoryRepository
 
 VALID_RESULT = """# Execution Result
 ## Status
@@ -41,12 +41,12 @@ None
 """
 
 
-def _valid_result(root: Path) -> str:
+def _valid_result(root: Path, session_id: str = "session") -> str:
     paths = {
-        "native": root / "models" / "session" / "part.sldprt",
-        "step": root / "exports" / "session" / "part.step",
-        "stl": root / "exports" / "session" / "part.stl",
-        "preview": root / "images" / "session" / "preview.png",
+        "native": root / "models" / session_id / "part.sldprt",
+        "step": root / "exports" / session_id / "part.step",
+        "stl": root / "exports" / session_id / "part.stl",
+        "preview": root / "images" / session_id / "preview.png",
     }
     for path in paths.values():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +79,7 @@ def test_manifest_and_settings_define_an_independent_plugin(monkeypatch):
 
     assert manifest["name"] == "solidworks_agent"
     assert manifest["entry"] == "SolidWorksAgentPlugin"
-    assert manifest["permissions"] == ["agent.tool"]
+    assert set(manifest["permissions"]) == {"agent.tool", "network"}
     assert settings.DEFAULT_EXECUTION_TIMEOUT_SECONDS == 600.0
     monkeypatch.setenv("SOLIDWORKS_MCP_TIMEOUT_SECONDS", "37.5")
     assert settings.execution_timeout_seconds() == 37.5
@@ -87,7 +87,14 @@ def test_manifest_and_settings_define_an_independent_plugin(monkeypatch):
     assert settings.execution_timeout_seconds() == 600.0
 
 
-def _install_recording_runtime(monkeypatch, module, *, connect_error=None, result=VALID_RESULT):
+def _install_recording_runtime(
+    monkeypatch,
+    module,
+    *,
+    connect_error=None,
+    result=VALID_RESULT,
+    register_artifacts=False,
+):
     events = []
     captured = {}
 
@@ -133,6 +140,28 @@ def _install_recording_runtime(monkeypatch, module, *, connect_error=None, resul
         async def reply_stream(self, *, inputs):
             events.append("reply_stream")
             captured["message"] = inputs
+            if register_artifacts:
+                context = module.current_artifact_context()
+                categories = {
+                    ".sldprt": ArtifactCategory.MODELS,
+                    ".sldasm": ArtifactCategory.MODELS,
+                    ".step": ArtifactCategory.EXPORTS,
+                    ".stl": ArtifactCategory.EXPORTS,
+                    ".png": ArtifactCategory.IMAGES,
+                }
+                for line in result.splitlines():
+                    if not line.startswith("- "):
+                        continue
+                    path = Path(line[2:])
+                    category = categories.get(path.suffix.casefold())
+                    if category is not None:
+                        context.registry.confirm_file(
+                            context.session_id,
+                            category,
+                            path,
+                            producer="SolidWorksAgent",
+                            tool_call_id=captured["config"]["env"]["SOLIDWORKS_TOOL_CALL_ID"],
+                        )
             yield ReplyStartEvent(
                 session_id="agent-session",
                 reply_id="reply-1",
@@ -159,15 +188,17 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
 ):
     module = _module()
     policy = ArtifactPathPolicy(tmp_path / "custom-project")
-    valid_result = _valid_result(policy.data_root)
-    events, captured, fake_client = _install_recording_runtime(
-        monkeypatch, module, result=valid_result
-    )
     database = Database(tmp_path / "custom-state" / "history.sqlite3")
+    database.create_tables()
+    session_id = ChatHistoryRepository(database).create_session("solidworks test")
+    valid_result = _valid_result(policy.data_root, session_id)
     context = ArtifactExecutionContext(
-        "active-session",
+        session_id,
         policy,
         ArtifactRegistry(policy, ArtifactRepository(database)),
+    )
+    events, captured, fake_client = _install_recording_runtime(
+        monkeypatch, module, result=valid_result, register_artifacts=True
     )
     monkeypatch.setattr(module, "current_artifact_context", lambda: context)
     public_events = []
@@ -185,7 +216,7 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert captured["client_kwargs"]["execution_timeout"] == 600.0
     assert captured["config"]["command"] == sys.executable
     assert captured["config"]["args"] == ["-m", "plugins.solidworks_agent.mcp_server"]
-    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "active-session"
+    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == session_id
     assert captured["config"]["env"]["SOLIDWORKS_PROJECT_ROOT"] == str(
         policy.project_root
     )
@@ -197,7 +228,7 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert captured["config"]["cwd"] == str(Path(module.__file__).parents[2])
     message = captured["message"].get_text_content()
     assert "build it" in message
-    assert "active-session" in message
+    assert session_id in message
     assert correlation_id in message
     assert "solidworks_new_part" in message
     assert {event["kind"] for event in public_events} == {"text", "complete"}
@@ -223,6 +254,34 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert "arbitrary paths" in prompt
     for heading in module.REQUIRED_HEADINGS:
         assert heading in prompt
+
+
+@pytest.mark.asyncio
+async def test_success_markdown_is_rejected_without_four_matching_persisted_records(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    policy = ArtifactPathPolicy(tmp_path)
+    database = Database(tmp_path / "history.sqlite3")
+    database.create_tables()
+    session_id = ChatHistoryRepository(database).create_session("solidworks test")
+    context = ArtifactExecutionContext(
+        session_id,
+        policy,
+        ArtifactRegistry(policy, ArtifactRepository(database)),
+    )
+    _install_recording_runtime(
+        monkeypatch,
+        module,
+        result=_valid_result(policy.data_root),
+        register_artifacts=False,
+    )
+    monkeypatch.setattr(module, "current_artifact_context", lambda: context)
+
+    result = await module.SolidWorksAgentTools()._solidworks_model_async("build it")
+
+    assert result.success is False
+    assert "persisted artifact" in result
 
 
 @pytest.mark.asyncio
@@ -254,23 +313,32 @@ async def test_matching_explicit_session_is_allowed_with_artifact_context(
     monkeypatch, tmp_path
 ):
     module = _module()
+    database = Database(tmp_path / "history.sqlite3")
+    database.create_tables()
+    session_id = ChatHistoryRepository(database).create_session("solidworks test")
+    policy = ArtifactPathPolicy(tmp_path)
     _, captured, _ = _install_recording_runtime(
-        monkeypatch, module, result=_valid_result(tmp_path / "data")
+        monkeypatch,
+        module,
+        result=_valid_result(tmp_path / "data", session_id),
+        register_artifacts=True,
     )
     monkeypatch.setattr(
         module,
         "current_artifact_context",
         lambda: SimpleNamespace(
-            session_id="active-session", path_policy=ArtifactPathPolicy(tmp_path)
+            session_id=session_id,
+            path_policy=policy,
+            registry=ArtifactRegistry(policy, ArtifactRepository(database)),
         ),
     )
 
     result = await module.SolidWorksAgentTools()._solidworks_model_async(
-        "build it", session_id="active-session"
+        "build it", session_id=session_id
     )
 
     assert result.success is True
-    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "active-session"
+    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == session_id
 
 
 @pytest.mark.asyncio
@@ -454,7 +522,18 @@ def test_public_tool_returns_tool_response_and_rejects_malformed_markdown(
     monkeypatch.setattr(
         module,
         "_run_async",
-        lambda coro: (coro.close(), module._validate_result(valid_result, tmp_path))[1],
+        lambda coro: (
+            coro.close(),
+            module._verify_persisted_artifacts(
+                module._validate_result(valid_result, tmp_path),
+                [
+                    SimpleNamespace(path=line[2:])
+                    for line in valid_result.splitlines()
+                    if line.startswith("- ")
+                ],
+                project_root=tmp_path,
+            ),
+        )[1],
     )
     monkeypatch.setattr(
         module,
@@ -514,6 +593,15 @@ def test_plugin_registers_only_the_solidworks_streaming_tool():
     assert [tool.__name__ for tool in registered["tools"]] == [
         "tool_solidworks_model",
     ]
+
+
+def test_manifest_and_plugin_declare_network_and_agent_tool_permissions():
+    module = _module()
+    manifest = json.loads(Path(module.__file__).with_name("plugin.json").read_text("utf-8"))
+    assert set(manifest["permissions"]) == {"agent.tool", "network"}
+    assert module.SolidWorksAgentPlugin.permissions.has_all(
+        {module.Permission.AGENT_TOOL, module.Permission.NETWORK}
+    )
 
 
 class _RecordingRegistry:

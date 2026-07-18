@@ -181,8 +181,8 @@ class SolidWorksService:
         try:
             if plane not in PLANES:
                 raise ValueError("unsupported sketch plane")
-            _, document = self._document(document_id)
-            raw = self.adapter.create_sketch(document, plane)
+            document_ref, document = self._document(document_id)
+            raw = self.adapter.create_sketch(document, plane, document_ref.unit)
             ref = SketchRef(uuid.uuid4().hex, document_id, plane)
             self.sketches[ref.id] = (ref, raw)
             return self._ok(f"Created sketch on {plane}.", ref)
@@ -501,6 +501,18 @@ async def server_lifespan(server: FastMCP):
             "true",
             "yes",
         }
+        for _, document in list(service.documents.values()):
+            try:
+                service.adapter.close_document(document)
+            except Exception:
+                pass
+        service.documents.clear()
+        service.sketches.clear()
+        service.entities.clear()
+        service.features.clear()
+        service.faces.clear()
+        service.edges.clear()
+        service._persistent_refs.clear()
         service.adapter.disconnect(close_started_instance=close_owned)
 
 
@@ -518,6 +530,7 @@ def solidworks_status() -> str:
 
 @mcp.tool()
 def solidworks_new_part(session_id: str, name: str, unit: str) -> str:
+    """Create a part whose DocumentRef.unit defines all later numeric length inputs."""
     return _tool(service.new_part, session_id, name, unit)
 
 
@@ -528,11 +541,13 @@ def solidworks_create_sketch(document_id: str, plane: str) -> str:
 
 @mcp.tool()
 def solidworks_add_sketch_geometry(sketch_id: str, geometry: list[dict[str, Any]]) -> str:
+    """Add coordinates/radii in DocumentRef.unit; the adapter converts them to SI metres."""
     return _tool(service.add_sketch_geometry, sketch_id, geometry)
 
 
 @mcp.tool()
 def solidworks_add_dimensions(sketch_id: str, dimensions: list[dict[str, Any]]) -> str:
+    """Add values/positions in DocumentRef.unit; the adapter converts them to SI metres."""
     return _tool(service.add_dimensions, sketch_id, dimensions)
 
 
@@ -543,16 +558,19 @@ def solidworks_close_sketch(sketch_id: str) -> str:
 
 @mcp.tool()
 def solidworks_extrude(document_id: str, sketch_id: str, depth: float, direction: str) -> str:
+    """Extrude depth is in DocumentRef.unit and is converted to SI metres before COM."""
     return _tool(service.extrude, document_id, sketch_id, depth, direction)
 
 
 @mcp.tool()
 def solidworks_revolve(document_id: str, sketch_id: str, axis: str, angle: float) -> str:
+    """Revolve angle is degrees and is converted to COM radians by the adapter."""
     return _tool(service.revolve, document_id, sketch_id, axis, angle)
 
 
 @mcp.tool()
 def solidworks_cut_extrude(document_id: str, sketch_id: str, depth: float) -> str:
+    """Cut depth is in DocumentRef.unit and is converted to SI metres before COM."""
     return _tool(service.cut_extrude, document_id, sketch_id, depth)
 
 
@@ -560,11 +578,13 @@ def solidworks_cut_extrude(document_id: str, sketch_id: str, depth: float) -> st
 def solidworks_hole(
     document_id: str, face_ref: str, specification: dict[str, Any], position: list[float]
 ) -> str:
+    """Hole positions and sizes use DocumentRef.unit; angles are degrees."""
     return _tool(service.hole, document_id, face_ref, specification, position)
 
 
 @mcp.tool()
 def solidworks_fillet(document_id: str, edge_refs: list[str], radius: float) -> str:
+    """Fillet radius uses DocumentRef.unit."""
     return _tool(service.fillet, document_id, edge_refs, radius)
 
 
@@ -572,6 +592,7 @@ def solidworks_fillet(document_id: str, edge_refs: list[str], radius: float) -> 
 def solidworks_chamfer(
     document_id: str, edge_refs: list[str], specification: dict[str, Any]
 ) -> str:
+    """Chamfer distance uses DocumentRef.unit and angle uses degrees."""
     return _tool(service.chamfer, document_id, edge_refs, specification)
 
 
@@ -582,6 +603,7 @@ def solidworks_mirror_feature(document_id: str, feature_refs: list[str], plane: 
 
 @mcp.tool()
 def solidworks_pattern_feature(document_id: str, feature_ref: str, pattern: dict[str, Any]) -> str:
+    """Pattern spacing uses DocumentRef.unit and circular angle uses degrees."""
     return _tool(service.pattern_feature, document_id, feature_ref, pattern)
 
 

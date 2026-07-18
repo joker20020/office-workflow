@@ -52,3 +52,33 @@ def test_confirm_file_rejects_missing_final_file(tmp_path: Path, database: Datab
 
     with pytest.raises(ValueError, match="exist"):
         registry.confirm_file("session-123", ArtifactCategory.DOCUMENTS, missing_path)
+
+
+def test_registry_public_read_api_filters_producer_and_tool_call(
+    tmp_path: Path, database: Database
+):
+    session_id = ChatHistoryRepository(database).create_session("read artifacts")
+    policy = ArtifactPathPolicy(tmp_path)
+    registry = ArtifactRegistry(policy, ArtifactRepository(database))
+    for name, producer, call in (
+        ("one.txt", "SolidWorksAgent", "operation-1"),
+        ("two.txt", "SolidWorksAgent", "operation-2"),
+        ("three.txt", "OtherAgent", "operation-1"),
+    ):
+        path = policy.destination(session_id, ArtifactCategory.DOCUMENTS, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name, encoding="utf-8")
+        registry.confirm_file(
+            session_id,
+            ArtifactCategory.DOCUMENTS,
+            path,
+            producer=producer,
+            tool_call_id=call,
+        )
+
+    records = registry.list_session(
+        session_id,
+        producer="SolidWorksAgent",
+        tool_call_id="operation-1",
+    )
+    assert [record.filename for record in records] == ["one.txt"]

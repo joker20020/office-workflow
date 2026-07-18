@@ -46,3 +46,18 @@ class ArtifactRegistry:
             producer=producer,
             tool_call_id=tool_call_id,
         )
+
+    def list_session(
+        self,
+        session_id: str,
+        *,
+        producer: str | None = None,
+        tool_call_id: str | None = None,
+    ) -> list[ArtifactRecord]:
+        """Read session artifacts, optionally narrowed to one producer operation."""
+        records = self._repository.list_session(session_id)
+        if producer is not None:
+            records = [record for record in records if record.producer == producer]
+        if tool_call_id is not None:
+            records = [record for record in records if record.tool_call_id == tool_call_id]
+        return records

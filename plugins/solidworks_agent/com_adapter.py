@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import time
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from .types import ConnectionResult
@@ -35,9 +38,14 @@ def runtime_dispatch_factory() -> DispatchApi:
 class SketchContext:
     document: Any
     sketch: Any
+    unit: str = "m"
 
 
 class SolidWorksComAdapter:
+    PROG_ID = "SldWorks.Application.31"
+    VERSION_MAJOR = 31
+    _UNIT_TO_METERS = {"mm": 0.001, "cm": 0.01, "m": 1.0, "inch": 0.0254}
+
     def __init__(self, dispatch: DispatchApi | None = None, sleep=time.sleep):
         self._dispatch = dispatch
         self._sleep = sleep
@@ -50,12 +58,22 @@ class SolidWorksComAdapter:
             return ConnectionResult(initialized, self._owned, "already connected")
         dispatch = self._dispatch or runtime_dispatch_factory()
         try:
-            self._app = dispatch.get_active_object("SldWorks.Application")
+            self._app = dispatch.get_active_object(self.PROG_ID)
             self._owned = False
         except Exception:
-            self._app = dispatch.dispatch("SldWorks.Application")
+            self._app = dispatch.dispatch(self.PROG_ID)
             self._app.Visible = True
             self._owned = True
+        revision = getattr(self._app, "RevisionNumber", "")
+        revision = revision() if callable(revision) else revision
+        try:
+            major = int(str(revision).split(".", 1)[0])
+        except (TypeError, ValueError):
+            major = -1
+        if major != self.VERSION_MAJOR:
+            self._app = None
+            self._owned = False
+            return ConnectionResult(False, False, "SolidWorks 2023 (major 31) is required")
         deadline = time.monotonic() + max(0.0, readiness_timeout)
         while True:
             try:
@@ -98,14 +116,30 @@ class SolidWorksComAdapter:
             document.SetUserPreferenceIntegerValue(27, unit_codes[unit])
         return document
 
-    def create_sketch(self, document: Any, plane: str) -> SketchContext:
+    def create_sketch(self, document: Any, plane: str, unit: str = "m") -> SketchContext:
         if not document.Extension.SelectByID2(plane, "PLANE", 0, 0, 0, False, 0, None, 0):
             raise RuntimeError(f"SolidWorks could not select plane: {plane}")
         document.SketchManager.InsertSketch(True)
         sketch = document.GetActiveSketch2()
         if sketch is None:
             raise RuntimeError("SolidWorks failed to create sketch")
-        return SketchContext(document, sketch)
+        self._scale(unit)
+        return SketchContext(document, sketch, unit)
+
+    @classmethod
+    def _scale(cls, unit: str) -> float:
+        try:
+            return cls._UNIT_TO_METERS[unit]
+        except KeyError as exc:
+            raise ValueError("unsupported unit") from exc
+
+    @classmethod
+    def _length(cls, value: float, unit: str) -> float:
+        return float(value) * cls._scale(unit)
+
+    @classmethod
+    def _point_si(cls, point: list[float], unit: str) -> tuple[float, float]:
+        return cls._length(point[0], unit), cls._length(point[1], unit)
 
     def add_sketch_geometry(
         self, context: SketchContext, geometry: list[dict[str, Any]]
@@ -114,11 +148,25 @@ class SolidWorksComAdapter:
         created = []
         for item in geometry:
             if item["type"] == "line":
-                raw = manager.CreateLine(*item["start"], 0.0, *item["end"], 0.0)
+                raw = manager.CreateLine(
+                    *self._point_si(item["start"], context.unit),
+                    0.0,
+                    *self._point_si(item["end"], context.unit),
+                    0.0,
+                )
             elif item["type"] == "circle":
-                raw = manager.CreateCircleByRadius(*item["center"], 0.0, item["radius"])
+                raw = manager.CreateCircleByRadius(
+                    *self._point_si(item["center"], context.unit),
+                    0.0,
+                    self._length(item["radius"], context.unit),
+                )
             else:
-                raw = manager.CreateCenterRectangle(*item["center"], 0.0, *item["corner"], 0.0)
+                raw = manager.CreateCenterRectangle(
+                    *self._point_si(item["center"], context.unit),
+                    0.0,
+                    *self._point_si(item["corner"], context.unit),
+                    0.0,
+                )
             if raw is None:
                 raise RuntimeError(f"SolidWorks failed to create {item['type']}")
             created.append(raw)
@@ -141,10 +189,11 @@ class SolidWorksComAdapter:
                 "diameter": document.AddDiameterDimension2,
                 "radius": document.AddRadialDimension2,
             }[item["type"]]
-            dimension = factory(*item.get("position", [0.0, 0.0]), 0.0)
+            position = self._point_si(item.get("position", [0.0, 0.0]), context.unit)
+            dimension = factory(*position, 0.0)
             if dimension is None:
                 raise RuntimeError(f"SolidWorks failed to add {item['type']} dimension")
-            dimension.GetDimension2(0).SystemValue = item["value"]
+            dimension.GetDimension2(0).SystemValue = self._length(item["value"], context.unit)
         document.ClearSelection2(True)
         return len(dimensions)
 
@@ -166,7 +215,7 @@ class SolidWorksComAdapter:
             False,
             0,
             0,
-            depth,
+            self._length(depth, context.unit),
             0.0,
             False,
             False,
@@ -200,7 +249,7 @@ class SolidWorksComAdapter:
             False,
             False,
             False,
-            angle,
+            math.radians(angle),
             0.0,
             False,
             False,
@@ -228,7 +277,7 @@ class SolidWorksComAdapter:
             False,
             0,
             0,
-            depth,
+            self._length(depth, context.unit),
             0.0,
             False,
             False,
@@ -282,8 +331,35 @@ class SolidWorksComAdapter:
             raise ValueError("unsupported preview view")
         document.ShowNamedView2("", views[view])
         document.ViewZoomtofit2()
-        if not document.SaveBMP(path, 0, 0):
-            raise RuntimeError("SolidWorks preview capture failed")
+        target = Path(path).resolve()
+        if target.suffix.casefold() != ".png":
+            raise ValueError("preview output must be PNG")
+        try:
+            data_root = next(
+                parent for parent in target.parents if parent.name.casefold() == "data"
+            )
+        except StopIteration as exc:
+            raise ValueError("preview output must be below data") from exc
+        temp_dir = (data_root / "tmp").resolve()
+        temp_dir.relative_to(data_root)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temporary = temp_dir / f"{target.stem}-{uuid.uuid4().hex}.bmp"
+        target.unlink(missing_ok=True)
+        try:
+            if not document.SaveBMP(str(temporary), 0, 0):
+                raise RuntimeError("SolidWorks preview capture failed")
+            from PIL import Image
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(temporary) as bitmap:
+                bitmap.save(target, format="PNG")
+            if not target.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+                raise RuntimeError("SolidWorks preview conversion did not produce PNG")
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def close_document(self, document: Any) -> None:
         """Close one explicitly owned test document without exiting SolidWorks."""

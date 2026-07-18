@@ -43,11 +43,11 @@ def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
         sketch = service.create_sketch(document.id, "Front Plane").value
         geometry = service.add_sketch_geometry(
             sketch.id,
-            [{"type": "center_rectangle", "center": [0, 0], "corner": [0.02, 0.01]}],
+            [{"type": "center_rectangle", "center": [0, 0], "corner": [20, 10]}],
         )
         assert geometry.success
         assert service.close_sketch(sketch.id).success
-        assert service.extrude(document.id, sketch.id, 0.01, "forward").success
+        assert service.extrude(document.id, sketch.id, 10, "forward").success
         results = [
             service.save_model(document.id),
             service.export_step(document.id),
