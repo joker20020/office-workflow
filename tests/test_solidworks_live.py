@@ -40,7 +40,9 @@ def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
             "license, sign-in, template, or Windows automation prompt, then retry."
         )
         document = created.value
-        sketch = service.create_sketch(document.id, "Front Plane").value
+        sketch_result = service.create_sketch(document.id, "Front Plane")
+        assert sketch_result.success, sketch_result.message
+        sketch = sketch_result.value
         geometry = service.add_sketch_geometry(
             sketch.id,
             [{"type": "center_rectangle", "center": [0, 0], "corner": [20, 10]}],

@@ -46,6 +46,11 @@ class SolidWorksComAdapter:
     PROG_ID = "SldWorks.Application.31"
     VERSION_MAJOR = 31
     _UNIT_TO_METERS = {"mm": 0.001, "cm": 0.01, "m": 1.0, "inch": 0.0254}
+    _PLANE_ALIASES = {
+        "Front Plane": ("Front Plane", "前视基准面"),
+        "Top Plane": ("Top Plane", "上视基准面"),
+        "Right Plane": ("Right Plane", "右视基准面"),
+    }
 
     def __init__(self, dispatch: DispatchApi | None = None, sleep=time.sleep):
         self._dispatch = dispatch
@@ -65,8 +70,7 @@ class SolidWorksComAdapter:
             self._app = dispatch.dispatch(self.PROG_ID)
             self._app.Visible = True
             self._owned = True
-        revision = getattr(self._app, "RevisionNumber", "")
-        revision = revision() if callable(revision) else revision
+        revision = self._com_value(self._app, "RevisionNumber", "")
         try:
             major = int(str(revision).split(".", 1)[0])
         except (TypeError, ValueError):
@@ -110,6 +114,11 @@ class SolidWorksComAdapter:
             raise RuntimeError("SolidWorks is not connected")
         return self._app
 
+    @staticmethod
+    def _com_value(obj: Any, name: str, default: Any = None) -> Any:
+        value = getattr(obj, name, default)
+        return value() if callable(value) else value
+
     def new_part(self, name: str, unit: str) -> Any:
         app = self._require_app()
         template = app.GetUserPreferenceStringValue(1)
@@ -152,7 +161,14 @@ class SolidWorksComAdapter:
         return document
 
     def create_sketch(self, document: Any, plane: str, unit: str = "m") -> SketchContext:
-        if not document.Extension.SelectByID2(plane, "PLANE", 0, 0, 0, False, 0, None, 0):
+        aliases = self._PLANE_ALIASES.get(plane, (plane,))
+        selected = any(
+            document.Extension.SelectByID2(
+                candidate, "PLANE", 0, 0, 0, False, 0, None, 0
+            )
+            for candidate in aliases
+        )
+        if not selected:
             raise RuntimeError(f"SolidWorks could not select plane: {plane}")
         document.SketchManager.InsertSketch(True)
         sketch = document.GetActiveSketch2()
@@ -348,7 +364,7 @@ class SolidWorksComAdapter:
         faces = [face for body in bodies for face in list(body.GetFaces() or [])]
         edges = [edge for face in faces for edge in list(face.GetEdges() or [])]
         return {
-            "title": str(document.GetTitle()),
+            "title": str(self._com_value(document, "GetTitle", "")),
             "features": features,
             "faces": faces,
             "edges": edges,
@@ -400,5 +416,5 @@ class SolidWorksComAdapter:
         """Close one explicitly owned test document without exiting SolidWorks."""
         if self._app is None:
             return
-        title = str(document.GetTitle())
+        title = str(self._com_value(document, "GetTitle", ""))
         self._app.CloseDoc(title)

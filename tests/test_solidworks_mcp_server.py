@@ -294,6 +294,39 @@ def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_enti
     assert extrusion_args[1] is True
 
 
+def test_create_sketch_falls_back_to_localized_standard_plane_name():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    selected = []
+    sketch = object()
+    extension = SimpleNamespace(
+        SelectByID2=lambda name, *args: (selected.append(name), name == "前视基准面")[1]
+    )
+    manager = SimpleNamespace(InsertSketch=lambda _: None)
+    document = SimpleNamespace(
+        Extension=extension,
+        SketchManager=manager,
+        GetActiveSketch2=lambda: sketch,
+    )
+
+    context = adapter_module.SolidWorksComAdapter(
+        dispatch=SimpleNamespace()
+    ).create_sketch(document, "Front Plane", "mm")
+
+    assert context.sketch is sketch
+    assert selected == ["Front Plane", "前视基准面"]
+
+
+def test_close_document_accepts_get_title_as_a_com_property():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    closed = []
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    adapter._app = SimpleNamespace(CloseDoc=closed.append)
+
+    adapter.close_document(SimpleNamespace(GetTitle="property-title"))
+
+    assert closed == ["property-title"]
+
+
 def test_adapter_converts_document_units_and_degrees_before_com_calls():
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     events = []
