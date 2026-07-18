@@ -70,7 +70,7 @@ RAG cache files are intentionally excluded from artifact registration and may be
 
 ## 4. SolidWorks 2023 MCP (implemented last)
 
-Create a project-local Python stdio MCP server and register it through the existing AgentScope 2 MCP manager. It uses the local SolidWorks 2023 COM API, first attempting to attach to an already running instance and otherwise starting SolidWorks and waiting for COM readiness. It records whether it started the instance; disconnecting the MCP never closes a user-owned running instance. A configuration setting controls cleanup of instances the MCP started.
+Create a self-contained `plugins/solidworks_agent` plugin. Its public plugin tool follows the existing Blender pattern: the main agent calls one SolidWorks subagent tool, that subagent owns a stateful stdio MCP client, and its final structured Markdown is returned as the parent tool result. The plugin contains its own Python stdio MCP server and local SolidWorks 2023 COM adapter; no SolidWorks MCP implementation is added to `src`. The adapter first attempts to attach to an already running instance and otherwise starts SolidWorks and waits for COM readiness. It records whether it started the instance; disconnecting the MCP never closes a user-owned running instance. Plugin configuration controls cleanup of instances it started.
 
 The MCP has a constrained feature-level API rather than a monolithic free-form part creator.
 
@@ -106,7 +106,7 @@ Each modeling call returns structured Markdown with status, IDs, affected entiti
 
 Native `.sldprt`/`.sldasm` files save to `data/models/<session-id>/`; `.step` and `.stl` exports save to `data/exports/<session-id>/`; previews save to `data/images/<session-id>/`. Confirmed files use the common artifact registry.
 
-The existing Blender tool remains a compatibility entry point but is removed from the default system prompt and the default main workflow. SolidWorks replaces it only after MCP integration tests pass.
+On `main`, keep the existing Blender tool and current Blender modeling stage while applying the shared path policy and artifact registry. After the SolidWorks plugin integration tests pass on `solidworks_version`, remove Blender-specific plugin tools, prompts, configuration, and dedicated tests from that branch. The main agent never calls SolidWorks MCP tools directly; it calls the SolidWorks plugin subagent tool.
 
 ### First-use operator preparation
 
