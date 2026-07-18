@@ -16,6 +16,9 @@ from agentscope.message import ToolResultState
 
 from src.core.artifact_context import ArtifactExecutionContext
 from src.core.artifact_paths import ArtifactCategory, ArtifactPathPolicy
+from src.core.artifact_registry import ArtifactRegistry
+from src.storage.database import Database
+from src.storage.repositories import ArtifactRepository
 
 VALID_RESULT = """# Execution Result
 ## Status
@@ -146,17 +149,18 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     monkeypatch, tmp_path
 ):
     module = _module()
-    valid_result = _valid_result(tmp_path / "data")
+    policy = ArtifactPathPolicy(tmp_path / "custom-project")
+    valid_result = _valid_result(policy.data_root)
     events, captured, fake_client = _install_recording_runtime(
         monkeypatch, module, result=valid_result
     )
-    monkeypatch.setattr(
-        module,
-        "current_artifact_context",
-        lambda: SimpleNamespace(
-            session_id="active-session", path_policy=ArtifactPathPolicy(tmp_path)
-        ),
+    database = Database(tmp_path / "custom-state" / "history.sqlite3")
+    context = ArtifactExecutionContext(
+        "active-session",
+        policy,
+        ArtifactRegistry(policy, ArtifactRepository(database)),
     )
+    monkeypatch.setattr(module, "current_artifact_context", lambda: context)
     public_events = []
     token = module._PROGRESS_SINK.set(public_events.append)
     try:
@@ -174,10 +178,10 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert captured["config"]["args"] == ["-m", "plugins.solidworks_agent.mcp_server"]
     assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "active-session"
     assert captured["config"]["env"]["SOLIDWORKS_PROJECT_ROOT"] == str(
-        Path(module.__file__).parents[2]
+        policy.project_root
     )
-    assert captured["config"]["env"]["SOLIDWORKS_DATABASE_PATH"].endswith(
-        "data\\app.db"
+    assert captured["config"]["env"]["SOLIDWORKS_DATABASE_PATH"] == str(
+        database.db_path.resolve()
     )
     correlation_id = captured["config"]["env"]["SOLIDWORKS_TOOL_CALL_ID"]
     assert correlation_id
@@ -213,21 +217,74 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
 
 
 @pytest.mark.asyncio
-async def test_explicit_session_overrides_artifact_context(monkeypatch):
+async def test_explicit_session_cannot_override_artifact_context(monkeypatch):
     module = _module()
-    _, captured, _ = _install_recording_runtime(monkeypatch, module)
+    events, _, _ = _install_recording_runtime(monkeypatch, module)
     monkeypatch.setattr(
         module,
         "current_artifact_context",
-        lambda: SimpleNamespace(session_id="active-session"),
+        lambda: SimpleNamespace(
+            session_id="active-session",
+            path_policy=ArtifactPathPolicy(Path(module.__file__).parents[2]),
+        ),
     )
 
-    await module.SolidWorksAgentTools()._solidworks_model_async(
+    result = await module.SolidWorksAgentTools()._solidworks_model_async(
         "build it",
         session_id="explicit-session",
     )
 
+    assert result.success is False
+    assert "active-session" in result
+    assert "explicit-session" in result
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_matching_explicit_session_is_allowed_with_artifact_context(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    _, captured, _ = _install_recording_runtime(
+        monkeypatch, module, result=_valid_result(tmp_path / "data")
+    )
+    monkeypatch.setattr(
+        module,
+        "current_artifact_context",
+        lambda: SimpleNamespace(
+            session_id="active-session", path_policy=ArtifactPathPolicy(tmp_path)
+        ),
+    )
+
+    result = await module.SolidWorksAgentTools()._solidworks_model_async(
+        "build it", session_id="active-session"
+    )
+
+    assert result.success is True
+    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "active-session"
+
+
+@pytest.mark.asyncio
+async def test_explicit_session_is_used_without_artifact_context(monkeypatch):
+    module = _module()
+    _, captured, _ = _install_recording_runtime(
+        monkeypatch,
+        module,
+        result=VALID_RESULT,
+    )
+    monkeypatch.setattr(module, "current_artifact_context", lambda: None)
+
+    await module.SolidWorksAgentTools()._solidworks_model_async(
+        "build it", session_id="explicit-session"
+    )
+
     assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "explicit-session"
+
+
+def test_legacy_main_entrypoint_contains_no_blender_runtime():
+    source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+
+    assert "blender" not in source.casefold()
 
 
 @pytest.mark.asyncio

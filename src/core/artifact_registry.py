@@ -14,6 +14,11 @@ class ArtifactRegistry:
         self._path_policy = path_policy
         self._repository = repository
 
+    @property
+    def database_path(self) -> Path:
+        """Return the database file that persists artifact records."""
+        return self._repository.database_path
+
     def confirm_file(
         self,
         session_id: str,

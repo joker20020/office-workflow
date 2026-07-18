@@ -54,6 +54,11 @@ class ArtifactRepository:
     def __init__(self, database: Database):
         self._database = database
 
+    @property
+    def database_path(self):
+        """Return the database file used by this artifact repository."""
+        return self._database.db_path.resolve()
+
     def create(
         self,
         session_id: str,

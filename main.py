@@ -5,7 +5,7 @@ import base64
 from agentscope.agent import ReActAgent
 from agentscope.model import OpenAIChatModel
 from agentscope.tool import Toolkit, ToolResponse
-from agentscope.mcp import HttpStatefulClient, StdIOStatefulClient
+from agentscope.mcp import HttpStatefulClient
 from agentscope.formatter import OpenAIChatFormatter, OpenAIMultiAgentFormatter, DeepSeekChatFormatter
 from agentscope.message import Msg, TextBlock, ImageBlock, Base64Source
 from agentscope.memory import InMemoryMemory
@@ -127,73 +127,6 @@ async def unity_agent_tool(task: str, info: Dict[str, List[str]]):
     )
 
     # return unity_agent
-
-
-async def blender_agent_tool(task: str):
-    """根据需求完成blender建模
-
-    Args:
-        task (str):对 blender 模型的需求
-    """
-    # 准备工具
-    toolkit = Toolkit()
-    # blender_mcp = HttpStatefulClient(
-    #     name="blender_mcp",
-    #     transport="streamable_http",
-    #     url="http://localhost:8080/mcp"
-    # )
-
-    blender_mcp = StdIOStatefulClient(
-        name="blender_mcp",
-        command="D:\\anaconda\\Scripts\\uvx.exe",
-        args=[
-            "blender-mcp"
-        ], )
-
-    await blender_mcp.connect()
-    print(await blender_mcp.session.list_resources())
-    print(await blender_mcp.session.list_tools())
-
-    # custom_tools_response = await blender_mcp.session.read_resource(AnyUrl("unity://custom-tools"))
-    # custom_tools = json.loads(custom_tools_response.contents[0].text)["data"]["tools"]
-    #
-    # useful_tools = ["addXRRig", "addXRSimulator", "addMainCanvas", "addProcess"]
-    # custom_tools = [tool for tool in custom_tools if tool["name"] in useful_tools]
-    # print("custom tools:", custom_tools)
-
-    await toolkit.register_mcp_client(blender_mcp)
-    # for tool in toolkit.get_json_schemas():
-    #     print(tool)
-
-    blender_agent = ReActAgent(
-        name="blender_agent",
-        sys_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模
-        """,
-        model=OpenAIChatModel(
-            model_name=llm_name,
-            api_key=os.environ["LLM_API_KEY"],
-            stream=True,
-            enable_thinking=False,
-            client_kwargs={"base_url": os.environ["LLM_BASE_URL"]},
-            generate_kwargs={"max_tokens": 4096, "max_completion_tokens": 4096},
-        ),
-        formatter=DeepSeekChatFormatter(),
-        toolkit=toolkit,
-        memory=InMemoryMemory(),
-    )
-
-    msg = Msg(
-        name="user",
-        content=task,
-        role="user",
-    )
-
-    msg_res = await blender_agent(msg)
-    await blender_mcp.close()
-
-    return ToolResponse(
-        content=msg_res.get_content_blocks("text"),
-    )
 
 
 def plan_change_hook(self: PlanNotebook, plan: Plan):
@@ -453,7 +386,6 @@ async def comfyui_agent_tool(task: str):
 async def create_router() -> ReActAgent:
 
     toolkit = Toolkit()
-    toolkit.register_tool_function(blender_agent_tool)
     toolkit.register_tool_function(unity_agent_tool)
     toolkit.register_tool_function(process_agent_tool)
     toolkit.register_tool_function(comfyui_agent_tool)
@@ -501,7 +433,6 @@ if __name__ == '__main__':
         name="user",
         content=f"你好！请参考<./data/img/反推堵盖1.png>图像为我创建一份反推堵盖的安装工艺文件,"
                 f"完成后根据该文件帮我在unity里创建一个AR辅助装配应用, "
-                f"然后在blender中创建一个阶梯形零件，不需要保存"
                 f"并创建一张拧螺丝的图片",
         role="user",
     )
@@ -511,6 +442,4 @@ if __name__ == '__main__':
     # test
     # asyncio.run(process_agent_tool("请你为我创建一份反推堵盖的安装工艺文件", "./data/img/反推堵盖1.png"))
     # asyncio.run(unity_agent_tool("你好！帮我在unity里创建一个AR辅助装配应用, ", {"工序1": ["工步1", "工步2"]}))
-    # asyncio.run(blender_agent_tool("你好！帮我在blender里创建一个1x1x1的立方体"))
-    # asyncio.run(creating_blender_agent())
     # print(asyncio.run(get_json(r"asfdsafd{a:1, b:{c:1}}{}aaassd{a:1}dfsa")))

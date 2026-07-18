@@ -273,24 +273,49 @@ class SolidWorksAgentTools:
         session_id: str | None = None,
     ) -> _StructuredResult:
         context = current_artifact_context()
-        active_session = session_id or (context.session_id if context is not None else "standalone")
-        project_root = Path(__file__).resolve().parents[2]
+        if (
+            context is not None
+            and session_id is not None
+            and session_id != context.session_id
+        ):
+            return _failure(
+                "session_id conflict: active artifact context requires "
+                f"'{context.session_id}', but explicit session_id was '{session_id}'"
+            )
+        active_session = (
+            context.session_id
+            if context is not None
+            else (session_id or "standalone")
+        )
+        source_root = Path(__file__).resolve().parents[2]
+        project_root = (
+            context.path_policy.project_root
+            if context is not None and hasattr(context, "path_policy")
+            else source_root
+        )
+        database_path = (
+            context.registry.database_path
+            if context is not None
+            and hasattr(context, "registry")
+            and hasattr(context.registry, "database_path")
+            else project_root / "data" / "app.db"
+        )
         validation_root = (
             context.path_policy.project_root
             if context is not None and hasattr(context, "path_policy")
-            else project_root
+            else source_root
         )
         operation_id = uuid.uuid4().hex
         child_env = dict(os.environ)
         child_env["SOLIDWORKS_SESSION_ID"] = active_session
         child_env["SOLIDWORKS_PROJECT_ROOT"] = str(project_root)
-        child_env["SOLIDWORKS_DATABASE_PATH"] = str(project_root / "data" / "app.db")
+        child_env["SOLIDWORKS_DATABASE_PATH"] = str(Path(database_path).resolve())
         child_env["SOLIDWORKS_TOOL_CALL_ID"] = operation_id
         config = StdioMCPConfig(
             command=sys.executable,
             args=["-m", "plugins.solidworks_agent.mcp_server"],
             env=child_env,
-            cwd=str(project_root),
+            cwd=str(source_root),
         )
         client = MCPClient(
             name="solidworks_mcp",
