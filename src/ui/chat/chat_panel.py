@@ -654,6 +654,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._streaming_blocks: List[Dict[str, Any]] = []
         self._current_block_type = "unknown"
         self._attachments: List[Dict[str, Any]] = []
+        self._artifact_sidebar_width = ArtifactSidebar.DEFAULT_WIDTH
 
         self._setup_ui()
         self._connect_signals()
@@ -719,9 +720,20 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         if hasattr(self, "_artifact_sidebar"):
             self._splitter.addWidget(self._artifact_sidebar)
+            self._splitter.setCollapsible(
+                self._splitter.indexOf(self._artifact_sidebar),
+                False,
+            )
+            self._splitter.splitterMoved.connect(self._remember_artifact_sidebar_width)
 
         # 设置分割比例
-        self._splitter.setSizes([200, 600, 36])
+        splitter_sizes = [600]
+        if hasattr(self, "_session_list"):
+            splitter_sizes.insert(0, 200)
+        if hasattr(self, "_artifact_sidebar"):
+            splitter_sizes.append(0)
+            self._artifact_sidebar.hide()
+        self._splitter.setSizes(splitter_sizes)
 
         main_layout.addWidget(self._splitter)
 
@@ -1630,9 +1642,50 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _toggle_artifact_sidebar(self) -> None:
         if not hasattr(self, "_artifact_sidebar"):
             return
-        self._artifact_sidebar.set_collapsed(
-            not self._artifact_sidebar.is_collapsed(),
+        if self._artifact_sidebar.isVisible():
+            self._remember_artifact_sidebar_width()
+            self._artifact_sidebar.hide()
+            return
+
+        self._artifact_sidebar.show()
+        self._restore_artifact_sidebar_width()
+        QTimer.singleShot(0, self._restore_artifact_sidebar_width)
+
+    def _remember_artifact_sidebar_width(self, *_: Any) -> None:
+        """Retain only widths that keep artifact cards readable."""
+        if not hasattr(self, "_artifact_sidebar"):
+            return
+        sidebar = self._artifact_sidebar
+        if sidebar.isVisible() and sidebar.width() >= sidebar.minimumWidth():
+            self._artifact_sidebar_width = min(sidebar.width(), sidebar.maximumWidth())
+
+    def _restore_artifact_sidebar_width(self) -> None:
+        """Restore the last valid artifact width after showing the sidebar."""
+        if not hasattr(self, "_artifact_sidebar") or self._artifact_sidebar.isHidden():
+            return
+        sidebar = self._artifact_sidebar
+        target_width = max(
+            sidebar.minimumWidth(),
+            min(self._artifact_sidebar_width, sidebar.maximumWidth()),
         )
+        sidebar_index = self._splitter.indexOf(sidebar)
+        sizes = self._splitter.sizes()
+        if sidebar_index < 0 or sidebar_index >= len(sizes):
+            return
+        total_width = max(sum(sizes), target_width + 1)
+        other_indices = [index for index in range(len(sizes)) if index != sidebar_index]
+        remaining_width = max(total_width - target_width, 1)
+        current_other_width = sum(sizes[index] for index in other_indices)
+        if current_other_width:
+            for index in other_indices:
+                sizes[index] = max(
+                    1,
+                    round(sizes[index] * remaining_width / current_other_width),
+                )
+        elif other_indices:
+            sizes[other_indices[-1]] = remaining_width
+        sizes[sidebar_index] = target_width
+        self._splitter.setSizes(sizes)
 
     def _open_settings(self) -> None:
         if self._api_key_manager:

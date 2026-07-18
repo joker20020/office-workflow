@@ -287,6 +287,42 @@ class Theme:
         """
 
     @classmethod
+    def get_artifact_sidebar_stylesheet(cls) -> str:
+        """Return the themed hierarchy used by the assistant artifact sidebar."""
+        return f"""
+            QFrame#artifactSidebar {{
+                background-color: {cls.hex("background_secondary")};
+                border-left: 1px solid {cls.hex("border_primary")};
+            }}
+            QScrollArea#artifactSidebarScroll,
+            QWidget#artifactSidebarContent,
+            QFrame#artifactCategory {{
+                background-color: transparent;
+                border: none;
+            }}
+            QLabel#artifactCategoryTitle {{
+                color: {cls.hex("text_primary")};
+                font-size: 13px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 8px 0 4px 0;
+            }}
+            QFrame#artifactCard {{
+                background-color: {cls.hex("card_background")};
+                border: 1px solid {cls.hex("card_border")};
+                border-radius: {cls.METRICS["card_radius"]}px;
+            }}
+            QFrame#artifactCard:hover {{
+                border-color: {cls.hex("border_hover")};
+            }}
+            QLabel#artifactEmptyState {{
+                color: {cls.hex("text_hint")};
+                background-color: transparent;
+                padding: 40px 8px;
+            }}
+        """
+
+    @classmethod
     def get_compact_button_stylesheet(cls, kind: str = "default") -> str:
         """Return a consistent text-button treatment with keyboard focus."""
         if kind == "primary":
