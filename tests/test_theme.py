@@ -136,6 +136,24 @@ class TestThemeMethods:
         assert result == "#ffffff"
 
 
+class TestThemeLayoutMetrics:
+    """Shared UI geometry must remain internally consistent."""
+
+    def test_exposes_compact_layout_metrics(self):
+        assert Theme.METRICS["control_height"] >= 28
+        assert Theme.METRICS["compact_control_height"] <= Theme.METRICS["control_height"]
+        assert Theme.METRICS["page_margin"] >= Theme.METRICS["section_gap"]
+        assert Theme.METRICS["card_radius"] >= 6
+
+    def test_shared_card_and_button_styles_use_theme_focus_color(self):
+        card_style = Theme.get_card_stylesheet()
+        button_style = Theme.get_compact_button_stylesheet()
+
+        assert Theme.hex("card_background") in card_style
+        assert f"border-radius: {Theme.METRICS['card_radius']}px" in card_style
+        assert Theme.hex("border_focus") in button_style
+
+
 class TestThemeTypeEnum:
     """测试 ThemeType 枚举"""
 
