@@ -518,6 +518,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     session_selected = Signal(str)  # session_id
     session_delete_requested = Signal(str)  # session_id
     new_session_requested = Signal()
+    HEADER_STACK_BREAKPOINT = 260
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -532,20 +533,42 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         self._header = QFrame()
         self._header.setStyleSheet(Theme.get_session_list_header_stylesheet())
-        header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
+        self._header_layout = QVBoxLayout(self._header)
+        self._header_layout.setContentsMargins(12, 8, 12, 8)
+        self._header_layout.setSpacing(4)
+
+        self._header_primary_layout = QHBoxLayout()
+        self._header_primary_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_primary_layout.setSpacing(6)
+        self._header_layout.addLayout(self._header_primary_layout)
 
         self._title_label = QLabel(_("chat.session_history"))
         self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
-        header_layout.addWidget(self._title_label)
+        self._title_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._header_primary_layout.addWidget(self._title_label, 1)
 
-        header_layout.addStretch()
+        self._header_primary_layout.addStretch()
 
         self._new_btn = QPushButton(_("chat.new_session"))
-        self._new_btn.setFixedSize(72, 28)
+        self._new_btn.setFixedHeight(28)
+        self._new_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._new_btn.clicked.connect(self.new_session_requested.emit)
         self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
-        header_layout.addWidget(self._new_btn)
+        self._header_primary_layout.addWidget(self._new_btn)
+
+        self._header_secondary = QWidget()
+        self._header_secondary_layout = QHBoxLayout(self._header_secondary)
+        self._header_secondary_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_secondary_layout.addStretch()
+        self._header_secondary.hide()
+        self._header_layout.addWidget(self._header_secondary)
+        self._is_header_stacked = False
 
         layout.addWidget(self._header)
 
@@ -556,6 +579,39 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         self.setMinimumWidth(200)
         self.setMaximumWidth(300)
+        self._update_header_layout(force=True)
+
+    def _update_header_layout(self, force: bool = False) -> None:
+        """Keep the history title readable as the session rail is resized."""
+        available_width = self.width()
+        if available_width <= 0:
+            return
+        title_width = self._title_label.fontMetrics().horizontalAdvance(
+            self._title_label.text(),
+        )
+        button_width = self._new_btn.sizeHint().width()
+        margins = self._header_layout.contentsMargins()
+        required_width = max(
+            self.HEADER_STACK_BREAKPOINT,
+            title_width + button_width + margins.left() + margins.right() + 12,
+        )
+        stacked = available_width < required_width
+        if not force and stacked == self._is_header_stacked:
+            return
+
+        if stacked:
+            self._header_primary_layout.removeWidget(self._new_btn)
+            self._header_secondary_layout.addWidget(self._new_btn)
+            self._header_secondary.show()
+        else:
+            self._header_secondary_layout.removeWidget(self._new_btn)
+            self._header_primary_layout.addWidget(self._new_btn)
+            self._header_secondary.hide()
+        self._is_header_stacked = stacked
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_header_layout()
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         session_id = item.data(Qt.ItemDataRole.UserRole)
@@ -595,6 +651,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._title_label.setText(_("chat.session_history"))
         if hasattr(self, "_new_btn"):
             self._new_btn.setText(_("chat.new_session"))
+        self._update_header_layout(force=True)
         # 刷新列表项
         if hasattr(self, "_list_widget"):
             for i in range(self._list_widget.count()):
@@ -611,6 +668,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
         if hasattr(self, "_new_btn"):
             self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
+        self._update_header_layout(force=True)
         if hasattr(self, "_list_widget"):
             self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
             # Refresh all session item widgets

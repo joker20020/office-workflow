@@ -131,6 +131,37 @@ def test_management_cards_keep_long_descriptions_readable():
 
 
 @pytest.mark.parametrize("locale", ["zh_CN", "en"])
+def test_session_history_header_stacks_before_its_title_is_clipped(locale):
+    from src.ui.chat.chat_panel import SessionListWidget
+
+    application = _application()
+    _set_test_language(locale)
+    sessions = SessionListWidget()
+    sessions.resize(200, 400)
+    sessions.show()
+    application.processEvents()
+
+    assert sessions._is_header_stacked is True
+    assert sessions._header_secondary.isVisible()
+    assert (
+        sessions._title_label.fontMetrics().horizontalAdvance(
+            sessions._title_label.text(),
+        )
+        <= sessions._title_label.contentsRect().width()
+    )
+    assert (
+        sessions._new_btn.fontMetrics().horizontalAdvance(sessions._new_btn.text())
+        <= sessions._new_btn.contentsRect().width()
+    )
+
+    sessions.resize(320, 400)
+    application.processEvents()
+
+    assert sessions._is_header_stacked is False
+    assert not sessions._header_secondary.isVisible()
+
+
+@pytest.mark.parametrize("locale", ["zh_CN", "en"])
 def test_main_window_primary_labels_fit_or_wrap_at_minimum_size(locale):
     from src.ui.chat.chat_panel import ChatPanel
     from src.ui.home_page import HomePage
