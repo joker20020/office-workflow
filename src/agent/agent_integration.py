@@ -1,11 +1,15 @@
 """AgentScope框架集成层"""
 
 import asyncio
+import base64
 import concurrent.futures
 import json
+import mimetypes
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional
+from urllib.parse import unquote, urlparse
 
 try:
     from agentscope.credential import (
@@ -1100,17 +1104,49 @@ class AgentIntegration:
             "audio": "audio/mpeg",
             "video": "video/mp4",
         }
-        media_type = block.get("media_type", default_media_types[media_kind])
+        media_type = block.get("media_type") or default_media_types[media_kind]
         if "url" in block:
-            url = block["url"]
-            if url.startswith("file://"):
-                url = url[7:]
-            source = URLSource(url=url, media_type=media_type)
+            url = str(block["url"])
+            local_path = self._local_media_path(url)
+            if local_path is not None:
+                source = Base64Source(
+                    data=base64.b64encode(local_path.read_bytes()).decode("ascii"),
+                    media_type=(
+                        block.get("media_type")
+                        or mimetypes.guess_type(local_path.name)[0]
+                        or default_media_types[media_kind]
+                    ),
+                )
+            else:
+                source = URLSource(url=url, media_type=media_type)
         elif "data" in block:
             source = Base64Source(data=block["data"], media_type=media_type)
         else:
             raise ValueError(f"{media_kind.title()} block must have 'url' or 'data' field")
         return DataBlock(source=source, name=media_kind)
+
+    @staticmethod
+    def _local_media_path(url: str) -> Path | None:
+        """Return a local media path for file URLs and existing raw paths."""
+        parsed = urlparse(url)
+        if parsed.scheme.casefold() != "file":
+            path = Path(url)
+            return path if path.is_file() else None
+
+        path_text = unquote(parsed.path)
+        if parsed.netloc:
+            netloc = unquote(parsed.netloc)
+            if len(netloc) == 2 and netloc[1] == ":":
+                path_text = f"{netloc}{path_text}"
+            elif netloc.casefold() == "localhost":
+                pass
+            elif path_text:
+                path_text = f"//{netloc}{path_text}"
+            else:
+                path_text = netloc
+        if len(path_text) >= 3 and path_text[0] in "/\\" and path_text[2] == ":":
+            path_text = path_text[1:]
+        return Path(path_text)
 
     def interrupt(self, reason: str = "用户中断") -> bool:
         """Thread-safely cancel active work or clean up a parked reply."""

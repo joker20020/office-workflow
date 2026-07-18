@@ -86,6 +86,22 @@ class TestMultimodalIntegration:
         params = sig.parameters
         assert "message" in params
 
+    def test_local_image_attachment_is_sent_as_base64_not_a_file_url(self, tmp_path):
+        image_path = tmp_path / "fixture.jpg"
+        image_bytes = b"local-image-bytes"
+        image_path.write_bytes(image_bytes)
+
+        integration = object.__new__(AgentIntegration)
+        block = integration._create_data_block(
+            {"url": f"file://{image_path}"},
+            "image",
+        )
+
+        assert isinstance(block, DataBlock)
+        assert isinstance(block.source, Base64Source)
+        assert block.source.media_type == "image/jpeg"
+        assert block.source.data == "bG9jYWwtaW1hZ2UtYnl0ZXM="
+
     def test_block_widget_factory_multimodal_support(self):
         from src.ui.chat.blocks import create_block_widget
 
