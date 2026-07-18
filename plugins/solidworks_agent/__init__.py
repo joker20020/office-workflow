@@ -273,20 +273,20 @@ class SolidWorksAgentTools:
         session_id: str | None = None,
     ) -> _StructuredResult:
         context = current_artifact_context()
+        if context is None:
+            return _failure(
+                "SolidWorks modeling requires an active artifact context "
+                "bound to a persisted chat session"
+            )
         if (
-            context is not None
-            and session_id is not None
+            session_id is not None
             and session_id != context.session_id
         ):
             return _failure(
                 "session_id conflict: active artifact context requires "
                 f"'{context.session_id}', but explicit session_id was '{session_id}'"
             )
-        active_session = (
-            context.session_id
-            if context is not None
-            else (session_id or "standalone")
-        )
+        active_session = context.session_id
         source_root = Path(__file__).resolve().parents[2]
         project_root = (
             context.path_policy.project_root

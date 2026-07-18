@@ -62,6 +62,15 @@ def _module():
     return importlib.import_module("plugins.solidworks_agent")
 
 
+def _active_context(module):
+    root = Path(module.__file__).parents[2]
+    return SimpleNamespace(
+        session_id="active-session",
+        path_policy=ArtifactPathPolicy(root),
+        registry=SimpleNamespace(database_path=root / "data" / "app.db"),
+    )
+
+
 def test_manifest_and_settings_define_an_independent_plugin(monkeypatch):
     module = _module()
     settings = importlib.import_module("plugins.solidworks_agent.settings")
@@ -265,20 +274,22 @@ async def test_matching_explicit_session_is_allowed_with_artifact_context(
 
 
 @pytest.mark.asyncio
-async def test_explicit_session_is_used_without_artifact_context(monkeypatch):
+async def test_missing_artifact_context_rejects_before_starting_mcp(monkeypatch):
     module = _module()
-    _, captured, _ = _install_recording_runtime(
+    events, _, _ = _install_recording_runtime(
         monkeypatch,
         module,
         result=VALID_RESULT,
     )
     monkeypatch.setattr(module, "current_artifact_context", lambda: None)
 
-    await module.SolidWorksAgentTools()._solidworks_model_async(
+    result = await module.SolidWorksAgentTools()._solidworks_model_async(
         "build it", session_id="explicit-session"
     )
 
-    assert captured["config"]["env"]["SOLIDWORKS_SESSION_ID"] == "explicit-session"
+    assert result.success is False
+    assert "active artifact context" in result
+    assert events == []
 
 
 def test_legacy_main_entrypoint_contains_no_blender_runtime():
@@ -290,6 +301,7 @@ def test_legacy_main_entrypoint_contains_no_blender_runtime():
 @pytest.mark.asyncio
 async def test_connect_failure_still_closes_client_exactly_once(monkeypatch):
     module = _module()
+    monkeypatch.setattr(module, "current_artifact_context", lambda: _active_context(module))
     _, _, fake_client = _install_recording_runtime(
         monkeypatch,
         module,
@@ -306,6 +318,7 @@ async def test_connect_failure_still_closes_client_exactly_once(monkeypatch):
 @pytest.mark.asyncio
 async def test_cancellation_closes_client_exactly_once_and_propagates(monkeypatch):
     module = _module()
+    monkeypatch.setattr(module, "current_artifact_context", lambda: _active_context(module))
     started = asyncio.Event()
 
     class FakeConfig:
@@ -365,6 +378,7 @@ async def test_cancellation_closes_client_exactly_once_and_propagates(monkeypatc
 @pytest.mark.asyncio
 async def test_public_stream_close_cancels_work_and_closes_client_once(monkeypatch):
     module = _module()
+    monkeypatch.setattr(module, "current_artifact_context", lambda: _active_context(module))
     release = threading.Event()
     cancelled = threading.Event()
 
