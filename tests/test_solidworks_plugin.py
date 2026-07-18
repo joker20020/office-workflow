@@ -361,7 +361,11 @@ async def test_missing_artifact_context_rejects_before_starting_mcp(monkeypatch)
 
 
 def test_legacy_main_entrypoint_contains_no_blender_runtime():
-    source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    legacy_entrypoint = Path(__file__).parents[1] / "main.py"
+    if not legacy_entrypoint.exists():
+        pytest.skip("legacy root main.py entrypoint is no longer part of this application")
+
+    source = legacy_entrypoint.read_text(encoding="utf-8")
 
     assert "blender" not in source.casefold()
 
