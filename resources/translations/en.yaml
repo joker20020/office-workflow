@@ -133,6 +133,22 @@ chat:
   messages_count: " messages"
   delete_session_tooltip: "Delete this session"
 
+artifacts:
+  title: "Artifacts"
+  toggle: "Toggle artifact sidebar"
+  empty: "No artifacts for this session"
+  expand: "Expand artifacts"
+  collapse: "Collapse artifacts"
+  open: "Open"
+  reveal: "Reveal"
+  copy_path: "Copy path"
+  categories:
+    documents: "Documents"
+    images: "Images"
+    models: "Models"
+    exports: "Exports"
+    other: "Other"
+
 package:
   install: "Install Package"
   install_new: "Install New Package"

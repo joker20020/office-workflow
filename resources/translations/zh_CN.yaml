@@ -133,6 +133,22 @@ chat:
   messages_count: "条消息"
   delete_session_tooltip: "删除此会话"
 
+artifacts:
+  title: "产物"
+  toggle: "切换产物侧栏"
+  empty: "当前会话没有产物"
+  expand: "展开产物侧栏"
+  collapse: "收起产物侧栏"
+  open: "打开"
+  reveal: "显示位置"
+  copy_path: "复制路径"
+  categories:
+    documents: "文档"
+    images: "图片"
+    models: "模型"
+    exports: "导出文件"
+    other: "其他"
+
 package:
   install: "安装节点包"
   install_new: "安装新包"

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QStatusBar,
     QStackedWidget,
+    QStyle,
     QWidget,
 )
 from PySide6.QtGui import QIcon
@@ -229,12 +230,31 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
         self.add_page("packages", self._create_packages_page())
         self.add_page("settings", self._create_settings_page())
 
-        self._nav_rail.add_item("home", _("nav.home"), "🏠")
-        self._nav_rail.add_item("nodes", _("nav.nodes"), "🔧")
-        self._nav_rail.add_item("agent", _("nav.agent"), "🤖")
-        self._nav_rail.add_item("plugins", _("nav.plugins"), "🧩")
-        self._nav_rail.add_item("packages", _("nav.packages"), "📦")
-        self._nav_rail.add_item("settings", _("nav.settings"), "⚙️")
+        style = self.style()
+        self._nav_rail.add_item(
+            "home", _("nav.home"),
+            style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon),
+        )
+        self._nav_rail.add_item(
+            "nodes", _("nav.nodes"),
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
+        )
+        self._nav_rail.add_item(
+            "agent", _("nav.agent"),
+            style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation),
+        )
+        self._nav_rail.add_item(
+            "plugins", _("nav.plugins"),
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder),
+        )
+        self._nav_rail.add_item(
+            "packages", _("nav.packages"),
+            style.standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
+        )
+        self._nav_rail.add_item(
+            "settings", _("nav.settings"),
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+        )
 
     @staticmethod
     def _load_app_icon() -> QIcon:

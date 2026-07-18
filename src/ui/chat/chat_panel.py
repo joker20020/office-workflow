@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QUrl, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QHBoxLayout,
     QWidget,
@@ -732,7 +733,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         layout.setContentsMargins(16, 0, 16, 0)
 
         title_layout = QVBoxLayout()
-        self._title_label = QLabel("🤖 " + _("nav.agent"))
+        self._title_label = QLabel(_("nav.agent"))
         self._title_label.setStyleSheet(Theme.get_chat_title_label_stylesheet())
         title_layout.addWidget(self._title_label)
 
@@ -750,21 +751,36 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         layout.addStretch()
 
-        self._settings_btn = QPushButton("⚙ " + _("nav.settings"))
-        self._settings_btn.setFixedHeight(28)
+        self._settings_btn = QPushButton(_("nav.settings"))
+        self._settings_btn.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+        )
+        self._settings_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._settings_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._settings_btn.clicked.connect(self._open_settings)
         self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
         self._clear_btn = QPushButton(_("chat.clear"))
-        self._clear_btn.setFixedHeight(28)
+        self._clear_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._clear_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._clear_btn.clicked.connect(self._clear_chat)
         self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
 
         layout.addWidget(self._settings_btn)
         layout.addWidget(self._clear_btn)
 
-        self._artifacts_btn = QPushButton("Artifacts")
-        self._artifacts_btn.setFixedHeight(28)
+        self._artifacts_btn = QPushButton(_("artifacts.title"))
+        self._artifacts_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._artifacts_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._artifacts_btn.clicked.connect(self._toggle_artifact_sidebar)
         self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._artifacts_btn.setVisible(hasattr(self, "_artifact_sidebar"))
@@ -813,29 +829,32 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         button_layout.setSpacing(8)
 
         # 多模态附件按钮（默认隐藏，根据 API Key 支持类型显示）
-        self._image_btn = QPushButton("📷 " + _("chat.image"))
+        self._image_btn = QPushButton(_("chat.image"))
         self._image_btn.setToolTip(_("chat.add_image"))
-        self._image_btn.setFixedSize(70, 32)
+        self._image_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._image_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._image_btn.clicked.connect(self._select_image)
         self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._image_btn.hide()
 
-        self._audio_btn = QPushButton("🎤 " + _("chat.audio"))
+        self._audio_btn = QPushButton(_("chat.audio"))
         self._audio_btn.setToolTip(_("chat.add_audio"))
-        self._audio_btn.setFixedSize(70, 32)
+        self._audio_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._audio_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._audio_btn.clicked.connect(self._select_audio)
         self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._audio_btn.hide()
 
-        self._video_btn = QPushButton("🎬 " + _("chat.video"))
+        self._video_btn = QPushButton(_("chat.video"))
         self._video_btn.setToolTip(_("chat.add_video"))
-        self._video_btn.setFixedSize(70, 32)
+        self._video_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._video_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._video_btn.clicked.connect(self._select_video)
         self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._video_btn.hide()
 
         self._send_btn = QPushButton(_("chat.send"))
-        self._send_btn.setFixedHeight(32)
+        self._send_btn.setFixedHeight(Theme.METRICS["control_height"])
         self._send_btn.clicked.connect(self._on_action_button_clicked)
         self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
         self._send_btn.setEnabled(False)
@@ -1632,25 +1651,27 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def refresh_language(self) -> None:
         """刷新语言文本"""
         if hasattr(self, "_title_label"):
-            self._title_label.setText("🤖 " + _("nav.agent"))
+            self._title_label.setText(_("nav.agent"))
         if hasattr(self, "_status_label"):
             self._status_label.setText(_("chat.please_select_api_key"))
         if hasattr(self, "_api_key_combo"):
             self._api_key_combo.setPlaceholderText(_("chat.select_api_key"))
         if hasattr(self, "_settings_btn"):
-            self._settings_btn.setText("⚙ " + _("nav.settings"))
+            self._settings_btn.setText(_("nav.settings"))
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setText(_("chat.clear"))
+        if hasattr(self, "_artifacts_btn"):
+            self._artifacts_btn.setText(_("artifacts.title"))
         if hasattr(self, "_input_text"):
             self._input_text.setPlaceholderText(_("chat.input_placeholder"))
         if hasattr(self, "_image_btn"):
-            self._image_btn.setText("📷 " + _("chat.image"))
+            self._image_btn.setText(_("chat.image"))
             self._image_btn.setToolTip(_("chat.add_image"))
         if hasattr(self, "_audio_btn"):
-            self._audio_btn.setText("🎤 " + _("chat.audio"))
+            self._audio_btn.setText(_("chat.audio"))
             self._audio_btn.setToolTip(_("chat.add_audio"))
         if hasattr(self, "_video_btn"):
-            self._video_btn.setText("🎬 " + _("chat.video"))
+            self._video_btn.setText(_("chat.video"))
             self._video_btn.setToolTip(_("chat.add_video"))
         if hasattr(self, "_send_btn") and self._is_send_mode:
             self._send_btn.setText(_("chat.send"))
@@ -1679,6 +1700,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
+        if hasattr(self, "_artifacts_btn"):
+            self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_messages_widget"):
             self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
         if hasattr(self, "_input_area"):

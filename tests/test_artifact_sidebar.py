@@ -4,9 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from src.core.artifact_paths import ArtifactPathPolicy
+from src.ui.i18n_manager import I18nManager
 
 
 class _ArtifactRepository:
@@ -137,3 +138,33 @@ def test_chat_panel_refreshes_artifacts_after_agent_finishes():
     ChatPanel._refresh_artifacts(panel)
 
     panel._artifact_sidebar.refresh.assert_called_once_with()
+
+
+def test_sidebar_refreshes_translated_labels_without_losing_session_artifacts(tmp_path):
+    from src.ui.chat.artifact_sidebar import ArtifactSidebar
+
+    application = QApplication.instance() or QApplication([])
+    assert application is not None
+    output = tmp_path / "data" / "documents" / "session-1" / "report.md"
+    output.parent.mkdir(parents=True)
+    output.write_text("report", encoding="utf-8")
+    sidebar = ArtifactSidebar(
+        _ArtifactRepository({"session-1": [_artifact("report", output)]}),
+        ArtifactPathPolicy(tmp_path),
+    )
+    sidebar.set_session("session-1")
+    manager = I18nManager.instance()
+    manager._current_language = "en"
+    manager._load_translations("en")
+
+    sidebar.refresh_language()
+
+    assert sidebar._title_label.text() == "Artifacts"
+    assert sidebar.visible_artifact_ids() == ["report"]
+    assert {button.text() for button in sidebar.findChildren(QPushButton)} == {
+        "Open",
+        "Reveal",
+        "Copy path",
+    }
+    tool_button_type = type(sidebar._collapse_button)
+    assert {button.text() for button in sidebar.findChildren(tool_button_type)} == {""}
