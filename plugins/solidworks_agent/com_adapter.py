@@ -71,6 +71,16 @@ class SolidWorksComAdapter:
         except (TypeError, ValueError):
             major = -1
         if major != self.VERSION_MAJOR:
+            if self._owned:
+                try:
+                    self._app.ExitApp()
+                except Exception:
+                    return ConnectionResult(
+                        False,
+                        True,
+                        "SolidWorks 2023 is required and the incompatible "
+                        "started instance could not be closed",
+                    )
             self._app = None
             self._owned = False
             return ConnectionResult(False, False, "SolidWorks 2023 (major 31) is required")

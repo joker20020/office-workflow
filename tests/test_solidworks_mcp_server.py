@@ -437,6 +437,30 @@ def test_connect_starts_visible_2023_when_no_active_instance():
     assert calls == ["SldWorks.Application.31"]
 
 
+def test_connect_closes_only_a_newly_started_instance_when_version_is_wrong():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    exit_calls = []
+
+    class WrongVersionApp:
+        IsInitialized = True
+        RevisionNumber = "32.0"
+        Visible = False
+
+        def ExitApp(self):  # noqa: N802
+            exit_calls.append("exit")
+
+    app = WrongVersionApp()
+    dispatch = SimpleNamespace(
+        get_active_object=lambda _: (_ for _ in ()).throw(OSError()),
+        dispatch=lambda _: app,
+    )
+
+    result = adapter_module.SolidWorksComAdapter(dispatch=dispatch).connect()
+
+    assert result.success is False
+    assert exit_calls == ["exit"]
+
+
 class FakePaths:
     def __init__(self, root, *, allowed=True, confirm=True):
         self.root = Path(root)
