@@ -2269,7 +2269,7 @@ class AgentExtensionTools:
                 os.environ["LLM_API_KEY"],
             ),
             toolkit=toolkit,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
         )
 
         msg = UserMsg(
@@ -2404,7 +2404,7 @@ class AgentExtensionTools:
                 os.environ["LLM_API_KEY"],
             ),
             toolkit=toolkit,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
         )
 
         def confirm_tool_outputs(tool_call_id: str) -> None:
@@ -2685,7 +2685,7 @@ class AgentExtensionTools:
             ),
             toolkit=toolkit,
             state=process_state,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
             )
         except BaseException:
             process_write_file.close()
@@ -2818,7 +2818,7 @@ class AgentExtensionTools:
                 os.environ["LLM_API_KEY"],
             ),
             toolkit=toolkit,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
         )
 
         try:
