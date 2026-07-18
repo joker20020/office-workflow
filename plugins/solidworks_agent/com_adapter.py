@@ -7,6 +7,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -33,6 +34,35 @@ def runtime_dispatch_factory() -> DispatchApi:
     import win32com.client  # type: ignore[import-not-found]
 
     return _PyWin32Dispatch(win32com.client)
+
+
+def _empty_com_dispatch() -> Any:
+    """Return the typed null dispatch pointer required by SolidWorks COM."""
+    import pythoncom  # type: ignore[import-not-found]
+
+    return pythoncom.Nothing
+
+
+@lru_cache(maxsize=1)
+def _model_document_class() -> Any:
+    """Load the generated SolidWorks 2023 IModelDoc2 dispatch wrapper."""
+    import win32com.client  # type: ignore[import-not-found]
+
+    generated = win32com.client.gencache.EnsureModule(
+        "{83A33D31-27C5-11CE-BFD4-00400513BB57}",
+        0,
+        31,
+        0,
+    )
+    return generated.IModelDoc2
+
+
+def _typed_model_document(document: Any) -> Any:
+    """Wrap an untyped pywin32 document with its generated IModelDoc2 class."""
+    ole_object = getattr(document, "_oleobj_", None)
+    if ole_object is None:
+        return document
+    return _model_document_class()(ole_object)
 
 
 @dataclass(frozen=True)
@@ -151,6 +181,7 @@ class SolidWorksComAdapter:
         document = app.NewDocument(template, 0, 0.0, 0.0)
         if document is None:
             raise RuntimeError("SolidWorks failed to create a part document")
+        document = _typed_model_document(document)
         if hasattr(document, "SetTitle2"):
             document.SetTitle2(name)
         unit_codes = {"mm": 0, "cm": 1, "m": 2, "inch": 3}
@@ -162,14 +193,34 @@ class SolidWorksComAdapter:
 
     def create_sketch(self, document: Any, plane: str, unit: str = "m") -> SketchContext:
         aliases = self._PLANE_ALIASES.get(plane, (plane,))
-        selected = any(
-            document.Extension.SelectByID2(
-                candidate, "PLANE", 0, 0, 0, False, 0, None, 0
-            )
-            for candidate in aliases
-        )
+        selected = False
+        last_error = None
+        for candidate in aliases:
+            for callout_factory in (lambda: None, _empty_com_dispatch):
+                try:
+                    selected = bool(
+                        document.Extension.SelectByID2(
+                            candidate,
+                            "PLANE",
+                            0,
+                            0,
+                            0,
+                            False,
+                            0,
+                            callout_factory(),
+                            0,
+                        )
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    continue
+                if selected:
+                    break
+            if selected:
+                break
         if not selected:
-            raise RuntimeError(f"SolidWorks could not select plane: {plane}")
+            detail = f": {last_error}" if last_error is not None else ""
+            raise RuntimeError(f"SolidWorks could not select plane: {plane}{detail}")
         document.SketchManager.InsertSketch(True)
         sketch = document.GetActiveSketch2()
         if sketch is None:
@@ -373,8 +424,21 @@ class SolidWorksComAdapter:
     def save_as(self, document: Any, path: str, options: dict[str, Any] | None = None) -> None:
         if options and options.get("quality") not in {"coarse", "medium", "fine"}:
             raise ValueError("unsupported STL mesh quality")
-        if not document.Extension.SaveAs(path, 0, 1, None, 0, 0):
-            raise RuntimeError("SolidWorks SaveAs failed")
+        target = Path(path).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = document.Extension.SaveAs(str(target), 0, 1, None, 0, 0)
+        errors = 0
+        warnings = 0
+        if isinstance(result, (tuple, list)):
+            success = bool(result[0]) if result else False
+            errors = result[1] if len(result) > 1 else 0
+            warnings = result[2] if len(result) > 2 else 0
+        else:
+            success = bool(result)
+        if not success:
+            raise RuntimeError(
+                f"SolidWorks SaveAs failed: errors={errors}, warnings={warnings}"
+            )
 
     def capture_preview(self, document: Any, path: str, view: str) -> None:
         views = {"front": 1, "top": 5, "right": 3, "isometric": 7}

@@ -34,27 +34,40 @@ def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
     document = None
     files = []
     try:
+        print("[solidworks-live] create part", flush=True)
         created = service.new_part(bridge.context.session_id, "codex-live-disposable", "mm")
         assert created.success, (
             f"SolidWorks could not create a part: {created.message}. Complete any first-use "
             "license, sign-in, template, or Windows automation prompt, then retry."
         )
         document = created.value
+        print("[solidworks-live] create sketch", flush=True)
         sketch_result = service.create_sketch(document.id, "Front Plane")
         assert sketch_result.success, sketch_result.message
         sketch = sketch_result.value
+        print("[solidworks-live] add geometry", flush=True)
         geometry = service.add_sketch_geometry(
             sketch.id,
             [{"type": "center_rectangle", "center": [0, 0], "corner": [20, 10]}],
         )
         assert geometry.success
+        print("[solidworks-live] close sketch", flush=True)
         assert service.close_sketch(sketch.id).success
+        print("[solidworks-live] extrude", flush=True)
         assert service.extrude(document.id, sketch.id, 10, "forward").success
+        print("[solidworks-live] save native", flush=True)
+        native = service.save_model(document.id)
+        print("[solidworks-live] export STEP", flush=True)
+        step = service.export_step(document.id)
+        print("[solidworks-live] export STL", flush=True)
+        stl = service.export_stl(document.id, {"quality": "medium"})
+        print("[solidworks-live] capture PNG", flush=True)
+        preview = service.capture_preview(document.id, "isometric")
         results = [
-            service.save_model(document.id),
-            service.export_step(document.id),
-            service.export_stl(document.id, {"quality": "medium"}),
-            service.capture_preview(document.id, "isometric"),
+            native,
+            step,
+            stl,
+            preview,
         ]
         assert all(result.success for result in results), [result.message for result in results]
         files = [Path(path) for result in results for path in result.generated_files]
@@ -77,7 +90,9 @@ def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
         )
     finally:
         if document is not None:
+            print("[solidworks-live] close document", flush=True)
             service.adapter.close_document(service.documents[document.id][1])
+        print("[solidworks-live] disconnect", flush=True)
         service.adapter.disconnect(close_started_instance=False)
         chats.delete_session(session_id)
         assert all(path.is_file() for path in files)

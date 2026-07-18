@@ -294,13 +294,23 @@ def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_enti
     assert extrusion_args[1] is True
 
 
-def test_create_sketch_falls_back_to_localized_standard_plane_name():
+def test_create_sketch_falls_back_to_localized_standard_plane_name(monkeypatch):
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     selected = []
     sketch = object()
-    extension = SimpleNamespace(
-        SelectByID2=lambda name, *args: (selected.append(name), name == "前视基准面")[1]
-    )
+    dispatch_nothing = object()
+    monkeypatch.setattr(adapter_module, "_empty_com_dispatch", lambda: dispatch_nothing)
+    callouts = []
+
+    def select_plane(name, *args):
+        selected.append(name)
+        callouts.append(args[6])
+        if args[6] is None:
+            raise TypeError("typed callout mismatch")
+        assert args[6] is dispatch_nothing
+        return name == "前视基准面"
+
+    extension = SimpleNamespace(SelectByID2=select_plane)
     manager = SimpleNamespace(InsertSketch=lambda _: None)
     document = SimpleNamespace(
         Extension=extension,
@@ -313,7 +323,8 @@ def test_create_sketch_falls_back_to_localized_standard_plane_name():
     ).create_sketch(document, "Front Plane", "mm")
 
     assert context.sketch is sketch
-    assert selected == ["Front Plane", "前视基准面"]
+    assert selected == ["Front Plane", "Front Plane", "前视基准面", "前视基准面"]
+    assert callouts == [None, dispatch_nothing, None, dispatch_nothing]
 
 
 def test_close_document_accepts_get_title_as_a_com_property():
@@ -425,6 +436,39 @@ def test_preview_is_real_png_and_temporary_bmp_is_removed(tmp_path):
     assert not list((data / "tmp").glob("*.bmp"))
 
 
+def test_save_as_creates_parent_and_parses_typed_byref_result(tmp_path):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    target = tmp_path / "data" / "models" / "session" / "part.sldprt"
+    calls = []
+
+    def save_as(path, *args):
+        calls.append((path, args))
+        assert Path(path).parent.is_dir()
+        Path(path).write_bytes(b"model")
+        return True, 0, 0
+
+    document = SimpleNamespace(Extension=SimpleNamespace(SaveAs=save_as))
+    adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace()).save_as(
+        document, str(target)
+    )
+
+    assert target.is_file()
+    assert calls[0][0] == str(target.resolve())
+
+
+def test_save_as_reports_typed_solidworks_error_codes(tmp_path):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    target = tmp_path / "data" / "exports" / "session" / "part.step"
+    document = SimpleNamespace(
+        Extension=SimpleNamespace(SaveAs=lambda *args: (False, 8, 2))
+    )
+
+    with pytest.raises(RuntimeError, match="errors=8.*warnings=2"):
+        adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace()).save_as(
+            document, str(target)
+        )
+
+
 def test_connect_uses_solidworks_2023_progid_and_rejects_other_major_versions():
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     calls = []
@@ -517,6 +561,30 @@ def test_new_part_uses_administrator_template_fallback_when_default_is_empty(
 
     assert adapter.new_part("fallback-part", "mm") is document
     assert ("template", str(template.resolve())) in calls
+
+
+def test_new_part_wraps_a_real_com_document_with_the_generated_modeldoc_type(
+    monkeypatch
+):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    raw = SimpleNamespace()
+    wrapped = SimpleNamespace(
+        SetTitle2=lambda _: None,
+        SetUserPreferenceIntegerValue=lambda *_: None,
+    )
+    app = SimpleNamespace(
+        GetUserPreferenceStringValue=lambda _: "C:\\template.prtdot",
+        NewDocument=lambda *_: raw,
+    )
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    adapter._app = app
+    monkeypatch.setattr(
+        adapter_module,
+        "_typed_model_document",
+        lambda document: wrapped if document is raw else document,
+    )
+
+    assert adapter.new_part("typed-part", "mm") is wrapped
 
 
 class FakePaths:
