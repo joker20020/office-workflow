@@ -461,6 +461,31 @@ def test_connect_closes_only_a_newly_started_instance_when_version_is_wrong():
     assert exit_calls == ["exit"]
 
 
+def test_new_part_uses_administrator_template_fallback_when_default_is_empty(
+    monkeypatch, tmp_path
+):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    template = tmp_path / "gb_part.prtdot"
+    template.write_bytes(b"template")
+    calls = []
+    document = SimpleNamespace(
+        SetTitle2=lambda name: calls.append(("title", name)),
+        SetUserPreferenceIntegerValue=lambda key, value: calls.append(
+            ("unit", key, value)
+        ),
+    )
+    app = SimpleNamespace(
+        GetUserPreferenceStringValue=lambda _: "",
+        NewDocument=lambda path, *args: (calls.append(("template", path)), document)[1],
+    )
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    adapter._app = app
+    monkeypatch.setenv("SOLIDWORKS_PART_TEMPLATE", str(template))
+
+    assert adapter.new_part("fallback-part", "mm") is document
+    assert ("template", str(template.resolve())) in calls
+
+
 class FakePaths:
     def __init__(self, root, *, allowed=True, confirm=True):
         self.root = Path(root)

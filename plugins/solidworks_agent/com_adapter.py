@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -113,7 +114,31 @@ class SolidWorksComAdapter:
         app = self._require_app()
         template = app.GetUserPreferenceStringValue(1)
         if not template:
-            raise RuntimeError("SolidWorks default part template is unavailable")
+            candidates = []
+            configured = os.environ.get("SOLIDWORKS_PART_TEMPLATE")
+            if configured:
+                candidates.append(Path(configured))
+            program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+            candidates.append(
+                program_data
+                / "SOLIDWORKS"
+                / "SOLIDWORKS 2023"
+                / "templates"
+                / "gb_part.prtdot"
+            )
+            template_path = next(
+                (
+                    candidate.resolve()
+                    for candidate in candidates
+                    if candidate.is_absolute()
+                    and candidate.suffix.casefold() == ".prtdot"
+                    and candidate.is_file()
+                ),
+                None,
+            )
+            if template_path is None:
+                raise RuntimeError("SolidWorks default part template is unavailable")
+            template = str(template_path)
         document = app.NewDocument(template, 0, 0.0, 0.0)
         if document is None:
             raise RuntimeError("SolidWorks failed to create a part document")
