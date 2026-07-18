@@ -19,6 +19,7 @@ wheels/
 logs/
 
 data/
+references/
 *.db
 *.sqlite3
 .env
