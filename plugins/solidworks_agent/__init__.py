@@ -7,6 +7,7 @@ import os
 import queue
 import sys
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +104,10 @@ def _failure(message: str) -> _StructuredResult:
     )
 
 
-def _validate_result(content: str) -> _StructuredResult:
+def _validate_result(
+    content: str,
+    project_root: str | Path | None = None,
+) -> _StructuredResult:
     text = str(content or "").strip()
     positions = []
     for heading in REQUIRED_HEADINGS:
@@ -119,7 +123,36 @@ def _validate_result(content: str) -> _StructuredResult:
     ]
     if len(status_lines) != 1 or status_lines[0] not in _VALID_STATUSES:
         return _failure("invalid structured result status")
-    return _StructuredResult(text, success=status_lines[0] == "Success")
+    success = status_lines[0] == "Success"
+    if success:
+        root = Path(project_root or Path(__file__).resolve().parents[2]).resolve()
+        data_root = (root / "data").resolve()
+        generated_section = text[positions[3] + len(REQUIRED_HEADINGS[3]) : positions[4]]
+        paths = []
+        try:
+            for line in generated_section.splitlines():
+                value = line.strip()
+                if not value.startswith("- "):
+                    continue
+                path = Path(value[2:].strip().strip("`").strip()).resolve()
+                if not Path(value[2:].strip().strip("`").strip()).is_absolute():
+                    raise ValueError
+                path.relative_to(data_root)
+                if not path.is_file():
+                    raise ValueError
+                paths.append(path)
+        except (OSError, ValueError):
+            return _failure("successful result contains an invalid deliverable path")
+        suffixes = {path.suffix.casefold() for path in paths}
+        required = [
+            bool(suffixes & {".sldprt", ".sldasm"}),
+            ".step" in suffixes,
+            ".stl" in suffixes,
+            ".png" in suffixes,
+        ]
+        if not all(required):
+            return _failure("successful result is missing a required deliverable")
+    return _StructuredResult(text, success=success)
 
 
 def _build_model() -> Any:
@@ -220,7 +253,13 @@ class SolidWorksAgentTools:
     ) -> ToolResponse:
         try:
             result = _run_async(self._solidworks_model_async(task, session_id))
-            result = _validate_result(result)
+            context = current_artifact_context()
+            root = (
+                context.path_policy.project_root
+                if context is not None and hasattr(context, "path_policy")
+                else Path(__file__).resolve().parents[2]
+            )
+            result = _validate_result(result, root)
         except Exception as exc:
             result = _failure(f"SolidWorks execution failed: {exc}")
         return ToolResponse(
@@ -236,10 +275,17 @@ class SolidWorksAgentTools:
         context = current_artifact_context()
         active_session = session_id or (context.session_id if context is not None else "standalone")
         project_root = Path(__file__).resolve().parents[2]
+        validation_root = (
+            context.path_policy.project_root
+            if context is not None and hasattr(context, "path_policy")
+            else project_root
+        )
+        operation_id = uuid.uuid4().hex
         child_env = dict(os.environ)
         child_env["SOLIDWORKS_SESSION_ID"] = active_session
         child_env["SOLIDWORKS_PROJECT_ROOT"] = str(project_root)
         child_env["SOLIDWORKS_DATABASE_PATH"] = str(project_root / "data" / "app.db")
+        child_env["SOLIDWORKS_TOOL_CALL_ID"] = operation_id
         config = StdioMCPConfig(
             command=sys.executable,
             args=["-m", "plugins.solidworks_agent.mcp_server"],
@@ -271,9 +317,17 @@ class SolidWorksAgentTools:
             )
             response = await _consume_reply_stream(
                 agent,
-                UserMsg(name="User", content=task),
+                UserMsg(
+                    name="User",
+                    content=(
+                        f"{task}\n\n"
+                        f"Required session_id: {active_session}. Call solidworks_new_part "
+                        f"with session_id exactly {active_session}. Operation correlation id: "
+                        f"{operation_id}."
+                    ),
+                ),
             )
-            return _validate_result(response.get_text_content() or "")
+            return _validate_result(response.get_text_content() or "", validation_root)
         except BaseException as exc:
             primary_error = exc
             raise
@@ -301,7 +355,13 @@ class SolidWorksAgentTools:
                 try:
                     try:
                         result = await self._solidworks_model_async(*args, **kwargs)
-                        result = _validate_result(result)
+                        context = current_artifact_context()
+                        root = (
+                            context.path_policy.project_root
+                            if context is not None and hasattr(context, "path_policy")
+                            else Path(__file__).resolve().parents[2]
+                        )
+                        result = _validate_result(result, root)
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:

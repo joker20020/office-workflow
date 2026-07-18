@@ -38,6 +38,23 @@ None
 """
 
 
+def _valid_result(root: Path) -> str:
+    paths = {
+        "native": root / "models" / "session" / "part.sldprt",
+        "step": root / "exports" / "session" / "part.step",
+        "stl": root / "exports" / "session" / "part.stl",
+        "preview": root / "images" / "session" / "preview.png",
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"artifact")
+    files = "\n".join(f"- {path.resolve()}" for path in paths.values())
+    return VALID_RESULT.replace(
+        "- part.SLDPRT\n- part.step\n- part.stl\n- preview.png",
+        files,
+    )
+
+
 def _module():
     return importlib.import_module("plugins.solidworks_agent")
 
@@ -58,7 +75,7 @@ def test_manifest_and_settings_define_an_independent_plugin(monkeypatch):
     assert settings.execution_timeout_seconds() == 600.0
 
 
-def _install_recording_runtime(monkeypatch, module, *, connect_error=None):
+def _install_recording_runtime(monkeypatch, module, *, connect_error=None, result=VALID_RESULT):
     events = []
     captured = {}
 
@@ -112,7 +129,7 @@ def _install_recording_runtime(monkeypatch, module, *, connect_error=None):
             yield TextBlockDeltaEvent(
                 reply_id="reply-1",
                 block_id="text-1",
-                delta=VALID_RESULT,
+                delta=result,
             )
             yield ReplyEndEvent(session_id="agent-session", reply_id="reply-1")
 
@@ -125,13 +142,20 @@ def _install_recording_runtime(monkeypatch, module, *, connect_error=None):
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(monkeypatch):
+async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
+    monkeypatch, tmp_path
+):
     module = _module()
-    events, captured, fake_client = _install_recording_runtime(monkeypatch, module)
+    valid_result = _valid_result(tmp_path / "data")
+    events, captured, fake_client = _install_recording_runtime(
+        monkeypatch, module, result=valid_result
+    )
     monkeypatch.setattr(
         module,
         "current_artifact_context",
-        lambda: SimpleNamespace(session_id="active-session"),
+        lambda: SimpleNamespace(
+            session_id="active-session", path_policy=ArtifactPathPolicy(tmp_path)
+        ),
     )
     public_events = []
     token = module._PROGRESS_SINK.set(public_events.append)
@@ -140,7 +164,7 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(m
     finally:
         module._PROGRESS_SINK.reset(token)
 
-    assert result == VALID_RESULT.strip()
+    assert result == valid_result.strip()
     assert result.success is True
     assert events == ["client", "connect", "toolkit", "agent", "reply_stream", "close"]
     assert fake_client.instances[0].close_count == 1
@@ -155,8 +179,14 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(m
     assert captured["config"]["env"]["SOLIDWORKS_DATABASE_PATH"].endswith(
         "data\\app.db"
     )
+    correlation_id = captured["config"]["env"]["SOLIDWORKS_TOOL_CALL_ID"]
+    assert correlation_id
     assert captured["config"]["cwd"] == str(Path(module.__file__).parents[2])
-    assert captured["message"].get_text_content() == "build it"
+    message = captured["message"].get_text_content()
+    assert "build it" in message
+    assert "active-session" in message
+    assert correlation_id in message
+    assert "solidworks_new_part" in message
     assert {event["kind"] for event in public_events} == {"text", "complete"}
 
     prompt = captured["agent"]["system_prompt"]
@@ -343,25 +373,58 @@ async def test_public_stream_close_cancels_work_and_closes_client_once(monkeypat
             await asyncio.sleep(0.01)
 
 
-def test_public_tool_returns_tool_response_and_rejects_malformed_markdown(monkeypatch):
+def test_public_tool_returns_tool_response_and_rejects_malformed_markdown(
+    monkeypatch, tmp_path
+):
     module = _module()
     tools = module.SolidWorksAgentTools()
+    valid_result = _valid_result(tmp_path / "data")
 
     monkeypatch.setattr(
         module,
         "_run_async",
-        lambda coro: (coro.close(), module._validate_result(VALID_RESULT))[1],
+        lambda coro: (coro.close(), module._validate_result(valid_result, tmp_path))[1],
+    )
+    monkeypatch.setattr(
+        module,
+        "current_artifact_context",
+        lambda: SimpleNamespace(path_policy=ArtifactPathPolicy(tmp_path)),
     )
     response = tools.tool_solidworks_model("build it", session_id="session")
     assert response.state is ToolResultState.SUCCESS
-    assert response.content[0].text == VALID_RESULT.strip()
+    assert response.content[0].text == valid_result.strip()
 
-    malformed = VALID_RESULT.replace("## Verification\n", "")
-    rejected = module._validate_result(malformed)
+    malformed = valid_result.replace("## Verification\n", "")
+    rejected = module._validate_result(malformed, tmp_path)
     assert rejected.success is False
     assert rejected.startswith("# Execution Result")
     assert "## Verification" in rejected
     assert "missing required heading" in rejected
+
+
+@pytest.mark.parametrize("missing_suffix", [".sldprt", ".step", ".stl", ".png"])
+def test_success_result_requires_all_real_absolute_data_deliverables(tmp_path, missing_suffix):
+    module = _module()
+    valid = _valid_result(tmp_path / "data")
+    lines = [line for line in valid.splitlines() if not line.casefold().endswith(missing_suffix)]
+    rejected = module._validate_result("\n".join(lines), tmp_path)
+    assert rejected.success is False
+    assert "deliverable" in rejected
+
+
+def test_success_result_rejects_nonexistent_relative_and_outside_paths(tmp_path):
+    module = _module()
+    valid = _valid_result(tmp_path / "data")
+    native = next(line[2:] for line in valid.splitlines() if line.casefold().endswith(".sldprt"))
+    bad_paths = [
+        "missing.sldprt",
+        str((tmp_path / "data" / "models" / "session" / "missing.sldprt").resolve()),
+        str((tmp_path / "outside.sldprt").resolve()),
+    ]
+    for bad in bad_paths:
+        rejected = module._validate_result(valid.replace(native, bad), tmp_path)
+        assert rejected.success is False
+        assert "deliverable" in rejected
 
 
 def test_plugin_registers_only_the_solidworks_streaming_tool():
