@@ -1,10 +1,14 @@
-# -*- coding: utf-8 -*-
+"""Contracts for the general main agent prompt and optional AR delivery skill."""
+
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
-
-SETTINGS_PATH = Path(__file__).parents[1] / "config" / "settings.yaml"
+PROJECT_ROOT = Path(__file__).parents[1]
+SETTINGS_PATH = PROJECT_ROOT / "config" / "settings.yaml"
+AR_DELIVERY_SKILL = PROJECT_ROOT / "skills" / "ar-assembly-delivery" / "SKILL.md"
+AR_DELIVERY_METADATA = AR_DELIVERY_SKILL.parent / "agents" / "openai.yaml"
 
 
 def _load_system_prompt() -> str:
@@ -12,57 +16,59 @@ def _load_system_prompt() -> str:
     return settings["system_prompt"]
 
 
-def test_main_agent_system_prompt_has_fixed_tool_order():
+def test_configured_main_prompt_is_general_and_not_a_fixed_pipeline():
     prompt = _load_system_prompt()
-    tool_names = (
+
+    assert "通用任务代理" in prompt
+    assert "按需选择" in prompt
+    assert "不得虚构" in prompt
+    for prohibited in (
         "tool_generate_process",
         "tool_generate_image",
         "tool_blender_model",
         "tool_unity_ar",
-    )
-
-    positions = [prompt.index(name) for name in tool_names]
-
-    assert positions == sorted(positions)
-    assert "不得跳过或调换阶段" in prompt
-
-
-def test_main_agent_system_prompt_gates_each_stage_and_stops_on_failure():
-    prompt = _load_system_prompt()
-
-    assert "只有当前阶段明确返回“成功”" in prompt
-    assert "部分成功" in prompt
-    assert "立即停止" in prompt
-    assert "不调用任何后续工具" in prompt
-    assert "未验证" in prompt
-
-
-def test_main_agent_system_prompt_passes_complete_artifact_context():
-    prompt = _load_system_prompt()
-
-    for requirement in (
-        "完整工艺与工步内容",
-        "工序和工步 JSON 文件路径",
-        "每张图片的文件路径",
-        ".blend 工程路径",
-        "导出模型、材质、贴图和渲染图路径",
-        "info 参数",
-        "工序工步 JSON",
+        "固定执行流程",
+        "四个阶段",
     ):
-        assert requirement in prompt
-
-    assert "不得猜测" in prompt
+        assert prohibited not in prompt
 
 
-def test_main_agent_system_prompt_requires_recoverable_final_report():
-    prompt = _load_system_prompt()
+def test_hard_coded_fallback_is_the_same_general_agent_contract():
+    from src.agent.agent_integration import AgentIntegration
 
+    agent = object.__new__(AgentIntegration)
+    agent.config = SimpleNamespace(get=lambda _key, default: default)
+
+    prompt = agent._system_prompt()
+
+    assert "通用任务代理" in prompt
+    assert "按需选择" in prompt
+    assert "不得虚构" in prompt
+    assert "创建和配置节点" not in prompt
+    assert "执行工作流" not in prompt
+
+
+def test_ar_assembly_delivery_skill_keeps_specialised_handoff_rules():
+    content = AR_DELIVERY_SKILL.read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(content.split("---", 2)[1])
+
+    assert frontmatter["name"] == "ar-assembly-delivery"
+    assert "完整 AR 辅助装配" in frontmatter["description"]
     for requirement in (
-        "已成功完成的阶段",
-        "已生成文件的全部已知路径",
-        "停止所在阶段",
-        "恢复执行前需要满足的条件",
-        "四个阶段全部成功",
-        "按阶段分类的全部生成文件路径",
+        "工艺规划",
+        "图像资源",
+        "Blender",
+        "Unity AR",
+        "不得虚构",
+        "完整交接",
+        "部分成功",
     ):
-        assert requirement in prompt
+        assert requirement in content
+
+
+def test_ar_assembly_delivery_metadata_is_utf8_and_ascii_safe():
+    content = AR_DELIVERY_METADATA.read_text(encoding="utf-8")
+    metadata = yaml.safe_load(content)
+
+    assert content.isascii()
+    assert metadata["interface"]["display_name"] == "AR Assembly Delivery"
