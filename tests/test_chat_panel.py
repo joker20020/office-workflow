@@ -28,7 +28,7 @@ from agentscope.event import (
     ToolResultEndEvent,
     ToolResultTextDeltaEvent,
 )
-from agentscope.message import ToolResultState
+from agentscope.message import Base64Source, DataBlock, ToolResultState, UserMsg
 
 import src.ui.chat.chat_panel as chat_panel
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
@@ -47,6 +47,30 @@ class MockStreamingWidget:
 
 
 class TestChatPanelStreaming:
+    def test_history_extracts_base64_image_data_blocks_for_display(self):
+        message = UserMsg(
+            name="User",
+            content=[
+                DataBlock(
+                    name="image",
+                    source=Base64Source(data="aW1hZ2U=", media_type="image/png"),
+                ),
+            ],
+        )
+
+        blocks = chat_panel._extract_blocks_from_msg(message)
+
+        assert blocks == [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "data": "aW1hZ2U=",
+                    "media_type": "image/png",
+                },
+            },
+        ]
+
     def test_subagent_marker_delta_becomes_nested_event_not_tool_output(self):
         state = {("tool_result", "call-1"): {"name": "tool_blender_model", "output": ""}}
         marker = chat_panel.encode_subagent_event(

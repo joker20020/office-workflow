@@ -302,27 +302,23 @@ def _extract_blocks_from_msg(msg: Any) -> List[Dict[str, Any]]:
                     block_dict["id"] = getattr(block, "id", "")
                     block_dict["name"] = getattr(block, "name", "")
                     block_dict["output"] = getattr(block, "output", "")
-                elif block_dict["type"] == "image":
+                elif block_dict["type"] == "data":
+                    media_kind = getattr(block, "name", "")
+                    if media_kind in ("image", "audio", "video"):
+                        block_dict["type"] = media_kind
+                if block_dict["type"] in ("image", "audio", "video"):
                     source = getattr(block, "source", None)
                     if source:
-                        block_dict["source"] = {
-                            "type": getattr(source, "type", "url"),
-                            "url": getattr(source, "url", ""),
-                        }
-                elif block_dict["type"] == "audio":
-                    source = getattr(block, "source", None)
-                    if source:
-                        block_dict["source"] = {
-                            "type": getattr(source, "type", "url"),
-                            "url": getattr(source, "url", ""),
-                        }
-                elif block_dict["type"] == "video":
-                    source = getattr(block, "source", None)
-                    if source:
-                        block_dict["source"] = {
-                            "type": getattr(source, "type", "url"),
-                            "url": getattr(source, "url", ""),
-                        }
+                        source_type = getattr(source, "type", "url")
+                        source_data = {"type": source_type}
+                        if source_type == "base64":
+                            source_data["data"] = getattr(source, "data", "")
+                        else:
+                            source_data["url"] = getattr(source, "url", "")
+                        media_type = getattr(source, "media_type", "")
+                        if media_type:
+                            source_data["media_type"] = media_type
+                        block_dict["source"] = source_data
                 blocks.append(block_dict)
         return blocks
 

@@ -1089,6 +1089,17 @@ class AgentIntegration:
                 content_blocks.append(TextBlock(text=block.get("text", "")))
             elif block_type in ("image", "audio", "video"):
                 content_blocks.append(self._create_data_block(block, block_type))
+                if block_type == "image" and "url" in block:
+                    local_path = self._local_media_path(str(block["url"]))
+                    if local_path is not None:
+                        content_blocks.append(
+                            TextBlock(
+                                text=(
+                                    "已附加图片的本地绝对路径（供需要读取原文件的工具使用）："
+                                    f"{local_path.resolve()}"
+                                ),
+                            ),
+                        )
         return UserMsg(name="User", content=content_blocks)
 
     def _create_data_block(self, block: Dict[str, Any], media_kind: str) -> Any:
