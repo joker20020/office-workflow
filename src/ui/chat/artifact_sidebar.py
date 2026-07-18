@@ -15,18 +15,21 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from src.core.artifact_paths import ArtifactPathPolicy
+from src.ui.i18n_manager import _
+from src.ui.language_aware import LanguageAwareMixin
+from src.ui.theme import Theme
+from src.ui.theme_aware import ThemeAwareMixin
 
-_CATEGORY_LABELS = {
-    "documents": "Documents",
-    "images": "Images",
-    "models": "Models",
-    "exports": "Exports",
+_CATEGORY_LABEL_KEYS = {
+    "documents": "artifacts.categories.documents",
+    "images": "artifacts.categories.images",
+    "models": "artifacts.categories.models",
+    "exports": "artifacts.categories.exports",
 }
 
 
@@ -36,10 +39,13 @@ def _value(artifact: Any, key: str, default: Any = None) -> Any:
     return getattr(artifact, key, default)
 
 
-class ArtifactSidebar(QFrame):
+class ArtifactSidebar(QFrame, ThemeAwareMixin, LanguageAwareMixin):
     """Display verified artifacts belonging to the active chat session."""
 
     artifact_activated = Signal(str)
+    MINIMUM_WIDTH = 240
+    MAXIMUM_WIDTH = 520
+    DEFAULT_WIDTH = 320
 
     def __init__(
         self,
@@ -48,42 +54,42 @@ class ArtifactSidebar(QFrame):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._setup_theme_awareness()
+        self._setup_language_awareness()
         self._repository = repository
         self._policy = policy
         self._session_id: str | None = None
-        self._collapsed = True
         self._artifacts: dict[str, Any] = {}
         self._statuses: dict[str, str] = {}
         self._setup_ui()
-        self.set_collapsed(True)
 
     def _setup_ui(self) -> None:
         self.setObjectName("artifactSidebar")
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setMinimumWidth(self.MINIMUM_WIDTH)
+        self.setMaximumWidth(self.MAXIMUM_WIDTH)
+        self.setStyleSheet(Theme.get_artifact_sidebar_stylesheet())
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        compact_gap = Theme.METRICS["section_gap"] // 2
+        root.setContentsMargins(compact_gap, compact_gap, compact_gap, compact_gap)
+        root.setSpacing(compact_gap)
 
         header = QHBoxLayout()
-        self._title_label = QLabel("Artifacts")
-        self._title_label.setStyleSheet("font-weight: 600;")
+        self._title_label = QLabel(_("artifacts.title"))
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
         header.addWidget(self._title_label)
         header.addStretch()
-        self._collapse_button = QToolButton()
-        self._collapse_button.setToolTip("Collapse artifacts")
-        self._collapse_button.clicked.connect(
-            lambda: self.set_collapsed(not self.is_collapsed()),
-        )
-        header.addWidget(self._collapse_button)
         root.addLayout(header)
 
         self._scroll = QScrollArea()
+        self._scroll.setObjectName("artifactSidebarScroll")
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._content = QWidget()
+        self._content.setObjectName("artifactSidebarContent")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_layout.setSpacing(8)
+        self._content_layout.setSpacing(Theme.METRICS["section_gap"] // 2)
         self._content_layout.addStretch()
         self._scroll.setWidget(self._content)
         root.addWidget(self._scroll, 1)
@@ -108,7 +114,7 @@ class ArtifactSidebar(QFrame):
             if self._session_id
             else []
         )
-        grouped: dict[str, list[Any]] = {key: [] for key in _CATEGORY_LABELS}
+        grouped: dict[str, list[Any]] = {key: [] for key in _CATEGORY_LABEL_KEYS}
         for artifact in records:
             artifact_id = str(_value(artifact, "id"))
             self._artifacts[artifact_id] = artifact
@@ -117,7 +123,8 @@ class ArtifactSidebar(QFrame):
             self._statuses[artifact_id] = self._path_status(artifact)
 
         if not records:
-            empty = QLabel("No artifacts for this session")
+            empty = QLabel(_("artifacts.empty"))
+            empty.setObjectName("artifactEmptyState")
             empty.setWordWrap(True)
             self._content_layout.addWidget(empty)
         else:
@@ -125,7 +132,13 @@ class ArtifactSidebar(QFrame):
                 if artifacts:
                     self._content_layout.addWidget(
                         self._category_widget(
-                            _CATEGORY_LABELS.get(category, category.title()),
+                            _(
+                                _CATEGORY_LABEL_KEYS.get(
+                                    category,
+                                    "artifacts.categories.other",
+                                ),
+                                category.title(),
+                            ),
                             artifacts,
                         ),
                     )
@@ -133,10 +146,11 @@ class ArtifactSidebar(QFrame):
 
     def _category_widget(self, title: str, artifacts: list[Any]) -> QWidget:
         section = QFrame()
+        section.setObjectName("artifactCategory")
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         label = QLabel(title)
-        label.setStyleSheet("font-weight: 600;")
+        label.setObjectName("artifactCategoryTitle")
         layout.addWidget(label)
         for artifact in artifacts:
             layout.addWidget(self._artifact_widget(artifact))
@@ -145,16 +159,19 @@ class ArtifactSidebar(QFrame):
     def _artifact_widget(self, artifact: Any) -> QWidget:
         artifact_id = str(_value(artifact, "id"))
         card = QFrame()
+        card.setObjectName("artifactCard")
         card.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(3)
 
         name = QLabel(str(_value(artifact, "filename", "Artifact")))
         name.setWordWrap(True)
+        name.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
         layout.addWidget(name)
         path = QLabel(str(_value(artifact, "path", "")))
         path.setWordWrap(True)
+        path.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_secondary"))
         path.setTextInteractionFlags(path.textInteractionFlags())
         layout.addWidget(path)
 
@@ -166,15 +183,26 @@ class ArtifactSidebar(QFrame):
             created_text = str(created or "")
         status = self._statuses[artifact_id]
         metadata = QLabel(" · ".join(part for part in (producer, created_text, status) if part))
+        metadata.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_hint"))
         layout.addWidget(metadata)
 
         actions = QHBoxLayout()
-        for text, callback in (
-            ("Open", lambda _=False, item_id=artifact_id: self.open_artifact(item_id)),
-            ("Reveal", lambda _=False, item_id=artifact_id: self.reveal_artifact(item_id)),
-            ("Copy", lambda _=False, item_id=artifact_id: self.copy_artifact_path(item_id)),
+        for key, callback in (
+            (
+                "artifacts.open",
+                lambda _=False, item_id=artifact_id: self.open_artifact(item_id),
+            ),
+            (
+                "artifacts.reveal",
+                lambda _=False, item_id=artifact_id: self.reveal_artifact(item_id),
+            ),
+            (
+                "artifacts.copy_path",
+                lambda _=False, item_id=artifact_id: self.copy_artifact_path(item_id),
+            ),
         ):
-            button = QPushButton(text)
+            button = QPushButton(_(key))
+            button.setStyleSheet(Theme.get_compact_button_stylesheet())
             button.clicked.connect(callback)
             button.setEnabled(status == "available")
             actions.addWidget(button)
@@ -224,23 +252,15 @@ class ArtifactSidebar(QFrame):
         QApplication.clipboard().setText(str(path))
         return True
 
-    def set_collapsed(self, collapsed: bool) -> None:
-        self._collapsed = bool(collapsed)
-        self._scroll.setVisible(not self._collapsed)
-        self._title_label.setVisible(not self._collapsed)
-        self._collapse_button.setText("›" if self._collapsed else "‹")
-        self._collapse_button.setToolTip(
-            "Expand artifacts" if self._collapsed else "Collapse artifacts",
-        )
-        if self._collapsed:
-            self.setMinimumWidth(36)
-            self.setMaximumWidth(36)
-        else:
-            self.setMinimumWidth(240)
-            self.setMaximumWidth(420)
+    def refresh_language(self) -> None:
+        """Refresh static labels while retaining the active artifact session."""
+        self._title_label.setText(_("artifacts.title"))
+        self.refresh()
 
-    def is_collapsed(self) -> bool:
-        return self._collapsed
+    def refresh_theme(self) -> None:
+        self.setStyleSheet(Theme.get_artifact_sidebar_stylesheet())
+        self._title_label.setStyleSheet(Theme.get_title_label_stylesheet())
+        self.refresh()
 
     def visible_artifact_ids(self) -> list[str]:
         return list(self._artifacts)

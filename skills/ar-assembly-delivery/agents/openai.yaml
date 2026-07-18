@@ -1,0 +1,4 @@
+interface:
+  display_name: "AR Assembly Delivery"
+  short_description: "Verified end-to-end AR assembly delivery workflow"
+  default_prompt: "Use $ar-assembly-delivery to deliver a complete AR-assisted assembly solution."

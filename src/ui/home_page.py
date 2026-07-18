@@ -19,6 +19,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QSizePolicy,
+    QStyle,
 )
 
 from src.core.config_manager import get_config_manager
@@ -49,7 +51,7 @@ class QuickActionCard(QFrame, ThemeAwareMixin, LanguageAwareMixin):
         self,
         action_id: str,
         title: str,
-        icon: str,
+        icon: QIcon,
         description: str,
         parent: Optional[QWidget] = None,
     ):
@@ -73,9 +75,11 @@ class QuickActionCard(QFrame, ThemeAwareMixin, LanguageAwareMixin):
         layout.setSpacing(8)
 
         # 图标
-        self._icon_label = QLabel(self._icon)
+        self._icon_label = QLabel()
         self._icon_label.setObjectName("quickActionIcon")
+        self._icon_label.setFixedSize(28, 28)
         self._icon_label.setStyleSheet(Theme.get_quick_action_icon_stylesheet())
+        self._icon_label.setPixmap(self._icon.pixmap(24, 24))
         layout.addWidget(self._icon_label)
 
         # 标题
@@ -147,7 +151,11 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin, LanguageAwareMixin):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
 
-        self._icon_label = QLabel("📄")
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(24, 24)
+        self._icon_label.setPixmap(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon).pixmap(20, 20),
+        )
         self._icon_label.setStyleSheet(Theme.get_icon_label_stylesheet(20))
         layout.addWidget(self._icon_label)
 
@@ -166,7 +174,11 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin, LanguageAwareMixin):
 
         layout.addLayout(info_layout, 1)
 
-        self._arrow_label = QLabel("›")
+        self._arrow_label = QLabel()
+        self._arrow_label.setFixedSize(20, 20)
+        self._arrow_label.setPixmap(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight).pixmap(16, 16),
+        )
         self._arrow_label.setStyleSheet(Theme.get_arrow_indicator_stylesheet())
         layout.addWidget(self._arrow_label)
 
@@ -195,7 +207,13 @@ class RecentWorkflowItem(QFrame, ThemeAwareMixin, LanguageAwareMixin):
         self._title_label.setStyleSheet(Theme.get_recent_item_title_stylesheet())
         self._meta_label.setStyleSheet(Theme.get_recent_item_meta_stylesheet())
         self._icon_label.setStyleSheet(Theme.get_icon_label_stylesheet(20))
+        self._icon_label.setPixmap(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon).pixmap(20, 20),
+        )
         self._arrow_label.setStyleSheet(Theme.get_arrow_indicator_stylesheet())
+        self._arrow_label.setPixmap(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight).pixmap(16, 16),
+        )
 
 
 class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
@@ -214,10 +232,10 @@ class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
     # 快速操作配置
     QUICK_ACTIONS = [
-        {"id": "nodes", "icon": "🔧", "title": "节点编辑器", "desc": "创建和编辑节点工作流"},
-        {"id": "agent", "icon": "🤖", "title": "AI 助手", "desc": "与 AI 对话获取帮助"},
-        {"id": "plugins", "icon": "🧩", "title": "插件管理", "desc": "管理已安装的插件"},
-        {"id": "packages", "icon": "📦", "title": "节点包", "desc": "浏览和安装节点包"},
+        {"id": "nodes", "icon": QStyle.StandardPixmap.SP_FileDialogContentsView},
+        {"id": "agent", "icon": QStyle.StandardPixmap.SP_MessageBoxInformation},
+        {"id": "plugins", "icon": QStyle.StandardPixmap.SP_FileDialogNewFolder},
+        {"id": "packages", "icon": QStyle.StandardPixmap.SP_DirOpenIcon},
     ]
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -317,9 +335,9 @@ class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         for i, action in enumerate(self.QUICK_ACTIONS):
             card = QuickActionCard(
                 action_id=action["id"],
-                title=action["title"],
-                icon=action["icon"],
-                description=action["desc"],
+                title=_(f"home.actions.{action['id']}.title"),
+                icon=self.style().standardIcon(action["icon"]),
+                description=_(f"home.actions.{action['id']}.desc"),
             )
             card.setMinimumWidth(200)  # 设置最小宽度
             card.clicked.connect(self._on_action_clicked)
@@ -361,7 +379,7 @@ class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(24, 12, 24, 12)
 
-        self._status_label = QLabel(f"💡 {_('home.hint')}")
+        self._status_label = QLabel(_("home.hint"))
         self._status_label.setObjectName("footerStatus")
         self._status_label.setStyleSheet(Theme.get_footer_status_stylesheet())
         layout.addWidget(self._status_label)
@@ -471,7 +489,7 @@ class HomePage(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._title_label.setText(_("app.welcome_title"))
         self._subtitle_label.setText(_("app.welcome_subtitle"))
         self._recent_title.setText(_("home.recent_workflows"))
-        self._status_label.setText(f"💡 {_('home.hint')}")
+        self._status_label.setText(_("home.hint"))
 
         # 刷新快速操作卡片
         for card in self._quick_action_cards:

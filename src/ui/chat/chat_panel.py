@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QUrl, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QHBoxLayout,
     QWidget,
@@ -517,6 +518,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     session_selected = Signal(str)  # session_id
     session_delete_requested = Signal(str)  # session_id
     new_session_requested = Signal()
+    HEADER_STACK_BREAKPOINT = 260
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -531,20 +533,42 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         self._header = QFrame()
         self._header.setStyleSheet(Theme.get_session_list_header_stylesheet())
-        header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
+        self._header_layout = QVBoxLayout(self._header)
+        self._header_layout.setContentsMargins(12, 8, 12, 8)
+        self._header_layout.setSpacing(4)
+
+        self._header_primary_layout = QHBoxLayout()
+        self._header_primary_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_primary_layout.setSpacing(6)
+        self._header_layout.addLayout(self._header_primary_layout)
 
         self._title_label = QLabel(_("chat.session_history"))
         self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
-        header_layout.addWidget(self._title_label)
+        self._title_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._header_primary_layout.addWidget(self._title_label, 1)
 
-        header_layout.addStretch()
+        self._header_primary_layout.addStretch()
 
         self._new_btn = QPushButton(_("chat.new_session"))
-        self._new_btn.setFixedSize(72, 28)
+        self._new_btn.setFixedHeight(28)
+        self._new_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._new_btn.clicked.connect(self.new_session_requested.emit)
         self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
-        header_layout.addWidget(self._new_btn)
+        self._header_primary_layout.addWidget(self._new_btn)
+
+        self._header_secondary = QWidget()
+        self._header_secondary_layout = QHBoxLayout(self._header_secondary)
+        self._header_secondary_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_secondary_layout.addStretch()
+        self._header_secondary.hide()
+        self._header_layout.addWidget(self._header_secondary)
+        self._is_header_stacked = False
 
         layout.addWidget(self._header)
 
@@ -555,6 +579,39 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         self.setMinimumWidth(200)
         self.setMaximumWidth(300)
+        self._update_header_layout(force=True)
+
+    def _update_header_layout(self, force: bool = False) -> None:
+        """Keep the history title readable as the session rail is resized."""
+        available_width = self.width()
+        if available_width <= 0:
+            return
+        title_width = self._title_label.fontMetrics().horizontalAdvance(
+            self._title_label.text(),
+        )
+        button_width = self._new_btn.sizeHint().width()
+        margins = self._header_layout.contentsMargins()
+        required_width = max(
+            self.HEADER_STACK_BREAKPOINT,
+            title_width + button_width + margins.left() + margins.right() + 12,
+        )
+        stacked = available_width < required_width
+        if not force and stacked == self._is_header_stacked:
+            return
+
+        if stacked:
+            self._header_primary_layout.removeWidget(self._new_btn)
+            self._header_secondary_layout.addWidget(self._new_btn)
+            self._header_secondary.show()
+        else:
+            self._header_secondary_layout.removeWidget(self._new_btn)
+            self._header_primary_layout.addWidget(self._new_btn)
+            self._header_secondary.hide()
+        self._is_header_stacked = stacked
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_header_layout()
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         session_id = item.data(Qt.ItemDataRole.UserRole)
@@ -594,6 +651,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._title_label.setText(_("chat.session_history"))
         if hasattr(self, "_new_btn"):
             self._new_btn.setText(_("chat.new_session"))
+        self._update_header_layout(force=True)
         # 刷新列表项
         if hasattr(self, "_list_widget"):
             for i in range(self._list_widget.count()):
@@ -610,6 +668,7 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._title_label.setStyleSheet(Theme.get_session_list_title_stylesheet())
         if hasattr(self, "_new_btn"):
             self._new_btn.setStyleSheet(Theme.get_session_new_button_stylesheet())
+        self._update_header_layout(force=True)
         if hasattr(self, "_list_widget"):
             self._list_widget.setStyleSheet(Theme.get_session_list_widget_stylesheet())
             # Refresh all session item widgets
@@ -653,6 +712,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._streaming_blocks: List[Dict[str, Any]] = []
         self._current_block_type = "unknown"
         self._attachments: List[Dict[str, Any]] = []
+        self._artifact_sidebar_width = ArtifactSidebar.DEFAULT_WIDTH
 
         self._setup_ui()
         self._connect_signals()
@@ -718,9 +778,20 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         if hasattr(self, "_artifact_sidebar"):
             self._splitter.addWidget(self._artifact_sidebar)
+            self._splitter.setCollapsible(
+                self._splitter.indexOf(self._artifact_sidebar),
+                False,
+            )
+            self._splitter.splitterMoved.connect(self._remember_artifact_sidebar_width)
 
         # 设置分割比例
-        self._splitter.setSizes([200, 600, 36])
+        splitter_sizes = [600]
+        if hasattr(self, "_session_list"):
+            splitter_sizes.insert(0, 200)
+        if hasattr(self, "_artifact_sidebar"):
+            splitter_sizes.append(0)
+            self._artifact_sidebar.hide()
+        self._splitter.setSizes(splitter_sizes)
 
         main_layout.addWidget(self._splitter)
 
@@ -732,7 +803,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         layout.setContentsMargins(16, 0, 16, 0)
 
         title_layout = QVBoxLayout()
-        self._title_label = QLabel("🤖 " + _("nav.agent"))
+        self._title_label = QLabel(_("nav.agent"))
         self._title_label.setStyleSheet(Theme.get_chat_title_label_stylesheet())
         title_layout.addWidget(self._title_label)
 
@@ -750,21 +821,36 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         layout.addStretch()
 
-        self._settings_btn = QPushButton("⚙ " + _("nav.settings"))
-        self._settings_btn.setFixedHeight(28)
+        self._settings_btn = QPushButton(_("nav.settings"))
+        self._settings_btn.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+        )
+        self._settings_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._settings_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._settings_btn.clicked.connect(self._open_settings)
         self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
 
         self._clear_btn = QPushButton(_("chat.clear"))
-        self._clear_btn.setFixedHeight(28)
+        self._clear_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._clear_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._clear_btn.clicked.connect(self._clear_chat)
         self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
 
         layout.addWidget(self._settings_btn)
         layout.addWidget(self._clear_btn)
 
-        self._artifacts_btn = QPushButton("Artifacts")
-        self._artifacts_btn.setFixedHeight(28)
+        self._artifacts_btn = QPushButton(_("artifacts.title"))
+        self._artifacts_btn.setFixedHeight(Theme.METRICS["compact_control_height"])
+        self._artifacts_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._artifacts_btn.clicked.connect(self._toggle_artifact_sidebar)
         self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._artifacts_btn.setVisible(hasattr(self, "_artifact_sidebar"))
@@ -813,29 +899,32 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         button_layout.setSpacing(8)
 
         # 多模态附件按钮（默认隐藏，根据 API Key 支持类型显示）
-        self._image_btn = QPushButton("📷 " + _("chat.image"))
+        self._image_btn = QPushButton(_("chat.image"))
         self._image_btn.setToolTip(_("chat.add_image"))
-        self._image_btn.setFixedSize(70, 32)
+        self._image_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._image_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._image_btn.clicked.connect(self._select_image)
         self._image_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._image_btn.hide()
 
-        self._audio_btn = QPushButton("🎤 " + _("chat.audio"))
+        self._audio_btn = QPushButton(_("chat.audio"))
         self._audio_btn.setToolTip(_("chat.add_audio"))
-        self._audio_btn.setFixedSize(70, 32)
+        self._audio_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._audio_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._audio_btn.clicked.connect(self._select_audio)
         self._audio_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._audio_btn.hide()
 
-        self._video_btn = QPushButton("🎬 " + _("chat.video"))
+        self._video_btn = QPushButton(_("chat.video"))
         self._video_btn.setToolTip(_("chat.add_video"))
-        self._video_btn.setFixedSize(70, 32)
+        self._video_btn.setFixedHeight(Theme.METRICS["control_height"])
+        self._video_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._video_btn.clicked.connect(self._select_video)
         self._video_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._video_btn.hide()
 
         self._send_btn = QPushButton(_("chat.send"))
-        self._send_btn.setFixedHeight(32)
+        self._send_btn.setFixedHeight(Theme.METRICS["control_height"])
         self._send_btn.clicked.connect(self._on_action_button_clicked)
         self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
         self._send_btn.setEnabled(False)
@@ -1611,9 +1700,50 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def _toggle_artifact_sidebar(self) -> None:
         if not hasattr(self, "_artifact_sidebar"):
             return
-        self._artifact_sidebar.set_collapsed(
-            not self._artifact_sidebar.is_collapsed(),
+        if self._artifact_sidebar.isVisible():
+            self._remember_artifact_sidebar_width()
+            self._artifact_sidebar.hide()
+            return
+
+        self._artifact_sidebar.show()
+        self._restore_artifact_sidebar_width()
+        QTimer.singleShot(0, self._restore_artifact_sidebar_width)
+
+    def _remember_artifact_sidebar_width(self, *_: Any) -> None:
+        """Retain only widths that keep artifact cards readable."""
+        if not hasattr(self, "_artifact_sidebar"):
+            return
+        sidebar = self._artifact_sidebar
+        if sidebar.isVisible() and sidebar.width() >= sidebar.minimumWidth():
+            self._artifact_sidebar_width = min(sidebar.width(), sidebar.maximumWidth())
+
+    def _restore_artifact_sidebar_width(self) -> None:
+        """Restore the last valid artifact width after showing the sidebar."""
+        if not hasattr(self, "_artifact_sidebar") or self._artifact_sidebar.isHidden():
+            return
+        sidebar = self._artifact_sidebar
+        target_width = max(
+            sidebar.minimumWidth(),
+            min(self._artifact_sidebar_width, sidebar.maximumWidth()),
         )
+        sidebar_index = self._splitter.indexOf(sidebar)
+        sizes = self._splitter.sizes()
+        if sidebar_index < 0 or sidebar_index >= len(sizes):
+            return
+        total_width = max(sum(sizes), target_width + 1)
+        other_indices = [index for index in range(len(sizes)) if index != sidebar_index]
+        remaining_width = max(total_width - target_width, 1)
+        current_other_width = sum(sizes[index] for index in other_indices)
+        if current_other_width:
+            for index in other_indices:
+                sizes[index] = max(
+                    1,
+                    round(sizes[index] * remaining_width / current_other_width),
+                )
+        elif other_indices:
+            sizes[other_indices[-1]] = remaining_width
+        sizes[sidebar_index] = target_width
+        self._splitter.setSizes(sizes)
 
     def _open_settings(self) -> None:
         if self._api_key_manager:
@@ -1632,25 +1762,27 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
     def refresh_language(self) -> None:
         """刷新语言文本"""
         if hasattr(self, "_title_label"):
-            self._title_label.setText("🤖 " + _("nav.agent"))
+            self._title_label.setText(_("nav.agent"))
         if hasattr(self, "_status_label"):
             self._status_label.setText(_("chat.please_select_api_key"))
         if hasattr(self, "_api_key_combo"):
             self._api_key_combo.setPlaceholderText(_("chat.select_api_key"))
         if hasattr(self, "_settings_btn"):
-            self._settings_btn.setText("⚙ " + _("nav.settings"))
+            self._settings_btn.setText(_("nav.settings"))
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setText(_("chat.clear"))
+        if hasattr(self, "_artifacts_btn"):
+            self._artifacts_btn.setText(_("artifacts.title"))
         if hasattr(self, "_input_text"):
             self._input_text.setPlaceholderText(_("chat.input_placeholder"))
         if hasattr(self, "_image_btn"):
-            self._image_btn.setText("📷 " + _("chat.image"))
+            self._image_btn.setText(_("chat.image"))
             self._image_btn.setToolTip(_("chat.add_image"))
         if hasattr(self, "_audio_btn"):
-            self._audio_btn.setText("🎤 " + _("chat.audio"))
+            self._audio_btn.setText(_("chat.audio"))
             self._audio_btn.setToolTip(_("chat.add_audio"))
         if hasattr(self, "_video_btn"):
-            self._video_btn.setText("🎬 " + _("chat.video"))
+            self._video_btn.setText(_("chat.video"))
             self._video_btn.setToolTip(_("chat.add_video"))
         if hasattr(self, "_send_btn") and self._is_send_mode:
             self._send_btn.setText(_("chat.send"))
@@ -1679,6 +1811,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._settings_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_clear_btn"):
             self._clear_btn.setStyleSheet(Theme.get_chat_clear_button_stylesheet())
+        if hasattr(self, "_artifacts_btn"):
+            self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_messages_widget"):
             self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
         if hasattr(self, "_input_area"):

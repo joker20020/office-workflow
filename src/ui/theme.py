@@ -40,6 +40,16 @@ class Theme:
     # Emoji 字体回退（用于包含 emoji 图标的组件样式）
     _emoji_font_family: str = ""
 
+    # Shared geometry tokens.  Keep text controls layout-managed; these values
+    # only standardise vertical rhythm and the size of icon-only controls.
+    METRICS = {
+        "control_height": 32,
+        "compact_control_height": 28,
+        "page_margin": 24,
+        "section_gap": 16,
+        "card_radius": 8,
+    }
+
     # ==================== 颜色常量 ====================
 
     DARK_COLORS = {
@@ -265,6 +275,82 @@ class Theme:
         """
         return cls._get_colors().get(name, "#ffffff")
 
+    @classmethod
+    def get_card_stylesheet(cls) -> str:
+        """Return the common elevated-card treatment used by page panels."""
+        return f"""
+            QFrame {{
+                background-color: {cls.hex("card_background")};
+                border: 1px solid {cls.hex("card_border")};
+                border-radius: {cls.METRICS["card_radius"]}px;
+            }}
+        """
+
+    @classmethod
+    def get_artifact_sidebar_stylesheet(cls) -> str:
+        """Return the themed hierarchy used by the assistant artifact sidebar."""
+        return f"""
+            QFrame#artifactSidebar {{
+                background-color: {cls.hex("background_secondary")};
+                border-left: 1px solid {cls.hex("border_primary")};
+            }}
+            QScrollArea#artifactSidebarScroll,
+            QWidget#artifactSidebarContent,
+            QFrame#artifactCategory {{
+                background-color: transparent;
+                border: none;
+            }}
+            QLabel#artifactCategoryTitle {{
+                color: {cls.hex("text_primary")};
+                font-size: 13px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 8px 0 4px 0;
+            }}
+            QFrame#artifactCard {{
+                background-color: {cls.hex("card_background")};
+                border: 1px solid {cls.hex("card_border")};
+                border-radius: {cls.METRICS["card_radius"]}px;
+            }}
+            QFrame#artifactCard:hover {{
+                border-color: {cls.hex("border_hover")};
+            }}
+            QLabel#artifactEmptyState {{
+                color: {cls.hex("text_hint")};
+                background-color: transparent;
+                padding: 40px 8px;
+            }}
+        """
+
+    @classmethod
+    def get_compact_button_stylesheet(cls, kind: str = "default") -> str:
+        """Return a consistent text-button treatment with keyboard focus."""
+        if kind == "primary":
+            background = cls.hex("accent_secondary")
+            hover = cls.hex("accent_hover_bg")
+            text = cls.hex("text_primary")
+        elif kind == "danger":
+            background = "transparent"
+            hover = cls.hex("danger_hover_bg")
+            text = cls.hex("state_error")
+        else:
+            background = "transparent"
+            hover = cls.hex("background_hover")
+            text = cls.hex("text_primary")
+        return f"""
+            QPushButton {{
+                min-height: {cls.METRICS["compact_control_height"]}px;
+                padding: 0 10px;
+                color: {text};
+                background-color: {background};
+                border: 1px solid transparent;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {hover}; }}
+            QPushButton:focus {{ border: 1px solid {cls.hex("border_focus")}; }}
+            QPushButton:disabled {{ color: {cls.hex("text_disabled")}; }}
+        """
+
     # ==================== 样式表 ====================
 
     @classmethod
@@ -313,7 +399,7 @@ class Theme:
     def get_navigation_rail_stylesheet(cls) -> str:
         """获取导航栏样式表"""
         return f"""
-            NavigationRail {{
+            QWidget#navigationRail {{
                 background-color: {cls.hex("background_secondary")};
                 border-right: 1px solid {cls.hex("border_primary")};
             }}
