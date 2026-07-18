@@ -1,5 +1,6 @@
 """Regression checks for locale-resilient PySide6 layouts."""
 
+import pytest
 from PySide6.QtWidgets import QApplication, QLabel, QStyle
 
 from src.ui.i18n_manager import I18nManager
@@ -76,3 +77,38 @@ def test_home_quick_actions_use_qt_icons_and_wrapping_descriptions():
     assert card._icon_label.text() == ""
     assert not card._icon_label.pixmap().isNull()
     assert card._desc_label.wordWrap() is True
+
+
+@pytest.mark.parametrize(
+    "dialog_factory",
+    [
+        "src.ui.plugins.plugin_panel.PluginInstallDialog",
+        "src.ui.plugins.plugin_panel.PluginLocalInstallDialog",
+        "src.ui.packages.package_panel.InstallDialog",
+        "src.ui.packages.package_panel.LocalInstallDialog",
+    ],
+)
+def test_install_dialogs_keep_text_layout_flexible(dialog_factory):
+    import importlib
+
+    _application()
+    module_name, class_name = dialog_factory.rsplit(".", 1)
+    dialog = getattr(importlib.import_module(module_name), class_name)()
+
+    assert dialog.minimumWidth() >= 450
+    assert dialog.maximumWidth() > dialog.minimumWidth()
+
+
+def test_management_cards_keep_long_descriptions_readable():
+    from src.ui.packages.package_panel import PackageItemWidget
+    from src.ui.plugins.plugin_panel import PluginItemWidget
+
+    _application()
+    description = "A deliberately long localized description that must remain readable in the management list."
+    plugin = PluginItemWidget("demo", {"description": description})
+    package = PackageItemWidget({"id": "demo", "description": description})
+
+    assert plugin._desc_label.text() == description
+    assert plugin._desc_label.wordWrap() is True
+    assert package._desc_label.text() == description
+    assert package._desc_label.wordWrap() is True

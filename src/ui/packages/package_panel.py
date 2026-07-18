@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
     QMessageBox,
@@ -109,7 +110,8 @@ class InstallDialog(QDialog, ThemeAwareMixin):
         super().__init__(parent)
         self._setup_theme_awareness()
         self.setWindowTitle(_("package.install"))
-        self.setFixedSize(450, 170)
+        self.setMinimumWidth(450)
+        self.resize(450, 170)
         self._setup_ui()
         self._apply_styles()
 
@@ -128,7 +130,11 @@ class InstallDialog(QDialog, ThemeAwareMixin):
         branch_layout = QHBoxLayout()
         self._branch_label = QLabel(_("package.branch"))
         self._branch_input = QLineEdit("main")
-        self._branch_input.setFixedWidth(100)
+        self._branch_input.setMinimumWidth(120)
+        self._branch_input.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._branch_input.setMinimumHeight(28)
         branch_layout.addWidget(self._branch_label)
         branch_layout.addWidget(self._branch_input)
@@ -172,7 +178,8 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
         super().__init__(parent)
         self._setup_theme_awareness()
         self.setWindowTitle(_("package.install_local_title"))
-        self.setFixedSize(500, 200)
+        self.setMinimumWidth(500)
+        self.resize(500, 200)
         self._setup_ui()
         self._apply_styles()
 
@@ -189,7 +196,11 @@ class LocalInstallDialog(QDialog, ThemeAwareMixin):
         path_layout.addWidget(self._path_input)
 
         self._browse_btn = QPushButton(_("package.browse"))
-        self._browse_btn.setFixedWidth(70)
+        self._browse_btn.setMinimumWidth(80)
+        self._browse_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._browse_btn.clicked.connect(self._on_browse)
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
@@ -318,22 +329,29 @@ class PackageItemWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         info_layout.addLayout(name_layout)
 
         desc = self._package_info.get("description", _("package.no_description"))
-        if len(desc) > 80:
-            desc = desc[:77] + "..."
         self._desc_label = QLabel(desc)
         self._desc_label.setStyleSheet(Theme.get_item_description_label_stylesheet())
+        self._desc_label.setWordWrap(True)
         info_layout.addWidget(self._desc_label)
 
         layout.addLayout(info_layout, 1)
 
         self._update_btn = QPushButton(_("package.update"))
-        self._update_btn.setFixedWidth(50)
+        self._update_btn.setMinimumWidth(72)
+        self._update_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._update_btn.setStyleSheet(Theme.get_item_accent_button_stylesheet())
         self._update_btn.clicked.connect(self._on_update_clicked)
         layout.addWidget(self._update_btn)
 
         self._delete_btn = QPushButton(_("package.delete"))
-        self._delete_btn.setFixedWidth(50)
+        self._delete_btn.setMinimumWidth(72)
+        self._delete_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._delete_btn.setStyleSheet(Theme.get_item_danger_button_stylesheet())
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         layout.addWidget(self._delete_btn)
@@ -368,7 +386,8 @@ class PackageItemWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         """刷新语言文本"""
         desc = self._package_info.get("description", _("package.no_description"))
         if hasattr(self, "_desc_label"):
-            self._desc_label.setText(desc[:80] if len(desc) <= 80 else desc[:77] + "...")
+            self._desc_label.setText(desc)
+            self._desc_label.setWordWrap(True)
         if hasattr(self, "_status_label"):
             self._status_label.setText(_package_status(self._is_enabled))
         if hasattr(self, "_update_btn"):
@@ -493,7 +512,11 @@ class PackagePanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         layout.addWidget(self._install_local_btn)
 
         self._refresh_btn = QPushButton(_("package.refresh"))
-        self._refresh_btn.setFixedWidth(60)
+        self._refresh_btn.setMinimumWidth(80)
+        self._refresh_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Fixed,
+        )
         self._refresh_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         self._refresh_btn.clicked.connect(self._on_refresh)
         layout.addWidget(self._refresh_btn)
