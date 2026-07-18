@@ -102,6 +102,22 @@ class TestMultimodalIntegration:
         assert block.source.media_type == "image/jpeg"
         assert block.source.data == "bG9jYWwtaW1hZ2UtYnl0ZXM="
 
+    def test_local_image_attachment_also_exposes_its_absolute_path_to_the_agent(self, tmp_path):
+        image_path = tmp_path / "fixture.png"
+        image_path.write_bytes(b"local-image-bytes")
+
+        integration = object.__new__(AgentIntegration)
+        message = integration._create_user_message(
+            [{"type": "image", "url": f"file://{image_path}"}],
+        )
+
+        assert isinstance(message.content[0], DataBlock)
+        assert isinstance(message.content[1], TextBlock)
+        assert message.content[1].text == (
+            "已附加图片的本地绝对路径（供需要读取原文件的工具使用）："
+            f"{image_path.resolve()}"
+        )
+
     def test_block_widget_factory_multimodal_support(self):
         from src.ui.chat.blocks import create_block_widget
 
