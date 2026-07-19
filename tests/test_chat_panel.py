@@ -128,6 +128,18 @@ class TestChatPanelStreaming:
         assert updates[-1]["event_kind"] == "text"
         assert state[("tool_result", "call-1")]["output"] == ""
 
+    def test_text_delta_private_subagent_marker_is_not_rendered(self):
+        marker = chat_panel.encode_subagent_event(
+            {"kind": "phase", "title": "Blender", "text": "started"}
+        )
+        event = TextBlockDeltaEvent(
+            reply_id="reply-1",
+            block_id="text-1",
+            delta=marker,
+        )
+
+        assert chat_panel._event_to_block_updates(event, {}) == []
+
     def test_event_adapter_keeps_visible_tool_output_and_removes_multiple_markers(self):
         state = {("tool_result", "call-1"): {"name": "image", "output": ""}}
         delta = "summary " + chat_panel.encode_subagent_event(

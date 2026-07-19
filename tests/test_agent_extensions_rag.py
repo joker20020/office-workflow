@@ -1168,8 +1168,8 @@ async def test_comfyui_uses_agentscope2_agent_and_reports_written_image(
     assert captured["agent"]["name"] == "ComfyUIAgent"
     assert captured["agent"]["model"] == "comfyui-model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
-    assert captured["react_config"] == {"max_iters": 60}
-    assert captured["react_config_instance"].max_iters == 60
+    assert captured["react_config"] == {"max_iters": 100}
+    assert captured["react_config_instance"].max_iters == 100
     assert (
         captured["agent"]["react_config"]
         is captured["react_config_instance"]
@@ -1484,6 +1484,8 @@ async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking()
         ReplyStartEvent,
         TextBlockDeltaEvent,
         ThinkingBlockDeltaEvent,
+        ToolCallDeltaEvent,
+        ToolCallEndEvent,
         ToolCallStartEvent,
         ToolResultStartEvent,
     )
@@ -1504,6 +1506,15 @@ async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking()
                 reply_id="reply-1",
                 tool_call_id="tool-1",
                 tool_call_name="create_object",
+            )
+            yield ToolCallDeltaEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                delta='{"primitive": "cube"}',
+            )
+            yield ToolCallEndEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
             )
             yield ToolResultStartEvent(
                 reply_id="reply-1",
@@ -1530,8 +1541,181 @@ async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking()
         "complete",
     }
     assert "private" not in str(public_events)
+    tool_events = [event for event in public_events if event["kind"] == "tool_call"]
+    assert tool_events == [
+        {
+            "kind": "tool_call",
+            "tool": "create_object",
+            "text": "Calling create object",
+        }
+    ]
     assert agent_extensions._LAST_SUBAGENT_TOOL_CALL_ID.get() == "tool-1"
     assert completed_tool_calls == ["tool-1"]
+
+
+@pytest.mark.asyncio
+async def test_subagent_reply_trace_records_missing_tool_result():
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyStartEvent,
+        ToolCallDeltaEvent,
+        ToolCallEndEvent,
+        ToolCallStartEvent,
+    )
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def reply_stream(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+            yield ToolCallStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="mcp__blender_mcp__get_scene_info",
+            )
+            yield ToolCallDeltaEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                delta='{"user_prompt": "inspect"}',
+            )
+            yield ToolCallEndEvent(reply_id="reply-1", tool_call_id="tool-1")
+            yield ReplyEndEvent(session_id="session-1", reply_id="reply-1")
+
+    trace = {}
+    reply = await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+        execution_trace=trace,
+    )
+
+    assert not reply.get_text_content()
+    assert trace["last_tool_name"] == "mcp__blender_mcp__get_scene_info"
+    assert trace["tool_result_state"] is None
+    assert trace["reply_finished_reason"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_subagent_formats_structured_tool_result_as_readable_text():
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyStartEvent,
+        ToolCallStartEvent,
+        ToolResultEndEvent,
+        ToolResultStartEvent,
+        ToolResultTextDeltaEvent,
+    )
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def reply_stream(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+            yield ToolCallStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="mcp__blender_mcp__get_scene_info",
+            )
+            yield ToolResultStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="mcp__blender_mcp__get_scene_info",
+            )
+            yield ToolResultTextDeltaEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                delta='{"object_count": 4, "active_object": "Table"}',
+            )
+            yield ToolResultEndEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                state=ToolResultState.SUCCESS,
+            )
+            yield ReplyEndEvent(session_id="session-1", reply_id="reply-1")
+
+    public_events = []
+    await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+        sink=public_events.append,
+    )
+
+    result_events = [event for event in public_events if event["kind"] == "tool_result"]
+    assert result_events == [
+        {
+            "kind": "tool_result",
+            "tool": "mcp__blender_mcp__get_scene_info",
+            "text": "object count: 4; active object: Table",
+        }
+    ]
+    assert '"object_count"' not in str(public_events)
+
+
+@pytest.mark.asyncio
+async def test_subagent_formats_structured_error_result_as_readable_error():
+    from agentscope.event import (
+        ReplyEndEvent,
+        ReplyStartEvent,
+        ToolCallStartEvent,
+        ToolResultEndEvent,
+        ToolResultStartEvent,
+        ToolResultTextDeltaEvent,
+    )
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def reply_stream(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+            yield ToolCallStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="mcp__blender_mcp__get_scene_info",
+            )
+            yield ToolResultStartEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                tool_call_name="mcp__blender_mcp__get_scene_info",
+            )
+            yield ToolResultTextDeltaEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                delta='{"error": "Blender connection lost"}',
+            )
+            yield ToolResultEndEvent(
+                reply_id="reply-1",
+                tool_call_id="tool-1",
+                state=ToolResultState.ERROR,
+            )
+            yield ReplyEndEvent(session_id="session-1", reply_id="reply-1")
+
+    public_events = []
+    await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+        sink=public_events.append,
+    )
+
+    error_events = [event for event in public_events if event["kind"] == "error"]
+    assert error_events == [
+        {
+            "kind": "error",
+            "tool": "mcp__blender_mcp__get_scene_info",
+            "text": "error: Blender connection lost",
+        }
+    ]
+    assert '"error"' not in str(public_events)
 
 
 @pytest.mark.parametrize(
@@ -1929,7 +2113,7 @@ async def test_unity_uses_agentscope2_http_mcp_agent_and_user_message(monkeypatc
     assert captured["agent"]["name"] == "UnityAgent"
     assert captured["agent"]["model"] == "model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
-    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["react_config"] == {"max_iters": 100}
     assert captured["model"] == (
         "openai",
         AgentExtensionTools()._llm_name,
@@ -2170,7 +2354,7 @@ async def test_blender_uses_agentscope2_stdio_mcp_agent_and_user_message(monkeyp
     assert captured["agent"]["name"] == "BlenderAgent"
     assert captured["agent"]["model"] == "model"
     assert captured["agent"]["toolkit"] is captured["toolkit_instance"]
-    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["react_config"] == {"max_iters": 100}
     assert captured["model"] == (
         "openai",
         AgentExtensionTools()._llm_name,
@@ -2847,7 +3031,7 @@ async def test_process_uses_agentscope2_task_file_tools_agent_and_user_message(
         captured["agent"]["state"].permission_context.mode
         == PermissionMode.BYPASS
     )
-    assert captured["react_config"] == {"max_iters": 60}
+    assert captured["react_config"] == {"max_iters": 100}
     assert captured["model"] == (
         "openai",
         tools._vlm_name,
