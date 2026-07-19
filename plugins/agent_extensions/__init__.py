@@ -70,7 +70,7 @@ try:
         DeepSeekChatModel,
         OpenAIChatModel,
     )
-    from agentscope.permission import PermissionMode
+    from agentscope.permission import PermissionMode, PermissionContext
     from agentscope.state import AgentState
     from agentscope.tool import (
         FunctionTool,
@@ -2396,6 +2396,12 @@ class AgentExtensionTools:
 
         info_dict = json.loads(info) if isinstance(info, str) else info
 
+        unity_state = AgentState(
+            permission_context=PermissionContext(
+                mode=PermissionMode.BYPASS
+            )
+        )
+
         unity_agent = Agent(
             name="UnityAgent",
             system_prompt=f"""
@@ -2441,6 +2447,7 @@ class AgentExtensionTools:
             ),
             toolkit=toolkit,
             react_config=ReActConfig(max_iters=100),
+            state=unity_state
         )
 
         msg = UserMsg(
@@ -2542,8 +2549,14 @@ class AgentExtensionTools:
         )
         toolkit = Toolkit(tools=blender_tools)
 
+        blender_state = AgentState(
+            permission_context=PermissionContext(
+                mode=PermissionMode.BYPASS
+            )
+        )
+
         blender_agent = Agent(
-            name="BlenderAgent",
+            name="BlenderAgen|t",
             system_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
         本次任务必须实际保存文件，并且只允许使用以下绝对目录：
         - .blend 工程文件：{model_directory}
@@ -2571,11 +2584,12 @@ class AgentExtensionTools:
             model=_build_model(
                 "openai",
                 self._llm_name,
-                os.environ["LLM_BASE_URL"],
-                os.environ["LLM_API_KEY"],
+                os.environ["VLM_BASE_URL"],
+                os.environ["VLM_API_KEY"],
             ),
             toolkit=toolkit,
             react_config=ReActConfig(max_iters=100),
+            state=blender_state
         )
 
         def confirm_tool_outputs(tool_call_id: str) -> None:
@@ -2815,7 +2829,9 @@ class AgentExtensionTools:
                 ],
             )
             process_state = AgentState(
-                permission_context={"mode": PermissionMode.BYPASS},
+                permission_context=PermissionContext(
+                    mode=PermissionMode.BYPASS
+                ),
             )
         except BaseException:
             process_write_file.close()
