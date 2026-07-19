@@ -60,6 +60,7 @@ try:
         AssistantMsg,
         Base64Source,
         DataBlock,
+        Msg,
         TextBlock,
         ToolResultState,
         UserMsg,
@@ -160,13 +161,19 @@ async def _reply_subagent_with_progress(
     on_tool_result_start=None,
     execution_trace: dict[str, Any] | None = None,
 ):
-    """Consume a subagent reply stream and forward only public event fields."""
+    """Consume a subagent reply stream and retain its terminal message."""
+    private_reply = getattr(agent, "_reply", None)
     reply_stream = getattr(agent, "reply_stream", None)
-    if reply_stream is None:
+    if callable(private_reply):
+        stream = private_reply(inputs=inputs)
+    elif reply_stream is not None:
+        stream = reply_stream(inputs=inputs)
+    else:
         return await agent.reply(inputs)
     event_sink = sink or _SUBAGENT_PROGRESS_SINK.get()
     agent_name = getattr(agent, "name", "Subagent")
     reply = AssistantMsg(name=agent_name, content=[])
+    terminal_message = None
     tool_names: dict[str, str] = {}
     tool_arguments: dict[str, str] = {}
     tool_results: dict[str, str] = {}
@@ -176,8 +183,14 @@ async def _reply_subagent_with_progress(
     trace.setdefault("tool_result_state", None)
     trace.setdefault("tool_result_text", "")
     trace.setdefault("reply_finished_reason", None)
+    trace.setdefault("terminal_message_received", False)
+    trace.setdefault("reply_end_received", False)
     _LAST_SUBAGENT_TOOL_CALL_ID.set(None)
-    async for event in reply_stream(inputs=inputs):
+    async for event in stream:
+        if isinstance(event, Msg):
+            terminal_message = event
+            trace["terminal_message_received"] = True
+            continue
         if isinstance(event, ReplyStartEvent):
             reply.id = event.reply_id
         reply.append_event(event)
@@ -248,6 +261,7 @@ async def _reply_subagent_with_progress(
                 "text": event.delta,
             }
         elif isinstance(event, ReplyEndEvent):
+            trace["reply_end_received"] = True
             trace["reply_finished_reason"] = str(
                 getattr(event.finished_reason, "value", event.finished_reason)
             )
@@ -264,9 +278,9 @@ async def _reply_subagent_with_progress(
         trace.get("reply_finished_reason"),
         trace.get("last_tool_name"),
         trace.get("tool_result_state"),
-        len(reply.get_text_content() or ""),
+        len((terminal_message or reply).get_text_content() or ""),
     )
-    return reply
+    return terminal_message or reply
 
 
 def _readable_tool_activity(tool_name: str) -> str:
@@ -309,7 +323,13 @@ def _readable_tool_result(value: str) -> str:
 def _subagent_empty_reply_failure(subject: str, trace: dict[str, Any]) -> "_SubagentResult":
     """Explain an incomplete subagent stream without masking its MCP state."""
     tool_name = trace.get("last_tool_name")
+    abnormal_end = (
+        trace.get("terminal_message_received") is False
+        and trace.get("reply_end_received") is False
+    )
     if not tool_name:
+        if abnormal_end:
+            return _subagent_failure(subject, "子智能体流异常结束，未收到最终消息或结束事件")
         return _subagent_failure(subject, "Blender Agent 未返回内容")
     result_state = trace.get("tool_result_state")
     finish_reason = trace.get("reply_finished_reason") or "unknown"
@@ -319,9 +339,14 @@ def _subagent_empty_reply_failure(subject: str, trace: dict[str, Any]) -> "_Suba
         detail = "工具执行失败"
     else:
         detail = f"工具结果状态为 {result_state}，但未返回最终说明"
+    message = (
+        f"Blender MCP 工具 {tool_name} {detail}（回复结束原因：{finish_reason}）"
+    )
+    if abnormal_end:
+        message = f"子智能体流异常结束；{message}"
     return _subagent_failure(
         subject,
-        f"Blender MCP 工具 {tool_name} {detail}（回复结束原因：{finish_reason}）",
+        message,
     )
 
 

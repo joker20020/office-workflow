@@ -1554,6 +1554,61 @@ async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking()
 
 
 @pytest.mark.asyncio
+async def test_subagent_reply_uses_terminal_message_from_private_stream():
+    from agentscope.event import ReplyEndEvent, ReplyStartEvent
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def _reply(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+            yield AssistantMsg(name=self.name, content="final handoff")
+            yield ReplyEndEvent(session_id="session-1", reply_id="reply-1")
+
+    reply = await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+    )
+
+    assert reply.get_text_content() == "final handoff"
+
+
+@pytest.mark.asyncio
+async def test_subagent_trace_marks_missing_terminal_events():
+    from agentscope.event import ReplyStartEvent
+
+    class FakeAgent:
+        name = "BlenderAgent"
+
+        async def _reply(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session-1",
+                reply_id="reply-1",
+                name=self.name,
+            )
+
+    trace = {}
+    reply = await agent_extensions._reply_subagent_with_progress(
+        FakeAgent(),
+        SimpleNamespace(),
+        execution_trace=trace,
+    )
+
+    assert not reply.get_text_content()
+    assert trace["terminal_message_received"] is False
+    assert trace["reply_end_received"] is False
+    failure = agent_extensions._subagent_empty_reply_failure(
+        "Blender操作",
+        trace,
+    )
+    assert "子智能体流异常结束" in failure
+
+
+@pytest.mark.asyncio
 async def test_subagent_reply_trace_records_missing_tool_result():
     from agentscope.event import (
         ReplyEndEvent,
