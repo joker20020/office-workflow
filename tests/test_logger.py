@@ -2,11 +2,14 @@
 """日志模块测试"""
 
 import logging
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from src.utils.logger import get_logger, configure_root_logger
+import src.utils.logger as logger_module
 
 
 class TestGetLogger:
@@ -47,6 +50,49 @@ class TestGetLogger:
         # 验证日志文件创建
         log_files = list(tmp_path.glob("*.log"))
         assert len(log_files) > 0
+
+    def test_file_handler_blocks_until_lock_is_released(self, tmp_path: Path):
+        handler = logger_module.BlockingRotatingFileHandler(
+            tmp_path / "shared.log",
+            maxBytes=1024,
+            backupCount=1,
+            encoding="utf-8",
+        )
+        record = logging.makeLogRecord({"levelno": logging.INFO, "msg": "after-lock"})
+        worker = threading.Thread(target=handler.emit, args=(record,))
+
+        with handler._interprocess_lock.hold():
+            worker.start()
+            time.sleep(0.05)
+            assert worker.is_alive()
+
+        worker.join(timeout=2)
+        handler.close()
+
+        assert not worker.is_alive()
+        assert "after-lock" in (tmp_path / "shared.log").read_text(encoding="utf-8")
+
+    def test_file_handler_retries_rollover_while_file_is_in_use(self, tmp_path: Path, monkeypatch):
+        handler = logger_module.BlockingRotatingFileHandler(
+            tmp_path / "shared.log",
+            maxBytes=1,
+            backupCount=1,
+            encoding="utf-8",
+        )
+        attempts = 0
+
+        def retry_once(_handler):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("file is in use")
+
+        monkeypatch.setattr(logging.handlers.RotatingFileHandler, "doRollover", retry_once)
+
+        handler.doRollover()
+        handler.close()
+
+        assert attempts == 2
 
 
 class TestConfigureRootLogger:

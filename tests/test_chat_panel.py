@@ -4,6 +4,8 @@ import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
+
 from agentscope.event import (
     DataBlockDeltaEvent,
     DataBlockEndEvent,
@@ -27,6 +29,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QApplication
 
 import src.ui.chat.chat_panel as chat_panel
+from src.ui.chat.blocks.image_block import ImageBlockWidget
 from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
@@ -43,6 +46,18 @@ class MockStreamingWidget:
 
 
 class TestChatPanelStreaming:
+    def test_image_block_loads_file_uri(self, tmp_path):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        image_path = tmp_path / "preview.png"
+        Image.new("RGB", (2, 2), color="red").save(image_path)
+
+        widget = ImageBlockWidget(
+            {"type": "image", "source": {"type": "url", "url": image_path.as_uri()}}
+        )
+
+        assert not widget._image_label.pixmap().isNull()
+
     def test_history_extracts_base64_image_data_blocks_for_display(self):
         message = UserMsg(
             name="User",
@@ -84,6 +99,111 @@ class TestChatPanelStreaming:
         assert update["type"] == "subagent_event"
         assert update["parent_tool_call_id"] == "call-1"
         assert state[("tool_result", "call-1")]["output"] == ""
+
+    def test_event_adapter_reassembles_fragmented_subagent_marker(self):
+        state = {("tool_result", "call-1"): {"name": "image", "output": ""}}
+        marker = chat_panel.encode_subagent_event(
+            {"kind": "text", "title": "Image Agent", "text": "done"}
+        )
+        first = ToolResultTextDeltaEvent(
+            reply_id="reply-1",
+            tool_call_id="call-1",
+            tool_call_name="image",
+            delta=marker[:11],
+        )
+        second = ToolResultTextDeltaEvent(
+            reply_id="reply-1",
+            tool_call_id="call-1",
+            tool_call_name="image",
+            delta=marker[11:],
+        )
+
+        assert chat_panel._event_to_block_updates(first, state) == []
+        updates = chat_panel._event_to_block_updates(second, state)
+
+        assert updates[-1]["type"] == "subagent_event"
+        assert updates[-1]["event_kind"] == "text"
+        assert state[("tool_result", "call-1")]["output"] == ""
+
+    def test_event_adapter_keeps_visible_tool_output_and_removes_multiple_markers(self):
+        state = {("tool_result", "call-1"): {"name": "image", "output": ""}}
+        delta = "summary " + chat_panel.encode_subagent_event(
+            {"kind": "phase", "title": "Image Agent", "text": "running"}
+        ) + chat_panel.encode_subagent_event(
+            {"kind": "complete", "title": "Image Agent", "text": "done"}
+        )
+        event = ToolResultTextDeltaEvent(
+            reply_id="reply-1",
+            tool_call_id="call-1",
+            tool_call_name="image",
+            delta=delta,
+        )
+
+        updates = chat_panel._event_to_block_updates(event, state)
+
+        assert updates[0]["output"] == "summary "
+        assert [item["event_kind"] for item in updates[1:]] == ["phase", "complete"]
+
+    def test_streaming_callback_emits_all_updates_from_one_delta(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel._worker = MagicMock()
+        callback = panel._create_streaming_callback()
+        event = ToolResultTextDeltaEvent(
+            reply_id="reply-1",
+            tool_call_id="call-1",
+            tool_call_name="image",
+            delta="summary " + chat_panel.encode_subagent_event(
+                {"kind": "complete", "title": "Image Agent", "text": "done"}
+            ),
+        )
+
+        callback(None, {"event": event}, None)
+
+        emitted = panel._worker.block_update.emit.call_args.args[0]
+        assert [item["type"] for item in emitted] == ["tool_result", "subagent_event"]
+
+    def test_coalesce_block_updates_merges_adjacent_subagent_text(self):
+        updates = chat_panel._coalesce_block_updates(
+            [
+                {
+                    "type": "subagent_event",
+                    "parent_tool_call_id": "call-1",
+                    "event_kind": "text",
+                    "title": "Image Agent",
+                    "status": "running",
+                    "text": "A",
+                },
+                {
+                    "type": "subagent_event",
+                    "parent_tool_call_id": "call-1",
+                    "event_kind": "text",
+                    "title": "Image Agent",
+                    "status": "running",
+                    "text": " 2D",
+                },
+            ]
+        )
+
+        assert len(updates) == 1
+        assert updates[0]["text"] == "A 2D"
+
+    def test_block_update_does_not_log_plain_text_at_info(self):
+        streaming_message = MagicMock()
+        streaming_message.block_count.return_value = 0
+        panel = MagicMock()
+        panel._streaming_message = streaming_message
+        panel._streaming_blocks = []
+        panel._current_block_type = "unknown"
+
+        with patch.object(chat_panel._logger, "info") as info:
+            chat_panel.ChatPanel._on_block_update(
+                panel,
+                [{"type": "text", "id": "text-1", "text": "one", "_new_block": True}],
+            )
+
+        info.assert_not_called()
 
     """Test streaming output in ChatPanel"""
 
@@ -516,6 +636,36 @@ class TestChatPanelStreaming:
 
         assert block.get_content() == "# Final"
         assert block.execution_event_count() == 1
+
+    def test_tool_result_merges_adjacent_subagent_text_events(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        block = ToolResultBlockWidget(
+            {"type": "tool_result", "id": "call-1", "name": "image", "output": ""}
+        )
+
+        block.append_execution_event(
+            {
+                "type": "subagent_event",
+                "event_kind": "text",
+                "title": "Image Agent",
+                "text": "A",
+                "status": "running",
+            }
+        )
+        block.append_execution_event(
+            {
+                "type": "subagent_event",
+                "event_kind": "text",
+                "title": "Image Agent",
+                "text": " 2D",
+                "status": "running",
+            }
+        )
+
+        assert block.execution_event_count() == 1
+        assert "Image Agent" in block._execution_events_text()
+        assert "A 2D" in block._execution_events_text()
 
     def test_tool_end_events_preserve_completion_and_result_state(self):
         state = {}
