@@ -212,19 +212,47 @@ class ToolResultBlockWidget(BaseBlockWidget):
         return str(output or "")
 
     def _execution_events_text(self) -> str:
-        return "\n".join(
-            "[{status}] {title}: {text}".format(
-                status=event.get("status", "running"),
-                title=event.get("title", "Subagent"),
-                text=event.get("text", ""),
-            )
-            for event in self._execution_events
+        labels = {
+            "phase": "status",
+            "tool_call": "calling tool",
+            "tool_result": "tool result",
+            "artifact": "artifact",
+            "warning": "warning",
+            "error": "error",
+            "complete": "completed",
+        }
+        lines = []
+        for event in self._execution_events:
+            title = event.get("title", "Subagent")
+            text = str(event.get("text", "")).strip()
+            if event.get("event_kind") == "text":
+                lines.append(f"{title}\n{text}" if text else title)
+                continue
+            label = labels.get(event.get("event_kind"), event.get("status", "running"))
+            lines.append(f"{title} · {label}" + (f"\n{text}" if text else ""))
+        return "\n\n".join(lines)
+
+    def _can_merge_execution_event(self, event: Dict[str, Any]) -> bool:
+        if not self._execution_events or event.get("event_kind") != "text":
+            return False
+        previous = self._execution_events[-1]
+        return (
+            previous.get("event_kind") == "text"
+            and previous.get("title") == event.get("title")
+            and previous.get("status") == event.get("status")
         )
 
     def append_execution_event(self, event: Dict[str, Any]) -> None:
         """Render one display-safe subagent update below the final tool output."""
-        self._execution_events.append(event.copy())
-        self._block_data.setdefault("execution_events", []).append(event.copy())
+        if self._can_merge_execution_event(event):
+            self._execution_events[-1]["text"] += str(event.get("text", ""))
+            self._block_data.setdefault("execution_events", [])[-1]["text"] = (
+                self._execution_events[-1]["text"]
+            )
+        else:
+            event_copy = event.copy()
+            self._execution_events.append(event_copy)
+            self._block_data.setdefault("execution_events", []).append(event_copy.copy())
         if self._execution_edit:
             self._execution_edit.setPlainText(self._execution_events_text())
             self._execution_edit.setVisible(True)

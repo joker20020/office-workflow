@@ -15,11 +15,15 @@
 """
 
 import logging
+import os
 import sys
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 
 # 日志格式配置
@@ -27,9 +31,99 @@ LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # 默认日志目录
-DEFAULT_LOG_DIR = Path("logs")
+DEFAULT_LOG_DIR = Path(os.environ.get("OFFICE_LOG_DIR", "logs"))
+_LOGGER_SETUP_LOCK = threading.RLock()
+_LOCAL_FILE_LOCKS: dict[str, threading.RLock] = {}
+_LOCAL_FILE_LOCKS_GUARD = threading.Lock()
 
 
+class _InterProcessFileLock:
+    """Block competing writers until a sidecar file lock becomes available."""
+
+    def __init__(self, lock_path: Path) -> None:
+        self._lock_path = lock_path
+        key = str(lock_path.resolve()).casefold()
+        with _LOCAL_FILE_LOCKS_GUARD:
+            self._thread_lock = _LOCAL_FILE_LOCKS.setdefault(key, threading.RLock())
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._thread_lock:
+            with open(self._lock_path, "a+b") as lock_file:
+                lock_file.seek(0, os.SEEK_END)
+                if lock_file.tell() == 0:
+                    lock_file.write(b"\0")
+                    lock_file.flush()
+                self._acquire(lock_file)
+                try:
+                    yield
+                finally:
+                    self._release(lock_file)
+
+    @staticmethod
+    def _acquire(lock_file) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    return
+                except OSError:
+                    time.sleep(0.02)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+    @staticmethod
+    def _release(lock_file) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+class BlockingRotatingFileHandler(RotatingFileHandler):
+    """Serialize write and rollover operations across application processes."""
+
+    def __init__(self, filename, *args, **kwargs) -> None:
+        super().__init__(filename, *args, **kwargs)
+        path = Path(filename)
+        self._interprocess_lock = _InterProcessFileLock(
+            path.with_name(f"{path.name}.lock")
+        )
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with self._interprocess_lock.hold():
+            super().emit(record)
+
+    def doRollover(self) -> None:
+        """Wait for external file handles before renaming the active log."""
+        while True:
+            try:
+                super().doRollover()
+                return
+            except PermissionError:
+                time.sleep(0.05)
+
+
+def _synchronized_logger_setup(func):
+    def wrapper(*args, **kwargs):
+        with _LOGGER_SETUP_LOCK:
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
+@_synchronized_logger_setup
 def get_logger(
     name: str,
     level: int = logging.DEBUG,
@@ -84,7 +178,7 @@ def get_logger(
 
         # 创建轮转文件处理器
         # maxBytes: 10MB, backupCount: 5
-        file_handler = RotatingFileHandler(
+        file_handler = BlockingRotatingFileHandler(
             filename=str(log_file),
             maxBytes=10 * 1024 * 1024,
             backupCount=5,

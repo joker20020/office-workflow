@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from typing import Any, Dict
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout
 
@@ -10,6 +10,12 @@ from src.ui.i18n_manager import _
 from src.ui.theme import Theme
 
 import base64
+
+
+def resolve_local_image_path(url: str) -> str:
+    """Convert a local file URI to the path expected by ``QPixmap``."""
+    parsed = QUrl(url)
+    return parsed.toLocalFile() if parsed.isLocalFile() else url
 
 
 class ImageBlockWidget(BaseBlockWidget):
@@ -66,7 +72,7 @@ class ImageBlockWidget(BaseBlockWidget):
         if url.startswith(("http://", "https://")):
             self._show_placeholder(f"🖼 {_('chat.image')} ({_('chat.network')})")
         else:
-            pixmap = QPixmap(url)
+            pixmap = QPixmap(resolve_local_image_path(url))
             if not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
                     400,

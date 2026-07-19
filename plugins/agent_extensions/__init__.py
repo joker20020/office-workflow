@@ -110,6 +110,47 @@ _LAST_SUBAGENT_TOOL_CALL_ID: contextvars.ContextVar[str | None] = (
 _TOOL_CALL_ID_UNSET = object()
 
 
+def _atomic_write_bytes(destination: Path, data: bytes) -> Path:
+    """Replace a cached file only after its complete payload reaches disk."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".part",
+            delete=False,
+        ) as file_handle:
+            temporary_name = file_handle.name
+            file_handle.write(data)
+            file_handle.flush()
+            os.fsync(file_handle.fileno())
+        os.replace(temporary_name, destination)
+        return destination
+    except Exception:
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+        raise
+
+
+def _drain_subagent_progress_events(progress_queue: queue.Queue) -> list[dict[str, Any]]:
+    """Drain queued progress while collapsing token-level text updates."""
+    events: list[dict[str, Any]] = []
+    while not progress_queue.empty():
+        event = progress_queue.get_nowait()
+        if (
+            events
+            and event.get("kind") == "text"
+            and events[-1].get("kind") == "text"
+            and events[-1].get("title") == event.get("title")
+        ):
+            events[-1]["text"] += str(event.get("text", ""))
+        else:
+            events.append(dict(event))
+    return events
+
+
 async def _reply_subagent_with_progress(
     agent,
     inputs,
@@ -1692,10 +1733,8 @@ class _APIRequester:
             async with session.get(url) as response:
                 if response.status == 200:
                     image_data = await response.read()
-                    cache_dir = os.path.join(self.data_dir, "tmp")
-                    os.makedirs(cache_dir, exist_ok=True)
-                    with open(os.path.join(cache_dir, filename), "wb") as f:
-                        f.write(image_data)
+                    cache_dir = Path(self.data_dir) / "tmp"
+                    _atomic_write_bytes(cache_dir / Path(filename).name, image_data)
                     return image_data
                 else:
                     raise RuntimeError(f"获取图片失败: {response.status}")
@@ -1744,9 +1783,7 @@ class _APIRequester:
                     destination = Path(output_path) if output_path else (
                         Path(self.data_dir) / "tmp" / output_name
                     )
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    with open(destination, "wb") as f:
-                        f.write(image_data)
+                    _atomic_write_bytes(destination, image_data)
                     return True
                 else:
                     error = await response.text()
@@ -1924,9 +1961,7 @@ class AgentExtensionTools:
         context = self._active_artifact_context()
         policy = context.path_policy if context is not None else self._artifact_paths
         local_path = policy.cache_path(filename)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, "wb") as file_handle:
-            file_handle.write(image_data)
+        _atomic_write_bytes(local_path, image_data)
         return str(local_path)
 
     async def _rerank_rag_candidates(
@@ -2073,8 +2108,7 @@ class AgentExtensionTools:
             try:
                 while not task.done() or not progress_queue.empty():
                     emitted = False
-                    while not progress_queue.empty():
-                        public = progress_queue.get_nowait()
+                    for public in _drain_subagent_progress_events(progress_queue):
                         terminal_seen = terminal_seen or public.get("kind") in {
                             "complete",
                             "error",

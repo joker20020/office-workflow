@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import threading
 import time
@@ -570,6 +571,18 @@ async def test_asset_cache_redownloads_and_overwrites_existing_file(tmp_path):
         call("process", "shared.png"),
         call("process", "shared.png"),
     ]
+
+
+def test_atomic_write_bytes_replaces_cache_without_partial_file(tmp_path):
+    target = tmp_path / "data" / "tmp" / "image.png"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old")
+
+    written = agent_extensions._atomic_write_bytes(target, b"new")
+
+    assert written == target
+    assert target.read_bytes() == b"new"
+    assert not list(target.parent.glob("*.part"))
 
 
 @pytest.mark.asyncio
@@ -1441,6 +1454,27 @@ async def test_registered_blender_tool_streams_safe_progress_and_final_response(
     assert chunks[0].is_last is False
     assert chunks[0].content[0].text.startswith(agent_extensions.SUBAGENT_EVENT_PREFIX)
     assert chunks[-1] is final
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_coalesces_adjacent_progress_text_events():
+    final = agent_extensions._make_response("# final")
+
+    def sync_tool():
+        sink = agent_extensions._SUBAGENT_PROGRESS_SINK.get()
+        sink({"kind": "text", "title": "Image Agent", "text": "A"})
+        sink({"kind": "text", "title": "Image Agent", "text": " 2D"})
+        return final
+
+    tool = AgentExtensionTools()._streaming_tool(sync_tool, "Image Agent", "image_tool")
+    chunks = [chunk async for chunk in tool()]
+    events = [
+        json.loads(chunk.content[0].text[len(agent_extensions.SUBAGENT_EVENT_PREFIX):])
+        for chunk in chunks[:-1]
+        if chunk.content[0].text.startswith(agent_extensions.SUBAGENT_EVENT_PREFIX)
+    ]
+
+    assert [event["text"] for event in events if event["kind"] == "text"] == ["A 2D"]
 
 
 @pytest.mark.asyncio

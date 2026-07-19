@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from typing import TYPE_CHECKING, Any, Callable, Optional, List, Dict
 
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QUrl, QSize
@@ -47,7 +48,6 @@ from agentscope.event import (
 
 from src.agent.agent_integration import (
     AgentIntegration,
-    decode_subagent_event,
     encode_subagent_event as encode_subagent_event,
     normalize_subagent_execution_event,
 )
@@ -72,6 +72,85 @@ _logger = get_logger(__name__)
 def _media_block_type(media_type: str) -> str:
     prefix = media_type.split("/", 1)[0]
     return prefix if prefix in ("image", "audio", "video") else "data"
+
+
+class SubagentEventDeltaDecoder:
+    """Recover private subagent events split across model stream deltas."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._json_decoder = json.JSONDecoder()
+
+    def feed(self, delta: str) -> tuple[str, list[dict[str, Any]]]:
+        """Return visible tool text and complete private events from ``delta``."""
+        self._buffer += delta
+        visible_parts: list[str] = []
+        events: list[dict[str, Any]] = []
+        prefix = "\x1eagentscope-subagent-event:"
+
+        while self._buffer:
+            marker_index = self._buffer.find(prefix)
+            if marker_index < 0:
+                suffix_length = min(len(self._buffer), len(prefix) - 1)
+                while suffix_length and not prefix.startswith(self._buffer[-suffix_length:]):
+                    suffix_length -= 1
+                if suffix_length:
+                    visible_parts.append(self._buffer[:-suffix_length])
+                    self._buffer = self._buffer[-suffix_length:]
+                else:
+                    visible_parts.append(self._buffer)
+                    self._buffer = ""
+                break
+
+            visible_parts.append(self._buffer[:marker_index])
+            payload_text = self._buffer[marker_index + len(prefix):]
+            try:
+                payload, end_index = self._json_decoder.raw_decode(payload_text)
+            except json.JSONDecodeError:
+                self._buffer = self._buffer[marker_index:]
+                break
+
+            self._buffer = payload_text[end_index:]
+            if isinstance(payload, dict):
+                events.append(payload)
+            else:
+                visible_parts.append(prefix + payload_text[:end_index])
+
+        return "".join(visible_parts), events
+
+    def flush(self) -> str:
+        """Return an incomplete marker as ordinary output at stream end."""
+        remaining = self._buffer
+        self._buffer = ""
+        return remaining
+
+
+def _tool_result_text_updates(event: ToolResultTextDeltaEvent, state: Dict[Any, Any]) -> list[Dict[str, Any]]:
+    key = ("tool_result", event.tool_call_id)
+    current = state.setdefault(key, {"name": "", "output": ""})
+    decoder_key = ("subagent_event_decoder", event.tool_call_id)
+    decoder = state.setdefault(decoder_key, SubagentEventDeltaDecoder())
+    visible_text, progress_events = decoder.feed(event.delta)
+    updates: list[Dict[str, Any]] = []
+    if visible_text:
+        current["output"] += visible_text
+        updates.append(
+            {
+                "type": "tool_result",
+                "id": event.tool_call_id,
+                "name": current["name"],
+                "output": current["output"],
+            }
+        )
+    updates.extend(
+        normalize_subagent_execution_event(
+            parent_tool_call_id=event.tool_call_id,
+            event=progress,
+            state=state,
+        )
+        for progress in progress_events
+    )
+    return updates
 
 
 def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[str, Any]]:
@@ -153,25 +232,14 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
             "output": "",
         }
     elif isinstance(event, ToolResultTextDeltaEvent):
-        key = ("tool_result", event.tool_call_id)
-        current = state.setdefault(key, {"name": "", "output": ""})
-        progress = decode_subagent_event(event.delta)
-        if progress is not None:
-            return normalize_subagent_execution_event(
-                parent_tool_call_id=event.tool_call_id,
-                event=progress,
-                state=state,
-            )
-        current["output"] += event.delta
-        return {
-            "type": "tool_result",
-            "id": event.tool_call_id,
-            "name": current["name"],
-            "output": current["output"],
-        }
+        updates = _tool_result_text_updates(event, state)
+        return updates[-1] if updates else None
     elif isinstance(event, ToolResultEndEvent):
         key = ("tool_result", event.tool_call_id)
         current = state.pop(key, {"name": "", "output": ""})
+        decoder = state.pop(("subagent_event_decoder", event.tool_call_id), None)
+        if decoder is not None:
+            current["output"] += decoder.flush()
         return {
             "type": "tool_result",
             "id": event.tool_call_id,
@@ -220,6 +288,35 @@ def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[s
             "source": source,
         }
     return None
+
+
+def _event_to_block_updates(event: Any, state: Dict[Any, Any]) -> list[Dict[str, Any]]:
+    """Translate one AgentScope event into every resulting widget payload."""
+    if isinstance(event, ToolResultTextDeltaEvent):
+        return _tool_result_text_updates(event, state)
+    update = _event_to_block_update(event, state)
+    return [update] if update is not None else []
+
+
+def _coalesce_block_updates(block_datas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge adjacent token-level subagent text updates before rendering."""
+    result: List[Dict[str, Any]] = []
+    for block_data in block_datas:
+        current = block_data.copy()
+        if (
+            result
+            and current.get("type") == "subagent_event"
+            and current.get("event_kind") == "text"
+            and result[-1].get("type") == "subagent_event"
+            and result[-1].get("event_kind") == "text"
+            and result[-1].get("parent_tool_call_id") == current.get("parent_tool_call_id")
+            and result[-1].get("title") == current.get("title")
+            and result[-1].get("status") == current.get("status")
+        ):
+            result[-1]["text"] += str(current.get("text", ""))
+        else:
+            result.append(current)
+    return result
 
 
 def _extract_text_from_msg(msg: Any) -> str:
@@ -707,6 +804,10 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._streaming_text: str = ""
         self._streaming_blocks: List[Dict[str, Any]] = []
         self._current_block_type = "unknown"
+        self._pending_block_updates: List[Dict[str, Any]] = []
+        self._block_update_timer = QTimer(self)
+        self._block_update_timer.setSingleShot(True)
+        self._block_update_timer.timeout.connect(self._flush_pending_block_updates)
         self._attachments: List[Dict[str, Any]] = []
         self._artifact_sidebar_width = ArtifactSidebar.DEFAULT_WIDTH
 
@@ -1424,9 +1525,9 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         def callback(agent_self: Any, kwargs: dict, output: Any) -> None:
             event = (kwargs or {}).get("event", output)
-            block = _event_to_block_update(event, event_state)
-            if block is not None and self._worker:
-                self._worker.block_update.emit([block])
+            blocks = _event_to_block_updates(event, event_state)
+            if blocks and self._worker:
+                self._worker.block_update.emit(blocks)
 
         return callback
 
@@ -1492,15 +1593,44 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._worker.start()
 
     def _on_block_update(self, block_datas: List[Dict[str, Any]]) -> None:
-        block_data = block_datas[-1]
+        pending_updates = getattr(self, "_pending_block_updates", None)
+        timer = getattr(self, "_block_update_timer", None)
+        if not isinstance(pending_updates, list) or not isinstance(timer, QTimer):
+            ChatPanel._apply_block_updates(self, block_datas)
+            return
+
+        pending_updates.extend(block_datas)
+        terminal = any(
+            block.get("type") == "_stream_end"
+            or block.get("event_kind") in {"complete", "error"}
+            for block in block_datas
+        )
+        if terminal:
+            self._flush_pending_block_updates()
+        elif not timer.isActive():
+            timer.start(75)
+
+    def _flush_pending_block_updates(self) -> None:
+        if not self._pending_block_updates:
+            return
+        updates = self._pending_block_updates
+        self._pending_block_updates = []
+        self._apply_block_updates(updates)
+
+    def _apply_block_updates(self, block_datas: List[Dict[str, Any]]) -> None:
+        for block_data in _coalesce_block_updates(block_datas):
+            ChatPanel._apply_block_update(self, block_data)
+
+    def _apply_block_update(self, block_data: Dict[str, Any]) -> None:
         if block_data.get("type") == "_stream_end":
             self._current_block_type = None
             return
 
         block_data = block_data.copy()
         is_new_block = bool(block_data.pop("_new_block", False))
-        _logger.info(f"Block update: {block_data.get('type', 'unknown')}")
         block_type = block_data.get("type", "text")
+        if block_type != "text":
+            _logger.debug("Block update: %s", block_type)
 
         if self._streaming_message is None:
             self._streaming_message = CompositeMessageWidget("assistant")
@@ -1545,6 +1675,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         QTimer.singleShot(100, self._scroll_to_bottom)
 
     def _on_agent_response(self, response: str) -> None:
+        self._flush_pending_block_updates()
         _logger.info(f"Agent response received, length: {len(response)}")
         self._set_status(
             _("chat.ready")
@@ -1560,6 +1691,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _on_agent_error(self, error: str) -> None:
+        self._flush_pending_block_updates()
         _logger.error(f"Agent error: {error}")
         self._set_status(f"{_('chat.error')}: {error}")
         self._streaming_message = None
@@ -1570,6 +1702,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._set_stop_mode(False)
 
     def _on_worker_finished(self) -> None:
+        self._flush_pending_block_updates()
         _logger.info("AgentWorker完成")
         self._set_stop_mode(False)
         self._current_block_type = "unknown"
@@ -1602,7 +1735,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
                 self._set_status(_("chat.stop_failed"))
 
     def _on_agent_interrupted(self, response: str) -> None:
-        """处理被中断的 Agent 响应 — 保留已流式输出的部分内容"""
+        """处理被中断的 Agent 响应 - 保留已流式输出的部分内容"""
+        self._flush_pending_block_updates()
         _logger.info(f"Agent 响应被中断, 已输出内容: {len(response)} 字符")
         self._set_status(_("chat.stopped"))
 
