@@ -1658,8 +1658,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         block_data = block_data.copy()
         is_new_block = bool(block_data.pop("_new_block", False))
         block_type = block_data.get("type", "text")
-        if block_type != "text":
-            _logger.debug("Block update: %s", block_type)
+        if block_type == "subagent_event":
+            _logger.debug("Block update: %s", block_data)
 
         if self._streaming_message is None:
             self._streaming_message = CompositeMessageWidget("assistant")
@@ -1701,7 +1701,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         if self._current_block_type != block_type:
             self._current_block_type = block_type
 
-        QTimer.singleShot(100, self._scroll_to_bottom)
+        QTimer.singleShot(1000, self._scroll_to_bottom)
 
     def _on_agent_response(self, response: str) -> None:
         self._flush_pending_block_updates()
