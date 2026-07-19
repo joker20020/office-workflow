@@ -811,7 +811,7 @@ class AgentIntegration:
                 toolkit=toolkit,
                 state=state,
                 react_config=ReActConfig(
-                    max_iters=50,
+                    max_iters=200,
                     interruption_raise_cancelled_error=False,
                 ),
             )

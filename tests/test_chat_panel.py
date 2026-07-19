@@ -1,10 +1,14 @@
 """ChatPanel streaming tests"""
 
 import base64
-from unittest.mock import MagicMock, patch
 
 import pytest
+from unittest.mock import MagicMock, patch
+from typing import Any
 from PIL import Image
+
+from PySide6.QtCore import Signal, QThread
+from PySide6.QtWidgets import QApplication, QWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
@@ -25,13 +29,11 @@ from agentscope.event import (
     ToolResultTextDeltaEvent,
 )
 from agentscope.message import Base64Source, DataBlock, ToolResultState, UserMsg
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QApplication
 
 import src.ui.chat.chat_panel as chat_panel
+from src.ui.chat.composite_message_widget import CompositeMessageWidget
 from src.ui.chat.blocks.image_block import ImageBlockWidget
 from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
-from src.ui.chat.composite_message_widget import CompositeMessageWidget
 
 
 class MockStreamingWidget:
@@ -124,6 +126,18 @@ class TestChatPanelStreaming:
         assert updates[-1]["type"] == "subagent_event"
         assert updates[-1]["event_kind"] == "text"
         assert state[("tool_result", "call-1")]["output"] == ""
+
+    def test_text_delta_private_subagent_marker_is_not_rendered(self):
+        marker = chat_panel.encode_subagent_event(
+            {"kind": "phase", "title": "Blender", "text": "started"}
+        )
+        event = TextBlockDeltaEvent(
+            reply_id="reply-1",
+            block_id="text-1",
+            delta=marker,
+        )
+
+        assert chat_panel._event_to_block_updates(event, {}) == []
 
     def test_event_adapter_keeps_visible_tool_output_and_removes_multiple_markers(self):
         state = {("tool_result", "call-1"): {"name": "image", "output": ""}}

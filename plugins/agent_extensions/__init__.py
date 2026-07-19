@@ -47,7 +47,9 @@ try:
         ReplyStartEvent,
         TextBlockDeltaEvent,
         ToolCallDeltaEvent,
+        ToolCallEndEvent,
         ToolCallStartEvent,
+        ToolResultEndEvent,
         ToolResultStartEvent,
         ToolResultTextDeltaEvent,
     )
@@ -56,6 +58,7 @@ try:
         AssistantMsg,
         Base64Source,
         DataBlock,
+        Msg,
         TextBlock,
         ToolResultState,
         UserMsg,
@@ -65,7 +68,7 @@ try:
         DeepSeekChatModel,
         OpenAIChatModel,
     )
-    from agentscope.permission import PermissionMode
+    from agentscope.permission import PermissionMode, PermissionContext
     from agentscope.state import AgentState
     from agentscope.tool import (
         FunctionTool,
@@ -154,17 +157,38 @@ async def _reply_subagent_with_progress(
     inputs,
     sink=None,
     on_tool_result_start=None,
+    execution_trace: dict[str, Any] | None = None,
 ):
-    """Consume a subagent reply stream and forward only public event fields."""
+    """Consume a subagent reply stream and retain its terminal message."""
+    private_reply = getattr(agent, "_reply", None)
     reply_stream = getattr(agent, "reply_stream", None)
-    if reply_stream is None:
+    if callable(private_reply):
+        stream = private_reply(inputs=inputs)
+    elif reply_stream is not None:
+        stream = reply_stream(inputs=inputs)
+    else:
         return await agent.reply(inputs)
     event_sink = sink or _SUBAGENT_PROGRESS_SINK.get()
     agent_name = getattr(agent, "name", "Subagent")
     reply = AssistantMsg(name=agent_name, content=[])
+    terminal_message = None
     tool_names: dict[str, str] = {}
+    tool_arguments: dict[str, str] = {}
+    tool_results: dict[str, str] = {}
+    trace = execution_trace if execution_trace is not None else {}
+    trace.setdefault("last_tool_name", None)
+    trace.setdefault("last_tool_call_id", None)
+    trace.setdefault("tool_result_state", None)
+    trace.setdefault("tool_result_text", "")
+    trace.setdefault("reply_finished_reason", None)
+    trace.setdefault("terminal_message_received", False)
+    trace.setdefault("reply_end_received", False)
     _LAST_SUBAGENT_TOOL_CALL_ID.set(None)
-    async for event in reply_stream(inputs=inputs):
+    async for event in stream:
+        if isinstance(event, Msg):
+            terminal_message = event
+            trace["terminal_message_received"] = True
+            continue
         if isinstance(event, ReplyStartEvent):
             reply.id = event.reply_id
         reply.append_event(event)
@@ -172,28 +196,62 @@ async def _reply_subagent_with_progress(
         if isinstance(event, ToolCallStartEvent):
             _LAST_SUBAGENT_TOOL_CALL_ID.set(event.tool_call_id)
             tool_names[event.tool_call_id] = event.tool_call_name
+            trace["last_tool_name"] = event.tool_call_name
+            trace["last_tool_call_id"] = event.tool_call_id
             public = {
                 "kind": "tool_call",
                 "tool": event.tool_call_name,
-                "text": "tool call started",
+                "text": _readable_tool_activity(event.tool_call_name),
             }
         elif isinstance(event, ToolCallDeltaEvent):
-            public = {
-                "kind": "tool_call",
-                "tool": tool_names.get(event.tool_call_id, "tool"),
-                "text": event.delta,
-            }
+            tool_arguments[event.tool_call_id] = (
+                tool_arguments.get(event.tool_call_id, "") + event.delta
+            )
+        elif isinstance(event, ToolCallEndEvent):
+            if event.tool_call_id == trace.get("last_tool_call_id"):
+                trace["last_tool_arguments"] = tool_arguments.get(
+                    event.tool_call_id,
+                    "",
+                )
         elif isinstance(event, ToolResultStartEvent):
             _LAST_SUBAGENT_TOOL_CALL_ID.set(event.tool_call_id)
             tool_names[event.tool_call_id] = event.tool_call_name
             if on_tool_result_start is not None:
                 on_tool_result_start(event.tool_call_id)
         elif isinstance(event, ToolResultTextDeltaEvent):
-            public = {
-                "kind": "tool_result",
-                "tool": tool_names.get(event.tool_call_id, "tool"),
-                "text": event.delta,
-            }
+            tool_results[event.tool_call_id] = (
+                tool_results.get(event.tool_call_id, "") + event.delta
+            )
+            if event.tool_call_id == trace.get("last_tool_call_id"):
+                trace["tool_result_text"] = tool_results[event.tool_call_id]
+            if not _looks_like_structured_payload(tool_results[event.tool_call_id]):
+                public = {
+                    "kind": "tool_result",
+                    "tool": tool_names.get(event.tool_call_id, "tool"),
+                    "text": event.delta,
+                }
+        elif isinstance(event, ToolResultEndEvent):
+            result_state = getattr(event.state, "value", event.state)
+            if event.tool_call_id == trace.get("last_tool_call_id"):
+                trace["tool_result_state"] = str(result_state)
+            result_text = tool_results.get(event.tool_call_id, "")
+            if str(result_state).lower() == "error":
+                public = {
+                    "kind": "error",
+                    "tool": tool_names.get(event.tool_call_id, "tool"),
+                    "text": (
+                        _readable_tool_result(result_text)
+                        if _looks_like_structured_payload(result_text)
+                        else result_text
+                        or f"{_readable_tool_activity(tool_names.get(event.tool_call_id, 'tool'))} failed"
+                    ),
+                }
+            elif _looks_like_structured_payload(result_text):
+                public = {
+                    "kind": "tool_result",
+                    "tool": tool_names.get(event.tool_call_id, "tool"),
+                    "text": _readable_tool_result(result_text),
+                }
         elif isinstance(event, TextBlockDeltaEvent):
             public = {
                 "kind": "text",
@@ -201,6 +259,10 @@ async def _reply_subagent_with_progress(
                 "text": event.delta,
             }
         elif isinstance(event, ReplyEndEvent):
+            trace["reply_end_received"] = True
+            trace["reply_finished_reason"] = str(
+                getattr(event.finished_reason, "value", event.finished_reason)
+            )
             public = {
                 "kind": "complete",
                 "title": agent_name,
@@ -208,7 +270,82 @@ async def _reply_subagent_with_progress(
             }
         if public is not None and event_sink is not None:
             event_sink(public)
-    return reply
+    _logger.debug(
+        "Subagent stream ended agent=%s reason=%s last_tool=%s result_state=%s reply_chars=%d",
+        agent_name,
+        trace.get("reply_finished_reason"),
+        trace.get("last_tool_name"),
+        trace.get("tool_result_state"),
+        len((terminal_message or reply).get_text_content() or ""),
+    )
+    return terminal_message or reply
+
+
+def _readable_tool_activity(tool_name: str) -> str:
+    """Return a concise, human-readable description for a tool lifecycle."""
+    normalized = str(tool_name or "tool").lower()
+    if "get_scene_info" in normalized:
+        return "Reading Blender scene information"
+    if "execute_blender_code" in normalized:
+        return "Running Blender modelling operation"
+    if "create_object" in normalized:
+        return "Calling create object"
+    return f"Calling {str(tool_name or 'tool').replace('_', ' ')}"
+
+
+def _looks_like_structured_payload(value: str) -> bool:
+    """Identify JSON-shaped tool output that should not be streamed verbatim."""
+    return str(value or "").lstrip().startswith(("{", "["))
+
+
+def _readable_tool_result(value: str) -> str:
+    """Format structured tool output without exposing its raw JSON transport."""
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return "Tool returned structured data."
+
+    def format_value(item: Any) -> str:
+        if isinstance(item, dict):
+            return "; ".join(
+                f"{str(key).replace('_', ' ')}: {format_value(child)}"
+                for key, child in item.items()
+            )
+        if isinstance(item, list):
+            return "; ".join(format_value(child) for child in item)
+        return str(item)
+
+    return format_value(payload).strip() or "Tool returned structured data."
+
+
+def _subagent_empty_reply_failure(subject: str, trace: dict[str, Any]) -> "_SubagentResult":
+    """Explain an incomplete subagent stream without masking its MCP state."""
+    tool_name = trace.get("last_tool_name")
+    abnormal_end = (
+        trace.get("terminal_message_received") is False
+        and trace.get("reply_end_received") is False
+    )
+    if not tool_name:
+        if abnormal_end:
+            return _subagent_failure(subject, "子智能体流异常结束，未收到最终消息或结束事件")
+        return _subagent_failure(subject, "Blender Agent 未返回内容")
+    result_state = trace.get("tool_result_state")
+    finish_reason = trace.get("reply_finished_reason") or "unknown"
+    if result_state is None:
+        detail = "未获得工具结果"
+    elif str(result_state).lower() == "error":
+        detail = "工具执行失败"
+    else:
+        detail = f"工具结果状态为 {result_state}，但未返回最终说明"
+    message = (
+        f"Blender MCP 工具 {tool_name} {detail}（回复结束原因：{finish_reason}）"
+    )
+    if abnormal_end:
+        message = f"子智能体流异常结束；{message}"
+    return _subagent_failure(
+        subject,
+        message,
+    )
 
 
 class _SubagentResult(str):
@@ -1982,6 +2119,12 @@ class AgentExtensionTools:
 
         info_dict = json.loads(info) if isinstance(info, str) else info
 
+        unity_state = AgentState(
+            permission_context=PermissionContext(
+                mode=PermissionMode.BYPASS
+            )
+        )
+
         unity_agent = Agent(
             name="UnityAgent",
             system_prompt=f"""
@@ -2026,7 +2169,8 @@ class AgentExtensionTools:
                 os.environ["LLM_API_KEY"],
             ),
             toolkit=toolkit,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
+            state=unity_state
         )
 
         msg = UserMsg(
@@ -2045,6 +2189,183 @@ class AgentExtensionTools:
             reply_text,
             "Unity操作",
         )
+
+    # ==================== 2. Blender 建模 ====================
+
+    def tool_blender_model(self, task: str) -> Any:
+        """根据需求完成Blender建模
+
+        Args:
+            task: 对Blender模型的需求描述
+
+        Returns:
+            Blender操作的执行结果
+        """
+        try:
+            result = _run_async(self._blender_model_async(task))
+            result = _validate_subagent_handoff(result, "Blender操作")
+            return _make_response(str(result), success=result.success)
+        except Exception as e:
+            result = _subagent_failure("Blender操作", f"Blender操作失败：{e}")
+            return _make_response(str(result), success=False)
+
+    async def _blender_model_async(self, task: str) -> str:
+        if not AGENTSCOPE_AVAILABLE:
+            return _subagent_failure(
+                "Blender操作",
+                "AgentScope 未安装，无法使用 Blender MCP 功能",
+            )
+
+        blender_timeout = _get_timeout_seconds(
+            "BLENDER_MCP_TIMEOUT_SECONDS",
+            600.0,
+        )
+        blender_config = StdioMCPConfig(
+            command="uvx",
+            args=["blender-mcp"],
+        )
+        blender_mcp = MCPClient(
+            name="blender_mcp",
+            is_stateful=True,
+            mcp_config=blender_config,
+            execution_timeout=blender_timeout,
+        )
+
+        connected = False
+        primary_error = None
+        try:
+            try:
+                await blender_mcp.connect()
+            except Exception as e:
+                return _subagent_failure(
+                    "Blender操作",
+                    "无法连接 Blender MCP 服务"
+                    f"(请确保 Blender 已启动且插件已安装)：{e}",
+                )
+            connected = True
+            return await self._blender_model_connected(blender_mcp, task)
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            if connected:
+                try:
+                    await blender_mcp.close()
+                except BaseException as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    _logger.warning(
+                        "Blender MCP cleanup failed while propagating %s: %s",
+                        type(primary_error).__name__,
+                        cleanup_error,
+                    )
+
+    async def _blender_model_connected(self, blender_mcp: Any, task: str) -> str:
+        output_directories = self._blender_output_directories()
+        model_directory = output_directories[ArtifactCategory.MODELS]
+        export_directory = output_directories[ArtifactCategory.EXPORTS]
+        image_directory = output_directories[ArtifactCategory.IMAGES]
+        outputs_before = self._snapshot_blender_outputs()
+        blender_tools = await _blender_tools_with_path_guard(
+            blender_mcp,
+            output_directories.values(),
+        )
+        toolkit = Toolkit(tools=blender_tools)
+
+        blender_state = AgentState(
+            permission_context=PermissionContext(
+                mode=PermissionMode.BYPASS
+            )
+        )
+
+        blender_agent = Agent(
+            name="BlenderAgen|t",
+            system_prompt=f"""你是一个blender建模助手,你的任务是帮助用户在blender应用中完成三维建模,注意完成建模后从多个视图进行检查。
+        本次任务必须实际保存文件，并且只允许使用以下绝对目录：
+        - .blend 工程文件：{model_directory}
+        - 导出的 STL、STEP、OBJ、FBX、GLTF 等模型：{export_directory}
+        - 渲染图：{image_directory}
+        不得保存到其他目录；最终答复必须逐项给出实际存在的绝对路径。
+
+        完成工具调用后，最终答复必须使用以下 Markdown 结构，章节不得缺失：
+        # 执行结果
+        ## 状态
+        只能填写：成功、部分成功或失败。
+        ## 完成摘要
+        只总结已经通过工具实际完成的工作，不得把计划、建议或尝试写成已完成。
+        ## 生成文件
+        逐项列出 .blend 工程、导出模型、材质、贴图和渲染图的类型、路径、用途和验证状态。
+        路径应优先使用工具返回的绝对路径；工具未返回路径时必须写“路径未提供”，不得猜测。
+        未执行保存或导出时必须明确说明；没有生成文件时必须明确写“无”。
+        ## 具体结果
+        列出创建、修改和删除的对象，以及关键尺寸、材质、层级关系和多个检查视角的结果。
+        ## 执行记录
+        列出实际调用的 Blender MCP 工具、关键参数和返回结果，明确区分已执行操作与建议操作。
+        ## 警告与未完成项
+        没有问题时写“无”；否则列出失败、缺失或未经验证的内容及原因。
+        """,
+            model=_build_model(
+                "openai",
+                self._llm_name,
+                os.environ["VLM_BASE_URL"],
+                os.environ["VLM_API_KEY"],
+            ),
+            toolkit=toolkit,
+            react_config=ReActConfig(max_iters=100),
+            state=blender_state
+        )
+
+        def confirm_tool_outputs(tool_call_id: str) -> None:
+            try:
+                self._confirm_changed_blender_outputs(
+                    outputs_before,
+                    tool_call_id=tool_call_id,
+                )
+                outputs_before.clear()
+                outputs_before.update(self._snapshot_blender_outputs())
+            except BaseException as scan_error:
+                _logger.warning(
+                    "Blender artifact scan failed for tool call %s: %s",
+                    tool_call_id,
+                    scan_error,
+                )
+
+        primary_error = None
+        try:
+            msg = UserMsg(name="User", content=task)
+            execution_trace: dict[str, Any] = {}
+            msg_res = await _reply_subagent_with_progress(
+                blender_agent,
+                msg,
+                on_tool_result_start=confirm_tool_outputs,
+                execution_trace=execution_trace,
+            )
+
+            if msg_res is None:
+                return _subagent_failure("Blender操作", "Blender Agent 未返回结果")
+            reply_text = _message_text(msg_res)
+            if not reply_text:
+                return _subagent_empty_reply_failure("Blender操作", execution_trace)
+            return _validate_subagent_handoff(
+                reply_text,
+                "Blender操作",
+            )
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            try:
+                self._confirm_changed_blender_outputs(outputs_before)
+            except BaseException as scan_error:
+                _logger.warning(
+                    "Blender artifact scan failed%s: %s",
+                    (
+                        f" while propagating {type(primary_error).__name__}"
+                        if primary_error is not None
+                        else ""
+                    ),
+                    scan_error,
+                )
 
     # ==================== 3. 工艺规划 ====================
 
@@ -2231,7 +2552,9 @@ class AgentExtensionTools:
                 ],
             )
             process_state = AgentState(
-                permission_context={"mode": PermissionMode.BYPASS},
+                permission_context=PermissionContext(
+                    mode=PermissionMode.BYPASS
+                ),
             )
         except BaseException:
             process_write_file.close()
@@ -2274,7 +2597,7 @@ class AgentExtensionTools:
             ),
             toolkit=toolkit,
             state=process_state,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
             )
         except BaseException:
             process_write_file.close()
@@ -2407,7 +2730,7 @@ class AgentExtensionTools:
                 os.environ["LLM_API_KEY"],
             ),
             toolkit=toolkit,
-            react_config=ReActConfig(max_iters=60),
+            react_config=ReActConfig(max_iters=100),
         )
 
         try:

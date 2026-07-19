@@ -153,6 +153,31 @@ def _tool_result_text_updates(event: ToolResultTextDeltaEvent, state: Dict[Any, 
     return updates
 
 
+def _text_block_delta_updates(
+    event: TextBlockDeltaEvent,
+    state: Dict[Any, Any],
+) -> list[Dict[str, Any]]:
+    """Render normal text while discarding private subagent transport markers."""
+    decoder_key = ("text_subagent_event_decoder", event.block_id)
+    decoder = state.setdefault(decoder_key, SubagentEventDeltaDecoder())
+    visible_text, _ = decoder.feed(event.delta)
+    if not visible_text:
+        return []
+    key = ("text", event.block_id)
+    current = state.setdefault(key, {"content": "", "emitted": False})
+    is_new = not current["emitted"]
+    current["emitted"] = True
+    current["content"] += visible_text
+    return [
+        {
+            "type": "text",
+            "id": event.block_id,
+            "text": current["content"],
+            "_new_block": is_new,
+        }
+    ]
+
+
 def _event_to_block_update(event: Any, state: Dict[Any, Any]) -> Optional[Dict[str, Any]]:
     """Translate one original AgentScope event into the widget block payload."""
     if isinstance(event, TextBlockStartEvent):
@@ -294,6 +319,10 @@ def _event_to_block_updates(event: Any, state: Dict[Any, Any]) -> list[Dict[str,
     """Translate one AgentScope event into every resulting widget payload."""
     if isinstance(event, ToolResultTextDeltaEvent):
         return _tool_result_text_updates(event, state)
+    if isinstance(event, TextBlockDeltaEvent):
+        return _text_block_delta_updates(event, state)
+    if isinstance(event, TextBlockEndEvent):
+        state.pop(("text_subagent_event_decoder", event.block_id), None)
     update = _event_to_block_update(event, state)
     return [update] if update is not None else []
 
@@ -1629,8 +1658,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         block_data = block_data.copy()
         is_new_block = bool(block_data.pop("_new_block", False))
         block_type = block_data.get("type", "text")
-        if block_type != "text":
-            _logger.debug("Block update: %s", block_type)
+        if block_type == "subagent_event":
+            _logger.debug("Block update: %s", block_data)
 
         if self._streaming_message is None:
             self._streaming_message = CompositeMessageWidget("assistant")
@@ -1672,7 +1701,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         if self._current_block_type != block_type:
             self._current_block_type = block_type
 
-        QTimer.singleShot(100, self._scroll_to_bottom)
+        QTimer.singleShot(1000, self._scroll_to_bottom)
 
     def _on_agent_response(self, response: str) -> None:
         self._flush_pending_block_updates()
