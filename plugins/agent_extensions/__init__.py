@@ -2441,7 +2441,7 @@ class AgentExtensionTools:
         """,
             model=_build_model(
                 "openai",
-                self._llm_name,
+                self._vlm_name,
                 os.environ["VLM_BASE_URL"],
                 os.environ["VLM_API_KEY"],
             ),
@@ -2583,7 +2583,7 @@ class AgentExtensionTools:
         """,
             model=_build_model(
                 "openai",
-                self._llm_name,
+                self._vlm_name,
                 os.environ["VLM_BASE_URL"],
                 os.environ["VLM_API_KEY"],
             ),
