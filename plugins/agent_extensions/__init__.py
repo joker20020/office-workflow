@@ -2442,8 +2442,8 @@ class AgentExtensionTools:
             model=_build_model(
                 "openai",
                 self._llm_name,
-                os.environ["LLM_BASE_URL"],
-                os.environ["LLM_API_KEY"],
+                os.environ["VLM_BASE_URL"],
+                os.environ["VLM_API_KEY"],
             ),
             toolkit=toolkit,
             react_config=ReActConfig(max_iters=100),
