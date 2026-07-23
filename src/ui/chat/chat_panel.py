@@ -428,6 +428,9 @@ def _extract_blocks_from_msg(msg: Any) -> List[Dict[str, Any]]:
                     block_dict["id"] = getattr(block, "id", "")
                     block_dict["name"] = getattr(block, "name", "")
                     block_dict["output"] = getattr(block, "output", "")
+                    metadata = getattr(block, "metadata", {}) or {}
+                    if isinstance(metadata, dict) and metadata.get("execution_events"):
+                        block_dict["execution_events"] = metadata["execution_events"]
                 elif block_dict["type"] == "data":
                     media_kind = getattr(block, "name", "")
                     if media_kind in ("image", "audio", "video"):
@@ -460,6 +463,31 @@ def _normalize_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for block in blocks:
         block_type = block.get("type", "text")
+        if block_type == "data" and block.get("name") in ("image", "audio", "video"):
+            block = {
+                "type": block["name"],
+                "source": block.get("source", {}),
+            }
+            block_type = block["type"]
+        if block_type == "tool_result":
+            block = block.copy()
+            metadata = block.get("metadata", {})
+            if (
+                "execution_events" not in block
+                and isinstance(metadata, dict)
+                and metadata.get("execution_events")
+            ):
+                block["execution_events"] = metadata["execution_events"]
+            output = block.get("output", "")
+            if isinstance(output, dict) and "content" in output:
+                output = output["content"]
+            if isinstance(output, list):
+                output = "\n".join(
+                    str(item.get("text", ""))
+                    for item in output
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
+            block["output"] = output if isinstance(output, str) else str(output)
         if block_type in ("image", "audio", "video") and "source" not in block:
             url = block.get("url", "")
             if url.startswith("file://"):
@@ -767,6 +795,11 @@ class SessionListWidget(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         finally:
             self._list_widget.blockSignals(False)
 
+    def set_session_switching_enabled(self, enabled: bool) -> None:
+        """Enable or lock every UI entry point that can change sessions."""
+        self._list_widget.setEnabled(enabled)
+        self._new_btn.setEnabled(enabled)
+
     def refresh_language(self) -> None:
         """刷新语言文本"""
         if hasattr(self, "_title_label"):
@@ -825,9 +858,12 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._history_repository = history_repository
         self._artifact_repository = artifact_repository
         self._artifact_path_policy = artifact_path_policy
-        self._messages: list[MarkdownMessageWidget | CompositeMessageWidget] = []
+        # Keep full-width row containers here.  The message itself is stored on
+        # each row so user/assistant alignment never constrains its size hint.
+        self._messages: list[QWidget] = []
         self._current_provider: Optional[str] = None
         self._worker: Optional[AgentWorker] = None
+        self._session_switching_locked = False
         self._current_session_id: Optional[str] = None
         self._streaming_message: Optional[MarkdownMessageWidget | CompositeMessageWidget] = None
         self._streaming_text: str = ""
@@ -891,6 +927,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._messages_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._messages_layout.setSpacing(8)
         self._messages_layout.setContentsMargins(12, 12, 12, 12)
+        self._messages_layout.addStretch(1)
         self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
 
         self._scroll_area.setWidget(self._messages_widget)
@@ -1369,6 +1406,9 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
     def _on_session_selected(self, session_id: str) -> None:
         """切换到选中的会话"""
+        if self._session_switching_locked:
+            _logger.debug("Agent运行中，忽略会话切换请求: %s", session_id)
+            return
         if not self._agent or not self._history_repository:
             return
 
@@ -1384,6 +1424,9 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             _logger.warning(f"切换会话失败: {session_id}")
 
     def _on_session_delete(self, session_id: str) -> None:
+        if self._session_switching_locked:
+            _logger.debug("Agent运行中，忽略会话删除请求: %s", session_id)
+            return
         if not self._history_repository:
             return
 
@@ -1411,6 +1454,9 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
                     self._on_session_selected(sessions[0]["id"])
 
     def _on_new_session(self) -> None:
+        if self._session_switching_locked:
+            _logger.debug("Agent运行中，忽略新建会话请求")
+            return
         if not self._agent:
             return
 
@@ -1554,7 +1600,10 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         def callback(agent_self: Any, kwargs: dict, output: Any) -> None:
             event = (kwargs or {}).get("event", output)
-            blocks = _event_to_block_updates(event, event_state)
+            if isinstance(event, dict) and event.get("type") == "subagent_event":
+                blocks = [event]
+            else:
+                blocks = _event_to_block_updates(event, event_state)
             if blocks and self._worker:
                 self._worker.block_update.emit(blocks)
 
@@ -1612,6 +1661,7 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         self._set_status(_("chat.thinking"))
         self._set_stop_mode(True)
+        self._set_session_switching_enabled(False)
 
         self._worker = AgentWorker(self._agent, message_content, self._create_streaming_callback())
         self._worker.response_ready.connect(self._on_agent_response)
@@ -1663,8 +1713,9 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
 
         if self._streaming_message is None:
             self._streaming_message = CompositeMessageWidget("assistant")
-            self._messages_layout.addWidget(self._streaming_message)
-            self._messages.append(self._streaming_message)
+            self._messages.append(
+                self._append_message_widget(self._streaming_message, "assistant")
+            )
             self._streaming_blocks = []
 
         self._streaming_blocks.append(block_data)
@@ -1672,7 +1723,6 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         if is_new_block and self._streaming_message.block_count() > 0:
             self._streaming_message.append_block(block_data)
             self._current_block_type = block_type
-            QTimer.singleShot(100, self._scroll_to_bottom)
             return
 
         if block_type == "thinking":
@@ -1701,7 +1751,6 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         if self._current_block_type != block_type:
             self._current_block_type = block_type
 
-        QTimer.singleShot(1000, self._scroll_to_bottom)
 
     def _on_agent_response(self, response: str) -> None:
         self._flush_pending_block_updates()
@@ -1717,7 +1766,6 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._streaming_blocks = []
             self._streaming_text = ""
 
-        QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _on_agent_error(self, error: str) -> None:
         self._flush_pending_block_updates()
@@ -1729,11 +1777,13 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         # 立即恢复按钮状态，允许用户重新执行
         if not self._is_send_mode:
             self._set_stop_mode(False)
+        self._set_session_switching_enabled(True)
 
     def _on_worker_finished(self) -> None:
         self._flush_pending_block_updates()
         _logger.info("AgentWorker完成")
         self._set_stop_mode(False)
+        self._set_session_switching_enabled(True)
         self._current_block_type = "unknown"
         self._refresh_artifacts()
         if self._worker:
@@ -1752,6 +1802,12 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._send_btn.setStyleSheet(Theme.get_chat_send_button_stylesheet())
             has_text = bool(self._input_text.toPlainText().strip())
             self._send_btn.setEnabled(has_text and self._current_provider is not None)
+
+    def _set_session_switching_enabled(self, enabled: bool) -> None:
+        """Keep the active session stable while its Worker streams output."""
+        self._session_switching_locked = not enabled
+        if hasattr(self, "_session_list"):
+            self._session_list.set_session_switching_enabled(enabled)
 
     def _on_stop_clicked(self) -> None:
         """处理停止按钮点击 — 中断 Agent 执行"""
@@ -1778,8 +1834,8 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._streaming_message = None
             self._streaming_blocks = []
             self._streaming_text = ""
+        self._set_session_switching_enabled(True)
 
-        QTimer.singleShot(10, self._scroll_to_bottom)
 
     def _add_message_widget(self, role: str, content: Any) -> None:
         if isinstance(content, list) and content and isinstance(content[0], dict):
@@ -1789,17 +1845,99 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         else:
             message_widget = MarkdownMessageWidget(role, str(content))
 
-        self._messages_layout.addWidget(message_widget)
-        self._messages.append(message_widget)
-        QTimer.singleShot(100, self._scroll_to_bottom)
+        self._messages.append(self._append_message_widget(message_widget, role))
 
+    def _append_message_widget(self, message_widget: QWidget, role: str) -> QWidget:
+        """Insert a full-width row; position the message inside that row by role."""
+        available_width = self._message_content_width()
+        if role == "user":
+            message_widget.setFixedWidth(
+                self._user_message_width(message_widget, available_width),
+            )
+            message_widget.setSizePolicy(
+                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
+            )
+        else:
+            message_widget.setMaximumWidth(
+                self._message_maximum_width(role, available_width),
+            )
+            message_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
+        if role != "user":
+            message_widget.setMinimumWidth(0)
+
+        row = QWidget(self._messages_widget)
+        row.setObjectName(f"chatMessageRow{role.capitalize()}")
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row._message_widget = message_widget
+        row._message_role = role
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+        if role == "user":
+            row_layout.addStretch(1)
+            row_layout.addWidget(message_widget)
+        else:
+            row_layout.addWidget(message_widget, 1)
+        self._messages_layout.insertWidget(
+            max(0, self._messages_layout.count() - 1),
+            row,
+        )
+        return row
+
+    @staticmethod
+    def _message_maximum_width(role: str, available_width: int) -> int:
+        """Return the role-specific width cap for the current chat viewport."""
+        if role != "user":
+            return 16777215  # Qt's QWIDGETSIZE_MAX
+        return int(max(available_width, 1) * 0.8)
+
+    def _message_content_width(self) -> int:
+        """Return the usable width of a message row, excluding layout margins."""
+        margins = self._messages_layout.contentsMargins()
+        return max(
+            1,
+            self._messages_widget.width() - margins.left() - margins.right(),
+        )
+
+    def _user_message_width(
+        self,
+        message_widget: QWidget,
+        available_width: int,
+    ) -> int:
+        """Fit plain user text while keeping all user content below the 80% cap."""
+        maximum_width = self._message_maximum_width("user", available_width)
+        preferred_width = getattr(message_widget, "preferred_user_width", None)
+        if callable(preferred_width):
+            return max(1, min(maximum_width, int(preferred_width(maximum_width))))
+        return maximum_width
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        # The scroll area updates its viewport after this widget's resize event.
+        # Run after that layout pass so user bubbles follow the actual row width.
+        QTimer.singleShot(0, self._update_message_widths)
+
+    def _update_message_widths(self) -> None:
+        for row in self._messages:
+            message_widget = getattr(row, "_message_widget", None)
+            if message_widget is None:
+                continue
+            role = getattr(row, "_message_role", "assistant")
+            available_width = row.width() or self._message_content_width()
+            width = self._message_maximum_width(role, available_width)
+            if role == "user":
+                message_widget.setFixedWidth(
+                    self._user_message_width(message_widget, available_width),
+                )
+            else:
+                message_widget.setMaximumWidth(width)
     def add_message(self, role: str, content: str) -> None:
         """添加消息（公开接口）"""
         self._add_message_widget(role, content)
-
-    def _scroll_to_bottom(self) -> None:
-        scrollbar = self._scroll_area.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
 
     def _set_status(self, status: str) -> None:
         self._status_label.setText(status)
@@ -1974,6 +2112,12 @@ class ChatPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
             self._artifacts_btn.setStyleSheet(Theme.get_panel_button_stylesheet())
         if hasattr(self, "_messages_widget"):
             self._messages_widget.setStyleSheet(Theme.get_chat_messages_widget_stylesheet())
+        if hasattr(self, "_messages"):
+            for row in self._messages:
+                message_widget = getattr(row, "_message_widget", None)
+                refresh = getattr(message_widget, "refresh_theme", None)
+                if callable(refresh):
+                    refresh()
         if hasattr(self, "_input_area"):
             self._input_area.setStyleSheet(Theme.get_chat_input_area_stylesheet())
         if hasattr(self, "_input_text"):

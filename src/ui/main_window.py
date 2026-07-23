@@ -637,7 +637,7 @@ class MainWindow(QMainWindow, LanguageAwareMixin):
         self.setStyleSheet(Theme.get_main_window_stylesheet())
         self._content_stack.setStyleSheet(Theme.get_content_stack_stylesheet())
         self._status_bar.setStyleSheet(Theme.get_status_bar_stylesheet())
-        theme_display = _("theme.dark") if theme_name == "dark" else _("theme.light")
+        theme_display = _(f"theme.{theme_name}")
         self._status_bar.showMessage(f"{_('status.theme_changed')}: {theme_display}")
 
     def refresh_language(self) -> None:

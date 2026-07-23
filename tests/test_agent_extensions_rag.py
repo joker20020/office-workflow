@@ -1478,6 +1478,69 @@ async def test_streaming_tool_coalesces_adjacent_progress_text_events():
 
 
 @pytest.mark.asyncio
+async def test_streaming_subagent_tool_publishes_progress_without_marker_chunks(monkeypatch):
+    published = []
+
+    def sync_tool(task: str):
+        assert task == "task"
+        return ToolResponse(
+            content=[TextBlock(text="# 执行结果")],
+            state=ToolResultState.SUCCESS,
+        )
+
+    monkeypatch.setattr(
+        agent_extensions,
+        "publish_subagent_progress_event",
+        published.append,
+        raising=False,
+    )
+    tool = AgentExtensionTools()._streaming_tool(
+        sync_tool,
+        "Unity Agent",
+        "tool_unity_ar",
+    )
+
+    chunks = [chunk async for chunk in tool("task")]
+
+    assert len(chunks) == 1
+    assert isinstance(chunks[0], ToolChunk)
+    assert chunks[0].content[0].text == "# 执行结果"
+    assert any(event["kind"] == "phase" for event in published)
+    assert any(event["kind"] == "complete" for event in published)
+
+
+@pytest.mark.asyncio
+async def test_streaming_subagent_tool_does_not_pollute_final_agentscope_result(monkeypatch):
+    monkeypatch.setattr(
+        agent_extensions,
+        "publish_subagent_progress_event",
+        lambda event: None,
+        raising=False,
+    )
+    tool = AgentExtensionTools()._streaming_tool(
+        lambda: ToolResponse(
+            content=[TextBlock(text="# 执行结果")],
+            state=ToolResultState.SUCCESS,
+        ),
+        "Unity Agent",
+        "tool_unity_ar",
+    )
+    toolkit = RealToolkit(tools=[RealFunctionTool(func=tool)])
+    results = [
+        result
+        async for result in toolkit.call_tool(
+            ToolCallBlock(id="call-1", name="tool_unity_ar", input="{}"),
+            AgentState(),
+        )
+    ]
+
+    final = results[-1]
+    assert isinstance(final, ToolResponse)
+    assert final.content[0].text == "# 执行结果"
+    assert agent_extensions.SUBAGENT_EVENT_PREFIX not in final.content[0].text
+
+
+@pytest.mark.asyncio
 async def test_subagent_reply_stream_forwards_public_events_and_hides_thinking():
     from agentscope.event import (
         ReplyEndEvent,
@@ -1805,8 +1868,8 @@ def test_public_subagent_wrappers_reject_invalid_handoff_status(
 
     response = call_tool(AgentExtensionTools())
 
-    assert response.state is ToolResultState.ERROR
-    assert "状态值无效" in response.content[0].text
+    assert response.state is ToolResultState.SUCCESS
+    assert "格式提示" in response.content[0].text
     assert "完成" in response.content[0].text
 
 
@@ -1836,8 +1899,8 @@ def test_public_subagent_wrappers_reject_missing_handoff_headings(
 
     response = call_tool(AgentExtensionTools())
 
-    assert response.state is ToolResultState.ERROR
-    assert "缺少必需章节" in response.content[0].text
+    assert response.state is ToolResultState.SUCCESS
+    assert "格式提示" in response.content[0].text
 
 
 @pytest.mark.parametrize(
@@ -1871,8 +1934,30 @@ def test_handoff_parser_rejects_wrong_order_levels_duplicates_fences_and_empty(
 ):
     result = agent_extensions._validate_subagent_handoff(malformed, "测试")
 
-    assert result.success is False
-    assert "## 状态\n失败" in result
+    assert result.success is True
+    assert "格式提示" in result
+
+
+def test_handoff_validation_extracts_textblock_content_before_parsing():
+    result = agent_extensions._validate_subagent_handoff(
+        [TextBlock(text=_valid_handoff("details"))],
+        "测试",
+    )
+
+    assert result.success is True
+    assert "content=[TextBlock" not in str(result)
+    assert "# 执行结果" in str(result)
+
+
+def test_handoff_format_notice_keeps_original_markdown_renderable():
+    result = agent_extensions._subagent_handoff_format_notice(
+        "测试",
+        "## 具体结果\n**加粗内容**",
+        "标题格式不规范",
+    )
+
+    assert "```markdown" not in str(result)
+    assert "**加粗内容**" in str(result)
 
 
 def test_process_normalization_uses_fence_longer_than_artifact_backticks(tmp_path):

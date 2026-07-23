@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from agentscope.mcp import HttpMCPConfig, MCPClient, StdioMCPConfig
-from agentscope.message import AssistantMsg, SystemMsg, UserMsg
+from agentscope.event import ReplyEndEvent, ReplyStartEvent, ToolResultEndEvent, ToolResultStartEvent
+from agentscope.message import AssistantMsg, SystemMsg, ToolResultState, UserMsg
 from agentscope.permission import PermissionMode
 from agentscope.state import AgentState
 from agentscope.tool import FunctionTool
@@ -63,6 +64,42 @@ def test_subagent_progress_is_nested_under_parent_tool_result():
         "text": "saved image",
         "status": "running",
     }
+
+
+@pytest.mark.asyncio
+async def test_subagent_progress_is_persisted_in_tool_result_metadata():
+    class FakeAgent:
+        async def reply_stream(self, inputs):
+            yield ReplyStartEvent(
+                session_id="session",
+                reply_id="reply",
+                name="Assistant",
+            )
+            yield ToolResultStartEvent(
+                reply_id="reply",
+                tool_call_id="call-1",
+                tool_call_name="tool_unity_ar",
+            )
+            agent_integration.publish_subagent_progress_event(
+                {"kind": "phase", "title": "Unity Agent", "text": "started"},
+            )
+            yield ToolResultEndEvent(
+                reply_id="reply",
+                tool_call_id="call-1",
+                state=ToolResultState.SUCCESS,
+            )
+            yield ReplyEndEvent(session_id="session", reply_id="reply")
+
+    integration = AgentIntegration.__new__(AgentIntegration)
+    integration._agent = FakeAgent()
+    integration._reply_ownership_lock = threading.Lock()
+    integration._parked_reply_id = None
+    integration._streaming_callbacks = []
+
+    reply = await integration._consume_reply_stream(UserMsg(name="User", content="task"))
+    tool_result = next(block for block in reply.content if block.type == "tool_result")
+
+    assert tool_result.metadata["execution_events"][0]["title"] == "Unity Agent"
 
 
 class _LifecycleClient:

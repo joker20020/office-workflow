@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 from typing import Any
 from PIL import Image
 
-from PySide6.QtCore import Signal, QThread
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtWidgets import QApplication, QFrame, QWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
@@ -33,8 +33,10 @@ from agentscope.message import Base64Source, DataBlock, ToolResultState, UserMsg
 
 import src.ui.chat.chat_panel as chat_panel
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
+from src.ui.chat.message_widget import MarkdownMessageWidget
 from src.ui.chat.blocks.image_block import ImageBlockWidget
 from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
+from src.ui.theme import Theme
 
 
 class MockStreamingWidget:
@@ -607,6 +609,125 @@ class TestChatPanelStreaming:
         widget._add_block_widget.assert_called_once_with(block)
         assert widget._blocks == [block]
 
+    def test_composite_message_blocks_use_spaced_visual_containers(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+
+        widget = CompositeMessageWidget(
+            "assistant",
+            [
+                {"type": "text", "text": "First block"},
+                {"type": "thinking", "thinking": "Second block"},
+            ],
+        )
+
+        assert widget._blocks_layout.spacing() == 12
+        text_container = widget._blocks_layout.itemAt(0).widget()
+        thinking_container = widget._blocks_layout.itemAt(1).widget()
+        assert text_container.objectName() == "chatMessageTextBlock"
+        assert "border: none" in text_container.styleSheet()
+        assert thinking_container.objectName() == "chatMessageBlock"
+        assert "border" in thinking_container.styleSheet()
+        assert "background-color: transparent" in thinking_container.styleSheet()
+        assert thinking_container.layout().contentsMargins().left() == 6
+
+    def test_composite_missing_type_defaults_to_unframed_text_container(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+
+        widget = CompositeMessageWidget("assistant", [{"text": "First block"}])
+        container = widget._blocks_layout.itemAt(0).widget()
+
+        assert widget.get_block_widgets()[0].get_block_type() == "text"
+        assert container.objectName() == "chatMessageTextBlock"
+        assert "border: none" in container.styleSheet()
+
+    def test_unsupported_history_block_does_not_leave_overlay_frame(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        widget = CompositeMessageWidget(
+            "assistant",
+            [
+                {"type": "text", "text": "Visible text"},
+                {
+                    "type": "tool_call",
+                    "id": "call-1",
+                    "name": "tool_query_knowledge_base",
+                },
+            ],
+        )
+
+        direct_frames = [
+            child
+            for child in widget._blocks_container.children()
+            if isinstance(child, QFrame)
+        ]
+
+        assert direct_frames == widget._block_containers
+        assert len(direct_frames) == 1
+
+    def test_theme_refresh_repairs_legacy_text_container_classification(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        widget = CompositeMessageWidget("assistant", [{"text": "First block"}])
+        container = widget._block_containers[0]
+        container.setObjectName("chatMessageBlock")
+        container.setStyleSheet(Theme.get_chat_message_block_stylesheet())
+        container.layout().setContentsMargins(6, 6, 6, 6)
+
+        widget.refresh_theme()
+
+        assert container.objectName() == "chatMessageTextBlock"
+        assert "border: none" in container.styleSheet()
+        assert container.layout().contentsMargins().left() == 0
+
+    def test_message_bubble_style_does_not_apply_to_descendant_blocks(self):
+        stylesheet = Theme.get_chat_message_bubble_stylesheet("assistant")
+
+        assert "QWidget#chatMessageAssistant" in stylesheet
+        assert "QWidget {" not in stylesheet
+        assert Theme.hex("background_primary") in stylesheet
+        assert "border: none" in stylesheet
+        assert Theme.hex("accent_primary") in Theme.get_chat_message_bubble_stylesheet("user")
+        assert "background-color: transparent" in Theme.get_message_content_edit_stylesheet()
+        assert "background-color: transparent" in Theme.get_block_card_stylesheet()
+
+    def test_user_messages_use_a_dedicated_card_bubble(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+
+        composite = CompositeMessageWidget(
+            "user",
+            [{"type": "text", "text": "User input"}],
+        )
+        markdown = MarkdownMessageWidget("user", "User input")
+
+        for widget in (composite, markdown):
+            bubble = widget._bubble_card
+            assert isinstance(bubble, QFrame)
+            assert bubble.objectName() == "chatUserBubble"
+            assert Theme.hex("background_selected") in bubble.styleSheet()
+            assert Theme.hex("accent_primary") in bubble.styleSheet()
+            assert bubble.layout().contentsMargins().left() == 10
+            assert bubble.layout().indexOf(widget._role_label) == -1
+            assert widget.layout().indexOf(widget._role_label) == 0
+            assert (
+                widget._role_label.alignment()
+                & Qt.AlignmentFlag.AlignRight
+            )
+
+    def test_chat_panel_theme_refresh_reaches_inner_message_widgets(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel._add_message_widget("assistant", [{"text": "First block"}])
+        message_widget = panel._messages[0]._message_widget
+        message_widget.refresh_theme = MagicMock()
+
+        panel.refresh_theme()
+
+        message_widget.refresh_theme.assert_called_once_with()
+
     def test_subagent_event_routes_to_its_parent_tool_result(self):
         parent = MagicMock()
         parent.get_block_type.return_value = "tool_result"
@@ -649,6 +770,267 @@ class TestChatPanelStreaming:
 
         assert block.get_content() == "# Final"
         assert block.execution_event_count() == 1
+        assert "<h1" in block._output_edit.document().toHtml()
+
+    def test_tool_result_places_execution_events_above_final_output(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        block = ToolResultBlockWidget(
+            {
+                "type": "tool_result",
+                "id": "call-1",
+                "name": "image",
+                "output": "# Final output",
+                "execution_events": [
+                    {
+                        "event_kind": "phase",
+                        "title": "Image Agent",
+                        "text": "started",
+                    },
+                ],
+            },
+        )
+        layout = block._output_edit.parentWidget().layout()
+
+        assert layout.indexOf(block._execution_edit) < layout.indexOf(block._output_edit)
+        assert "font-family: monospace" not in block._output_edit.styleSheet()
+
+    def test_tool_result_output_and_execution_logs_allow_scrolling(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        block = ToolResultBlockWidget(
+            {"type": "tool_result", "id": "call-1", "name": "image", "output": "result"},
+        )
+
+        assert block._output_edit.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        assert block._execution_edit.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        assert block._output_edit.maximumHeight() == 280
+        assert block._execution_edit.maximumHeight() == 240
+
+    def test_tool_result_extracts_text_from_agentscope_response_repr(self):
+        output = "content=[TextBlock(type='text', text='[\\n  {\\n    \\\"id\\\": 1\\n  }\\n]', id='block')] state=<ToolResultState.SUCCESS: 'success'>"
+
+        assert ToolResultBlockWidget._output_text(output) == '[\n  {\n    "id": 1\n  }\n]'
+
+    def test_message_layout_keeps_messages_top_aligned_and_roles_separated(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel.resize(1200, 800)
+        panel.show()
+        application.processEvents()
+
+        panel._add_message_widget("assistant", "assistant")
+        panel._add_message_widget("user", "user")
+        application.processEvents()
+
+        assert panel._messages_layout.itemAt(panel._messages_layout.count() - 1).spacerItem()
+        assistant_row, user_row = panel._messages
+        assistant = assistant_row._message_widget
+        user = user_row._message_widget
+
+        assert assistant_row.layout().itemAt(0).widget() is assistant
+        assert assistant_row.layout().stretch(0) == 1
+        assert assistant.width() == assistant_row.width()
+        assert user_row.layout().itemAt(0).spacerItem()
+        assert user_row.layout().itemAt(1).widget() is user
+        assert 0 < user.width() <= int(user_row.width() * 0.8)
+
+        panel.resize(900, 800)
+        application.processEvents()
+        assert 0 < user.width() <= int(user_row.width() * 0.8)
+        assert "accent_primary" not in assistant.styleSheet()
+        assert assistant.objectName() == "chatMessageAssistant"
+        assert user.objectName() == "chatMessageUser"
+
+    def test_message_width_policy_uses_full_assistant_and_eighty_percent_user_width(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+
+        assert panel._message_maximum_width("assistant", 1000) == 16777215
+        assert panel._message_maximum_width("user", 1000) == 800
+
+    def test_short_user_message_uses_content_width_below_eighty_percent_cap(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel.resize(1200, 800)
+        panel.show()
+        application.processEvents()
+
+        panel._add_message_widget("user", "Short input")
+        application.processEvents()
+
+        row = panel._messages[0]
+        user_message = row._message_widget
+        assert user_message.width() < int(row.width() * 0.8)
+
+    def test_long_user_message_uses_the_eighty_percent_width_cap(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel.resize(1200, 800)
+        panel.show()
+        application.processEvents()
+
+        panel._add_message_widget("user", "Long message content " * 80)
+        application.processEvents()
+
+        row = panel._messages[0]
+        user_message = row._message_widget
+        assert user_message.width() == int(row.width() * 0.8)
+
+    def test_multimodal_user_message_keeps_the_eighty_percent_width_cap(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        widget = CompositeMessageWidget(
+            "user",
+            [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "data": "aW1hZ2U="},
+                },
+            ],
+        )
+
+        assert widget.preferred_user_width(800) == 800
+
+    def test_history_extracts_persisted_subagent_execution_events(self):
+        message = type(
+            "Message",
+            (),
+            {
+                "content": [
+                    type(
+                        "ToolResult",
+                        (),
+                        {
+                            "type": "tool_result",
+                            "id": "call-1",
+                            "name": "tool_unity_ar",
+                            "output": "# Result",
+                            "metadata": {
+                                "execution_events": [
+                                    {
+                                        "event_kind": "phase",
+                                        "title": "Unity Agent",
+                                        "text": "started",
+                                    },
+                                ],
+                            },
+                        },
+                    )(),
+                ],
+            },
+        )()
+
+        blocks = chat_panel._extract_blocks_from_msg(message)
+
+        assert blocks[0]["execution_events"][0]["title"] == "Unity Agent"
+
+    def test_history_normalizes_nested_tool_result_text_for_display(self):
+        blocks = chat_panel._normalize_blocks(
+            [
+                {
+                    "type": "tool_result",
+                    "id": "call-1",
+                    "name": "tool_blender_model",
+                    "output": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "# 执行结果\n\n## 状态\n成功",
+                            },
+                        ],
+                        "state": "success",
+                    },
+                },
+            ],
+        )
+
+        assert blocks == [
+            {
+                "type": "tool_result",
+                "id": "call-1",
+                "name": "tool_blender_model",
+                "output": "# 执行结果\n\n## 状态\n成功",
+            },
+        ]
+
+    def test_history_normalizes_persisted_native_image_data_block_for_display(self):
+        blocks = chat_panel._normalize_blocks(
+            [
+                {
+                    "type": "data",
+                    "name": "image",
+                    "source": {
+                        "type": "base64",
+                        "data": "aW1hZ2U=",
+                        "media_type": "image/png",
+                    },
+                },
+            ],
+        )
+
+        assert blocks == [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "data": "aW1hZ2U=",
+                    "media_type": "image/png",
+                },
+            },
+        ]
+
+    def test_direct_subagent_ui_events_bypass_agentscope_event_adapter(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+        panel._worker = MagicMock()
+        callback = panel._create_streaming_callback()
+        direct_event = {
+            "type": "subagent_event",
+            "parent_tool_call_id": "call-1",
+            "event_kind": "phase",
+            "title": "Unity Agent",
+            "text": "started",
+            "status": "running",
+        }
+
+        callback(None, {"event": direct_event}, None)
+
+        panel._worker.block_update.emit.assert_called_once_with([direct_event])
+
+    def test_message_widgets_do_not_schedule_automatic_scroll(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        panel = chat_panel.ChatPanel()
+
+        with patch.object(chat_panel.QTimer, "singleShot") as single_shot:
+            panel._add_message_widget("assistant", "# Markdown")
+
+        single_shot.assert_not_called()
+
+    def test_running_agent_locks_session_switching_and_blocks_direct_selection(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        history_repository = MagicMock()
+        history_repository.list_sessions.return_value = []
+        panel = chat_panel.ChatPanel(history_repository=history_repository)
+        panel._agent = MagicMock()
+
+        panel._set_session_switching_enabled(False)
+        panel._on_session_selected("other-session")
+
+        assert not panel._session_list._list_widget.isEnabled()
+        assert not panel._session_list._new_btn.isEnabled()
+        panel._agent.switch_session.assert_not_called()
+
+        panel._set_session_switching_enabled(True)
+        assert panel._session_list._list_widget.isEnabled()
+        assert panel._session_list._new_btn.isEnabled()
 
     def test_tool_result_merges_adjacent_subagent_text_events(self):
         application = QApplication.instance() or QApplication([])

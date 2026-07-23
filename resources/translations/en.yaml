@@ -228,6 +228,10 @@ permission:
 theme:
   dark: "Dark"
   light: "Light"
+  slate: "Slate Night"
+  forest: "Forest Night"
+  paper: "Warm Paper"
+  mist: "Cool Mist"
 
 node_editor:
   run: "Run"

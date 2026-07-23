@@ -89,8 +89,7 @@ class SettingsPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         self._theme_label = QLabel(_("settings.theme_mode"))
         self._theme_label.setStyleSheet(Theme.get_simple_text_label_stylesheet("text_primary"))
         self._theme_combo = QComboBox()
-        self._theme_combo.addItem(_("theme.dark"), "dark")
-        self._theme_combo.addItem(_("theme.light"), "light")
+        self._populate_theme_combo()
         self._theme_combo.setStyleSheet(Theme.get_combobox_stylesheet())
         theme_form.addRow(self._theme_label, self._theme_combo)
         layout.addLayout(theme_form)
@@ -142,6 +141,20 @@ class SettingsPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         theme_name = self._theme_combo.itemData(index)
         if self._theme_manager:
             self._theme_manager.apply_theme(theme_name)
+
+    def _populate_theme_combo(self, current_theme: Optional[str] = None) -> None:
+        """Populate the selector from the themes registered by ThemeManager."""
+        if current_theme is None:
+            current_theme = self._theme_combo.currentData() if hasattr(self, "_theme_combo") else None
+        self._theme_combo.blockSignals(True)
+        self._theme_combo.clear()
+        for theme_name in self._theme_manager.get_available_themes():
+            self._theme_combo.addItem(_(f"theme.{theme_name}"), theme_name)
+        if current_theme:
+            index = self._theme_combo.findData(current_theme)
+            if index >= 0:
+                self._theme_combo.setCurrentIndex(index)
+        self._theme_combo.blockSignals(False)
 
     def _on_language_changed(self, index: int) -> None:
         language = self._language_combo.itemData(index)
@@ -195,12 +208,4 @@ class SettingsPanel(QWidget, ThemeAwareMixin, LanguageAwareMixin):
         # 刷新下拉框文本（需要保留当前数据）
         if hasattr(self, "_theme_combo"):
             current_theme = self._theme_combo.currentData()
-            self._theme_combo.blockSignals(True)
-            self._theme_combo.clear()
-            self._theme_combo.addItem(_("theme.dark"), "dark")
-            self._theme_combo.addItem(_("theme.light"), "light")
-            if current_theme:
-                idx = self._theme_combo.findData(current_theme)
-                if idx >= 0:
-                    self._theme_combo.setCurrentIndex(idx)
-            self._theme_combo.blockSignals(False)
+            self._populate_theme_combo(current_theme)
