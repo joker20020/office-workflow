@@ -167,7 +167,7 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         "two-number `[x,y]` `position`"
     ) in normalized_dimensions
     assert "`distance` needs one or two server-owned `entity_refs`" in normalized_dimensions
-    assert "`diameter` and `radius` each need exactly one server-owned `entity_ref`" in normalized_dimensions
+    assert "`diameter` and `radius` each need exactly one server-owned `entity_refs`" in normalized_dimensions
     assert examples["solidworks_hole"] == {"type": "simple", "diameter": 5, "depth": 10}
     for kind in ("simple", "counterbore", "countersink"):
         assert f"`{kind}`" in descriptions["solidworks_hole"]

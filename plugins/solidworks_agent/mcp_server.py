@@ -638,7 +638,7 @@ def solidworks_add_dimensions(sketch_id: str, dimensions: list[dict[str, Any]]) 
     Example: `[{"type":"distance","value":10,"entity_refs":["entity-id"]}]`. Each item
     requires exactly `type`, positive `value`, and `entity_refs`, with optional two-number `[x,y]`
     `position`. `distance` needs one or two server-owned `entity_refs`; `diameter` and `radius`
-    each need exactly one server-owned `entity_ref`.
+    each need exactly one server-owned `entity_refs`.
     """
     return _tool(service.add_dimensions, sketch_id, dimensions)
 
