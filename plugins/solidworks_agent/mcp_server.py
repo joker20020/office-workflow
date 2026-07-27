@@ -739,8 +739,8 @@ def solidworks_pattern_feature(document_id: str, feature_ref: str, pattern: dict
     Example: `{"type":"linear","direction":"x","spacing":10,"count":3}`; linear
     `linear` requires `type`, `direction`, `spacing`, and `count`; direction is `x` or `y`, count
     is 2 through 100, and spacing uses DocumentRef.unit. `circular` requires `type`, `angle`, and
-    `count`, with angle in degrees. Topology changes: call solidworks_inspect_model after this
-    call before reusing any face, edge, or feature reference.
+    `count`, with angle in degrees and count is 2 through 100. Topology changes: call
+    solidworks_inspect_model after this call before reusing any face, edge, or feature reference.
     """
     return _tool(service.pattern_feature, document_id, feature_ref, pattern)
 

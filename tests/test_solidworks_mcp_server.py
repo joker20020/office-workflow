@@ -113,6 +113,8 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         assert f"`{unit}`" in descriptions["solidworks_new_part"]
     for plane in ("front plane", "top plane", "right plane"):
         assert f"`{plane}`" in descriptions["solidworks_create_sketch"]
+    mirror_planes = set(re.findall(r"`([^`]+ plane)`", descriptions["solidworks_mirror_feature"]))
+    assert mirror_planes == {"front plane", "top plane", "right plane"}
     for direction in ("forward", "reverse"):
         assert f"`{direction}`" in descriptions["solidworks_extrude"]
     for view in ("front", "top", "right", "isometric"):
@@ -164,6 +166,10 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
     }
     for field in ("type", "direction", "spacing", "count", "angle"):
         assert f"`{field}`" in descriptions["solidworks_pattern_feature"]
+    assert (
+        "`circular` requires `type`, `angle`, and `count`, with angle in degrees and count is "
+        "2 through 100"
+    ) in " ".join(descriptions["solidworks_pattern_feature"].split())
 
 
 class FakeAdapter:
