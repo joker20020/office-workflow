@@ -65,6 +65,20 @@ def _typed_model_document(document: Any) -> Any:
     return _model_document_class()(ole_object)
 
 
+@lru_cache(maxsize=None)
+def _solidworks_constant(name: str) -> int:
+    """Load a named swconst enum value from the SolidWorks 2023 typelib."""
+    import win32com.client  # type: ignore[import-not-found]
+
+    generated = win32com.client.gencache.EnsureModule(
+        "{83A33D31-27C5-11CE-BFD4-00400513BB57}", 0, 31, 0
+    )
+    value = getattr(generated, name, getattr(win32com.client.constants, name, None))
+    if value is None:
+        raise RuntimeError(f"SolidWorks 2023 constant is unavailable: {name}")
+    return int(value)
+
+
 @dataclass(frozen=True)
 class SketchContext:
     document: Any
@@ -473,7 +487,21 @@ class SolidWorksComAdapter:
                 raise RuntimeError("SolidWorks failed to create hole location point")
         finally:
             document.SketchManager.InsertSketch(True)
-        self._select_raw(document, point, False, 0)
+        selected = document.Extension.SelectByRay(
+            float(point.X),
+            float(point.Y),
+            float(point.Z),
+            0.0,
+            0.0,
+            1.0,
+            1e-7,
+            _solidworks_constant("swSelSKETCHPOINTS"),
+            False,
+            0,
+            0,
+        )
+        if not selected:
+            raise RuntimeError("SolidWorks could not select hole location point")
 
     def hole(
         self,
@@ -524,22 +552,16 @@ class SolidWorksComAdapter:
         try:
             for index, edge in enumerate(edges):
                 self._select_raw(document, edge, index > 0, 1)
-            feature = document.FeatureManager.FeatureFillet3(
-                2,
-                self._length(radius, unit),
-                0.0,
-                0.0,
-                0,
-                0,
-                0,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+            data = document.FeatureManager.CreateDefinition(_solidworks_constant("swFmFillet"))
+            if data is None:
+                raise RuntimeError("SolidWorks failed to create fillet feature data")
+            data.Initialize(_solidworks_constant("swConstRadiusFillet"))
+            data.ConicTypeForCrossSectionProfile = _solidworks_constant(
+                "swFeatureFilletCircular"
             )
+            data.DefaultRadius = self._length(radius, unit)
+            data.OverflowType = 0
+            feature = document.FeatureManager.CreateFeature(data)
             if not feature:
                 raise RuntimeError("SolidWorks failed to create fillet feature")
             return feature
@@ -589,23 +611,27 @@ class SolidWorksComAdapter:
             if pattern["type"] == "linear":
                 # Standard planes provide the two supported global pattern directions.
                 self._select_plane(document, "Right Plane" if pattern["direction"] == "x" else "Front Plane", 1)
-                created = document.FeatureManager.FeatureLinearPattern3(
-                    pattern["count"],
-                    self._length(pattern["spacing"], unit),
-                    1,
-                    0.0,
-                    False,
-                    False,
-                    "",
-                    "",
-                    False,
-                    False,
+                data = document.FeatureManager.CreateDefinition(
+                    _solidworks_constant("swFmLPattern")
                 )
+                if data is None:
+                    raise RuntimeError("SolidWorks failed to create linear pattern feature data")
+                data.D1TotalInstances = pattern["count"]
+                data.D1Spacing = self._length(pattern["spacing"], unit)
+                data.GeometryPattern = False
+                created = document.FeatureManager.CreateFeature(data)
             else:
                 self._select_plane(document, "Top Plane", 1)
-                created = document.FeatureManager.FeatureCircularPattern3(
-                    pattern["count"], math.radians(pattern["angle"]), False, "", False, True
+                data = document.FeatureManager.CreateDefinition(
+                    _solidworks_constant("swFmCirPattern")
                 )
+                if data is None:
+                    raise RuntimeError("SolidWorks failed to create circular pattern feature data")
+                data.TotalInstances = pattern["count"]
+                data.Spacing = math.radians(pattern["angle"])
+                data.EqualSpacing = True
+                data.GeometryPattern = False
+                created = document.FeatureManager.CreateFeature(data)
             if not created:
                 raise RuntimeError("SolidWorks failed to create pattern feature")
             return created

@@ -640,13 +640,16 @@ def test_adapter_converts_document_units_and_degrees_before_com_calls():
     assert events[-1][1] == (0.0254, 0.0508, 0.0, 0.0127)
 
 
-def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units():
+def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_selection(
+    monkeypatch,
+):
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     events = []
 
     class Selectable:
-        def __init__(self, name):
+        def __init__(self, name, x=0.1, y=0.2, z=0.3):
             self.name = name
+            self.X, self.Y, self.Z = x, y, z
 
         def Select4(self, append, data):  # noqa: N802
             events.append(("select4", self.name, append, getattr(data, "Mark", None)))
@@ -665,13 +668,27 @@ def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units()
             return Selectable("point")
 
     feature = object()
+    definitions = []
+
+    class FeatureData(SimpleNamespace):
+        def __init__(self, kind):
+            super().__init__(kind=kind)
+
+        def Initialize(self, value):  # noqa: N802
+            events.append(("initialize", self.kind, value))
+
+    def create_definition(kind):
+        data = FeatureData(kind)
+        definitions.append(data)
+        events.append(("definition", kind))
+        return data
+
     manager = SimpleNamespace(
         HoleWizard5=lambda *args: (events.append(("hole5", args)), feature)[1],
-        FeatureFillet3=lambda *args: (events.append(("fillet3", args)), feature)[1],
         InsertFeatureChamfer=lambda *args: (events.append(("chamfer", args)), feature)[1],
         InsertMirrorFeature2=lambda *args: (events.append(("mirror2", args)), feature)[1],
-        FeatureLinearPattern3=lambda *args: (events.append(("linear3", args)), feature)[1],
-        FeatureCircularPattern3=lambda *args: (events.append(("circular3", args)), feature)[1],
+        CreateDefinition=create_definition,
+        CreateFeature=lambda data: (events.append(("create-feature", data.kind)), feature)[1],
     )
     document = SimpleNamespace(
         ClearSelection2=lambda all_items: events.append(("clear", all_items)),
@@ -681,7 +698,8 @@ def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units()
             SelectByID2=lambda name, entity_type, *args: events.append(
                 ("plane", name, entity_type, args[4])
             )
-            or True
+            or True,
+            SelectByRay=lambda *args: events.append(("ray", args)) or True,
         ),
         FeatureManager=manager,
     )
@@ -690,6 +708,17 @@ def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units()
     edge = Selectable("edge")
     seed = Selectable("seed")
     adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    constants = {
+        "swFmFillet": "fillet",
+        "swFmLPattern": "linear",
+        "swFmCirPattern": "circular",
+        "swConstRadiusFillet": "constant-radius",
+        "swFeatureFilletCircular": "circular-profile",
+        "swSelSKETCHPOINTS": "sketch-point",
+    }
+    monkeypatch.setattr(
+        adapter_module, "_solidworks_constant", constants.__getitem__, raising=False
+    )
 
     adapter.hole(
         document,
@@ -712,13 +741,13 @@ def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units()
 
     assert ("point", 0.01, 0.02, 0.0) in events
     assert ("select4", "face", False, 0) in events
-    assert ("select4", "point", False, 0) in events
     assert ("select4", "edge", False, 1) in events
     assert ("select4", "seed", False, 1) in events
     assert ("select4", "seed", False, 4) in events
     assert ("plane", "Front Plane", "PLANE", 2) in events
     assert ("plane", "Right Plane", "PLANE", 1) in events
     assert ("plane", "Top Plane", "PLANE", 1) in events
+    assert ("ray", (0.1, 0.2, 0.3, 0.0, 0.0, 1.0, 1e-7, "sketch-point", False, 0, 0)) in events
     assert next(item[1] for item in events if item[0] == "hole5")[5:10] == pytest.approx(
         (
         0.005,
@@ -728,17 +757,27 @@ def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units()
         0.003,
         )
     )
-    assert next(item[1] for item in events if item[0] == "fillet3")[1] == 0.002
+    assert [item[1] for item in events if item[0] == "definition"] == [
+        "fillet",
+        "linear",
+        "circular",
+    ]
+    assert ("initialize", "fillet", "constant-radius") in events
+    fillet_data, linear_data, circular_data = definitions
+    assert fillet_data.DefaultRadius == pytest.approx(0.002)
+    assert fillet_data.ConicTypeForCrossSectionProfile == "circular-profile"
+    assert linear_data.D1Spacing == pytest.approx(0.008)
+    assert linear_data.D1TotalInstances == 3
+    assert circular_data.Spacing == pytest.approx(math.pi)
+    assert circular_data.TotalInstances == 4
     assert next(item[1] for item in events if item[0] == "chamfer")[2:4] == pytest.approx(
         (0.003, math.pi / 4)
     )
     assert next(item[1] for item in events if item[0] == "mirror2") == (False, False, False, False, 0)
-    assert next(item[1] for item in events if item[0] == "linear3")[1] == 0.008
-    assert next(item[1] for item in events if item[0] == "circular3")[1] == pytest.approx(math.pi)
     assert events.count(("clear", True)) == 12
 
 
-def test_adapter_feature_selection_is_cleared_when_com_call_raises():
+def test_adapter_feature_selection_is_cleared_when_com_call_raises(monkeypatch):
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     clears = []
     edge = SimpleNamespace(Select4=lambda append, data: True)
@@ -746,9 +785,15 @@ def test_adapter_feature_selection_is_cleared_when_com_call_raises():
         ClearSelection2=lambda all_items: clears.append(all_items),
         SelectionManager=SimpleNamespace(CreateSelectData=lambda: SimpleNamespace()),
         FeatureManager=SimpleNamespace(
-            FeatureFillet3=lambda *args: (_ for _ in ()).throw(RuntimeError("boom"))
+            CreateDefinition=lambda _: SimpleNamespace(
+                Initialize=lambda _: None,
+                __setattr__=object.__setattr__,
+            ),
+            CreateFeature=lambda _: (_ for _ in ()).throw(RuntimeError("boom")),
         ),
     )
+
+    monkeypatch.setattr(adapter_module, "_solidworks_constant", lambda _: 1, raising=False)
 
     with pytest.raises(RuntimeError, match="boom"):
         adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace()).fillet(
