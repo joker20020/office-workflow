@@ -2,6 +2,7 @@
 """日志模块测试"""
 
 import logging
+import sys
 import threading
 import time
 from pathlib import Path
@@ -50,6 +51,24 @@ class TestGetLogger:
         # 验证日志文件创建
         log_files = list(tmp_path.glob("*.log"))
         assert len(log_files) > 0
+
+    def test_console_logger_uses_stderr_when_stdio_protocol_is_active(self, monkeypatch):
+        monkeypatch.setenv("OFFICE_LOG_STREAM", "stderr")
+        logger = get_logger(
+            "test.mcp.stderr.stream",
+            log_to_file=False,
+            log_to_console=True,
+        )
+
+        console_handlers = [
+            handler
+            for handler in logger.handlers
+            if isinstance(handler, logging.StreamHandler)
+            and not isinstance(handler, logging.FileHandler)
+        ]
+
+        assert len(console_handlers) == 1
+        assert console_handlers[0].stream is sys.stderr
 
     def test_file_handler_blocks_until_lock_is_released(self, tmp_path: Path):
         handler = logger_module.BlockingRotatingFileHandler(

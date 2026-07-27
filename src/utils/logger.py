@@ -162,7 +162,12 @@ def get_logger(
 
     # 控制台处理器
     if log_to_console:
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_stream = (
+            sys.stderr
+            if os.environ.get("OFFICE_LOG_STREAM", "").casefold() == "stderr"
+            else sys.stdout
+        )
+        console_handler = logging.StreamHandler(console_stream)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)

@@ -26,6 +26,8 @@ from agentscope.mcp import MCPClient, StdioMCPConfig
 from agentscope.message import AssistantMsg, TextBlock, ToolResultState, UserMsg
 from agentscope.model import OpenAIChatModel
 from agentscope.tool import ToolChunk, Toolkit, ToolResponse
+from agentscope.permission import PermissionMode, PermissionContext
+from agentscope.state import AgentState
 
 from src.agent.agent_integration import encode_subagent_event
 from src.core.artifact_context import current_artifact_context
@@ -192,11 +194,11 @@ def _verify_persisted_artifacts(
 def _build_model() -> Any:
     credential = OpenAICredential(
         api_key=os.environ["LLM_API_KEY"],
-        base_url=os.environ.get("LLM_BASE_URL") or "https://api.openai.com/v1",
+        base_url=os.environ.get("LLM_BASE_URL") or "https://api.deepseek.com",
     )
     return OpenAIChatModel(
         credential=credential,
-        model=os.environ.get("LLM_MODEL_NAME", "gpt-4o"),
+        model=os.environ.get("LLM_MODEL_NAME", "deepseek-v4-pro"),
         stream=True,
     )
 
@@ -278,11 +280,11 @@ async def _consume_reply_stream(agent: Any, inputs: Any) -> AssistantMsg:
 
 
 class SolidWorksAgentTools:
-    """Public SolidWorks subagent tools."""
-
     @staticmethod
     def _skill_path() -> str:
         return str(Path(__file__).with_name("skills") / "solidworks-feature-modeling")
+
+    """Public SolidWorks subagent tools."""
 
     def tool_solidworks_model(
         self,
@@ -346,6 +348,13 @@ class SolidWorksAgentTools:
         child_env["SOLIDWORKS_PROJECT_ROOT"] = str(project_root)
         child_env["SOLIDWORKS_DATABASE_PATH"] = str(Path(database_path).resolve())
         child_env["SOLIDWORKS_TOOL_CALL_ID"] = operation_id
+        # MCP stdio is a UTF-8 protocol.  On Windows a child Python process can
+        # otherwise inherit the active ANSI code page and emit localized
+        # SolidWorks/MCP text that the client cannot decode.
+        child_env["PYTHONUTF8"] = "1"
+        child_env["PYTHONIOENCODING"] = "utf-8"
+        # stdout is reserved exclusively for JSON-RPC messages in stdio mode.
+        child_env["OFFICE_LOG_STREAM"] = "stderr"
         config = StdioMCPConfig(
             command=sys.executable,
             args=["-m", "plugins.solidworks_agent.mcp_server"],
@@ -368,12 +377,18 @@ class SolidWorksAgentTools:
                 return _failure(f"Unable to connect to the project-local SolidWorks MCP: {exc}")
 
             toolkit = Toolkit(mcps=[client], skills_or_loaders=[self._skill_path()])
+            solidworks_state = AgentState(
+                        permission_context=PermissionContext(
+                            mode=PermissionMode.BYPASS
+                        )
+                    )
             agent = Agent(
                 name="SolidWorksAgent",
                 system_prompt=SYSTEM_PROMPT,
                 model=_build_model(),
                 toolkit=toolkit,
                 react_config=ReActConfig(max_iters=60),
+                state=solidworks_state
             )
             response = await _consume_reply_stream(
                 agent,

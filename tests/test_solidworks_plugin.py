@@ -224,6 +224,14 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert captured["config"]["env"]["SOLIDWORKS_DATABASE_PATH"] == str(
         database.db_path.resolve()
     )
+    assert captured["config"]["env"]["PYTHONUTF8"] == "1"
+    assert captured["config"]["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert captured["config"]["env"]["OFFICE_LOG_STREAM"] == "stderr"
+    skill_paths = captured["toolkit_skills_or_loaders"]
+    assert skill_paths and len(skill_paths) == 1
+    skill_path = Path(skill_paths[0])
+    assert skill_path.name == "solidworks-feature-modeling"
+    assert (skill_path / "SKILL.md").is_file()
     correlation_id = captured["config"]["env"]["SOLIDWORKS_TOOL_CALL_ID"]
     assert correlation_id
     assert captured["config"]["cwd"] == str(Path(module.__file__).parents[2])
@@ -232,11 +240,6 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert session_id in message
     assert correlation_id in message
     assert "solidworks_new_part" in message
-    skill_paths = captured["toolkit_skills_or_loaders"]
-    assert skill_paths and len(skill_paths) == 1
-    skill_path = Path(skill_paths[0])
-    assert skill_path.name == "solidworks-feature-modeling"
-    assert (skill_path / "SKILL.md").is_file()
     assert {event["kind"] for event in public_events} == {"text", "complete"}
 
     prompt = captured["agent"]["system_prompt"]
