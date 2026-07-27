@@ -649,7 +649,22 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     class Selectable:
         def __init__(self, name, x=0.1, y=0.2, z=0.3):
             self.name = name
-            self.X, self.Y, self.Z = x, y, z
+            self._coordinates = (x, y, z)
+
+        @property
+        def X(self):  # noqa: N802
+            events.append(("model-coordinate", self.name, "X", self._coordinates[0]))
+            return self._coordinates[0]
+
+        @property
+        def Y(self):  # noqa: N802
+            events.append(("model-coordinate", self.name, "Y", self._coordinates[1]))
+            return self._coordinates[1]
+
+        @property
+        def Z(self):  # noqa: N802
+            events.append(("model-coordinate", self.name, "Z", self._coordinates[2]))
+            return self._coordinates[2]
 
         def Select4(self, append, data):  # noqa: N802
             events.append(("select4", self.name, append, getattr(data, "Mark", None)))
@@ -665,7 +680,9 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
 
         def CreatePoint(self, x, y, z):  # noqa: N802
             events.append(("point", x, y, z))
-            return Selectable("point")
+            # A face-local sketch point is intentionally mapped to nontrivial
+            # model coordinates, as a rotated/translated planar face would be.
+            return Selectable("point", x + 0.37, y - 0.41, z + 0.83)
 
     feature = object()
     definitions = []
@@ -753,7 +770,14 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     assert ("plane", "Front Plane", "PLANE", 2) in events
     assert ("plane", "Right Plane", "PLANE", 1) in events
     assert ("plane", "Top Plane", "PLANE", 1) in events
-    assert ("ray", (0.1, 0.2, 0.3, 0.0, 0.0, 1.0, 1e-7, "face", False, 0, 0)) in events
+    ray_args = next(item[1] for item in events if item[0] == "ray")
+    assert ray_args[:3] == pytest.approx((0.38, -0.39, 0.83))
+    assert ray_args[3:] == (0.0, 0.0, 1.0, 1e-7, "face", False, 0, 0)
+    assert [item for item in events if item[0] == "model-coordinate"] == [
+        ("model-coordinate", "point", "X", pytest.approx(0.38)),
+        ("model-coordinate", "point", "Y", pytest.approx(-0.39)),
+        ("model-coordinate", "point", "Z", pytest.approx(0.83)),
+    ]
     assert next(item[1] for item in events if item[0] == "hole5")[5:10] == pytest.approx(
         (
         0.005,

@@ -472,6 +472,19 @@ class SolidWorksComAdapter:
                     return
         raise RuntimeError(f"SolidWorks could not select plane: {plane}")
 
+    @staticmethod
+    def _sketch_point_model_coordinates(point: Any) -> tuple[float, float, float]:
+        """Return ISketchPoint X/Y/Z model-space coordinates for SelectByRay.
+
+        SolidWorks exposes ``ISketchPoint.X``, ``Y``, and ``Z`` in model
+        coordinates even when the point was created while editing a sketch.
+        SelectByRay requires its origin in that same model coordinate system.
+        """
+        coordinates = tuple(float(getattr(point, axis)) for axis in ("X", "Y", "Z"))
+        if not all(math.isfinite(value) for value in coordinates):
+            raise RuntimeError("SolidWorks returned invalid model coordinates for hole location")
+        return coordinates
+
     def _create_hole_location(
         self, document: Any, face: Any, position: list[float], unit: str
     ) -> None:
@@ -490,11 +503,12 @@ class SolidWorksComAdapter:
         normal = self._com_value(face, "Normal", None)
         if not isinstance(normal, (tuple, list)) or len(normal) != 3:
             raise RuntimeError("SolidWorks returned no planar face normal")
+        world_x, world_y, world_z = self._sketch_point_model_coordinates(point)
         document.ClearSelection2(True)
         selected = document.Extension.SelectByRay(
-            float(point.X),
-            float(point.Y),
-            float(point.Z),
+            world_x,
+            world_y,
+            world_z,
             float(normal[0]),
             float(normal[1]),
             float(normal[2]),
