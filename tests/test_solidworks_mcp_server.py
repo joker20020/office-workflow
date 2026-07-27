@@ -1,7 +1,9 @@
 import asyncio
 import importlib
 import inspect
+import json
 import math
+import re
 import sys
 from dataclasses import is_dataclass
 from pathlib import Path
@@ -85,6 +87,7 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         "solidworks_pattern_feature",
     ):
         assert "server-owned" in descriptions[name]
+    topology_safety = "after this call before reusing any face, edge, or feature reference"
     for name in (
         "solidworks_extrude",
         "solidworks_revolve",
@@ -95,7 +98,7 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         "solidworks_mirror_feature",
         "solidworks_pattern_feature",
     ):
-        assert "solidworks_inspect_model" in descriptions[name]
+        assert topology_safety in " ".join(descriptions[name].split())
     for name in (
         "solidworks_add_sketch_geometry",
         "solidworks_add_dimensions",
@@ -106,9 +109,21 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         assert "si metres" in descriptions[name]
     assert "degrees" in descriptions["solidworks_revolve"]
     assert "com radians" in descriptions["solidworks_revolve"]
+    for unit in ("mm", "cm", "m", "inch"):
+        assert f"`{unit}`" in descriptions["solidworks_new_part"]
+    for plane in ("front plane", "top plane", "right plane"):
+        assert f"`{plane}`" in descriptions["solidworks_create_sketch"]
+    for direction in ("forward", "reverse"):
+        assert f"`{direction}`" in descriptions["solidworks_extrude"]
+    for view in ("front", "top", "right", "isometric"):
+        assert f"`{view}`" in descriptions["solidworks_capture_preview"]
+    for quality in ("coarse", "medium", "fine"):
+        assert f'"quality":"{quality}"' in descriptions["solidworks_export_stl"]
     for name in ("solidworks_save_model", "solidworks_export_step", "solidworks_export_stl", "solidworks_capture_preview"):
         assert "server-controlled" in descriptions[name]
         assert "artifact" in descriptions[name]
+
+    examples = {}
     for name in (
         "solidworks_add_sketch_geometry",
         "solidworks_add_dimensions",
@@ -116,7 +131,39 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
         "solidworks_chamfer",
         "solidworks_pattern_feature",
     ):
-        assert "{" in descriptions[name]
+        match = re.search(
+            r"Example:\s*`(?P<example>\[.*?\]|\{.*?\})`", tools[name].description, re.DOTALL
+        )
+        assert match, f"{name} must publish a JSON-shaped example"
+        examples[name] = json.loads(match.group("example"))
+
+    assert examples["solidworks_add_sketch_geometry"] == [
+        {"type": "line", "start": [0, 0], "end": [10, 0]}
+    ]
+    assert all(f"`{kind}`" in descriptions["solidworks_add_sketch_geometry"] for kind in (
+        "line", "circle", "center_rectangle", "three_point_arc"
+    ))
+    assert examples["solidworks_add_dimensions"] == [
+        {"type": "distance", "value": 10, "entity_refs": ["entity-id"]}
+    ]
+    assert all(f"`{kind}`" in descriptions["solidworks_add_dimensions"] for kind in (
+        "distance", "diameter", "radius"
+    ))
+    assert examples["solidworks_hole"] == {"type": "simple", "diameter": 5, "depth": 10}
+    for kind in ("simple", "counterbore", "countersink"):
+        assert f"`{kind}`" in descriptions["solidworks_hole"]
+    for field in ("counterbore_diameter", "counterbore_depth", "countersink_diameter", "angle"):
+        assert f"`{field}`" in descriptions["solidworks_hole"]
+    assert examples["solidworks_chamfer"] == {
+        "type": "distance_angle", "distance": 2, "angle": 45
+    }
+    for field in ("type", "distance", "angle"):
+        assert f"`{field}`" in descriptions["solidworks_chamfer"]
+    assert examples["solidworks_pattern_feature"] == {
+        "type": "linear", "direction": "x", "spacing": 10, "count": 3
+    }
+    for field in ("type", "direction", "spacing", "count", "angle"):
+        assert f"`{field}`" in descriptions["solidworks_pattern_feature"]
 
 
 class FakeAdapter:

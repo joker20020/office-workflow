@@ -688,8 +688,10 @@ def solidworks_hole(
 
     Position and sizes use DocumentRef.unit; countersink angles are degrees. Example:
     `{"type":"simple","diameter":5,"depth":10}` with `position` `[20,15]`; types are
-    `simple`, `counterbore`, and `countersink`. Topology changes: call solidworks_inspect_model
-    after this call before reusing any face, edge, or feature reference.
+    `simple` requires `type`, `diameter`, and `depth`; `counterbore` also requires
+    `counterbore_diameter` and `counterbore_depth`; `countersink` also requires
+    `countersink_diameter` and `angle`. Topology changes: call solidworks_inspect_model after
+    this call before reusing any face, edge, or feature reference.
     """
     return _tool(service.hole, document_id, face_ref, specification, position)
 
@@ -711,7 +713,8 @@ def solidworks_chamfer(
 ) -> str:
     """Chamfer inspected, server-owned edges in a server-owned document with distance and angle.
 
-    Example: `{"type":"distance_angle","distance":2,"angle":45}`. Distance uses
+    Example: `{"type":"distance_angle","distance":2,"angle":45}`. Only
+    `distance_angle` with exactly `type`, `distance`, and `angle` is valid; distance uses
     DocumentRef.unit and angle uses degrees. Topology changes: call solidworks_inspect_model
     after this call before reusing any face, edge, or feature reference.
     """
@@ -734,9 +737,10 @@ def solidworks_pattern_feature(document_id: str, feature_ref: str, pattern: dict
     """Pattern an inspected, server-owned feature in its server-owned document.
 
     Example: `{"type":"linear","direction":"x","spacing":10,"count":3}`; linear
-    direction is `x` or `y`, count is 2 through 100, spacing uses DocumentRef.unit, and circular
-    angles use degrees. Topology changes: call solidworks_inspect_model after this call before
-    reusing any face, edge, or feature reference.
+    `linear` requires `type`, `direction`, `spacing`, and `count`; direction is `x` or `y`, count
+    is 2 through 100, and spacing uses DocumentRef.unit. `circular` requires `type`, `angle`, and
+    `count`, with angle in degrees. Topology changes: call solidworks_inspect_model after this
+    call before reusing any face, edge, or feature reference.
     """
     return _tool(service.pattern_feature, document_id, feature_ref, pattern)
 
