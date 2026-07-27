@@ -69,21 +69,54 @@ def test_public_functions_and_fastmcp_schema_have_exact_confirmed_signatures():
         assert list(tools[name].inputSchema.get("properties", {})) == parameters
 
 
-def test_mcp_descriptions_publish_length_and_angle_unit_contracts():
+def test_mcp_descriptions_publish_model_facing_workflow_contracts():
     module = _module()
     tools = {tool.name: tool for tool in asyncio.run(module.mcp.list_tools())}
+    descriptions = {name: tools[name].description.casefold() for name in EXPECTED_SIGNATURES}
+
+    assert all(len(description) >= 80 for description in descriptions.values())
+    for name in (
+        "solidworks_create_sketch_on_face",
+        "solidworks_add_dimensions",
+        "solidworks_hole",
+        "solidworks_fillet",
+        "solidworks_chamfer",
+        "solidworks_mirror_feature",
+        "solidworks_pattern_feature",
+    ):
+        assert "server-owned" in descriptions[name]
+    for name in (
+        "solidworks_extrude",
+        "solidworks_revolve",
+        "solidworks_cut_extrude",
+        "solidworks_hole",
+        "solidworks_fillet",
+        "solidworks_chamfer",
+        "solidworks_mirror_feature",
+        "solidworks_pattern_feature",
+    ):
+        assert "solidworks_inspect_model" in descriptions[name]
     for name in (
         "solidworks_add_sketch_geometry",
         "solidworks_add_dimensions",
         "solidworks_extrude",
         "solidworks_cut_extrude",
     ):
-        description = tools[name].description.casefold()
-        assert "documentref.unit" in description
-        assert "si metres" in description
-    revolve = tools["solidworks_revolve"].description.casefold()
-    assert "degrees" in revolve
-    assert "com radians" in revolve
+        assert "documentref.unit" in descriptions[name]
+        assert "si metres" in descriptions[name]
+    assert "degrees" in descriptions["solidworks_revolve"]
+    assert "com radians" in descriptions["solidworks_revolve"]
+    for name in ("solidworks_save_model", "solidworks_export_step", "solidworks_export_stl", "solidworks_capture_preview"):
+        assert "server-controlled" in descriptions[name]
+        assert "artifact" in descriptions[name]
+    for name in (
+        "solidworks_add_sketch_geometry",
+        "solidworks_add_dimensions",
+        "solidworks_hole",
+        "solidworks_chamfer",
+        "solidworks_pattern_feature",
+    ):
+        assert "{" in descriptions[name]
 
 
 class FakeAdapter:

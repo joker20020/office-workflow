@@ -578,57 +578,105 @@ def _tool(method, *args):
 
 @mcp.tool()
 def solidworks_status() -> str:
+    """Check the configured SolidWorks connection before creating or changing a model.
+
+    Call this first when a session has not already returned a successful status. This tool
+    exposes only constrained server connection state, never raw COM access.
+    """
     return _tool(service.status)
 
 
 @mcp.tool()
 def solidworks_new_part(session_id: str, name: str, unit: str) -> str:
-    """Create a part whose DocumentRef.unit defines all later numeric length inputs."""
+    """Create a server-owned part and return its DocumentRef for the current session.
+
+    Start with a successful status and provide a safe model name. `unit` is `mm`, `cm`, `m`, or
+    `inch`; the returned DocumentRef.unit defines all later numeric length inputs.
+    """
     return _tool(service.new_part, session_id, name, unit)
 
 
 @mcp.tool()
 def solidworks_create_sketch(document_id: str, plane: str) -> str:
+    """Create an open, server-owned sketch on a server-owned document's standard plane.
+
+    Use the DocumentRef returned by solidworks_new_part. `plane` is `Front Plane`, `Top Plane`,
+    or `Right Plane`; add geometry and dimensions before closing the sketch.
+    """
     return _tool(service.create_sketch, document_id, plane)
 
 
 @mcp.tool()
 def solidworks_create_sketch_on_face(document_id: str, face_ref: str) -> str:
+    """Create an open sketch on a server-owned face belonging to the server-owned document.
+
+    Obtain `face_ref` from solidworks_inspect_model after the topology that created it. Add
+    geometry and dimensions, then close the returned server-owned sketch before a feature.
+    """
     return _tool(service.create_sketch_on_face, document_id, face_ref)
 
 
 @mcp.tool()
 def solidworks_add_sketch_geometry(sketch_id: str, geometry: list[dict[str, Any]]) -> str:
-    """Add coordinates/radii in DocumentRef.unit; the adapter converts them to SI metres."""
+    """Add geometry to an open, server-owned sketch using DocumentRef.unit coordinates.
+
+    The adapter converts lengths to SI metres. Example: `[{"type":"line","start":[0,0],
+    "end":[10,0]}]`; types are `line`, `circle`, `center_rectangle`, and `three_point_arc`.
+    Keep the returned server-owned entity references for dimensions.
+    """
     return _tool(service.add_sketch_geometry, sketch_id, geometry)
 
 
 @mcp.tool()
 def solidworks_add_dimensions(sketch_id: str, dimensions: list[dict[str, Any]]) -> str:
-    """Add values/positions in DocumentRef.unit; the adapter converts them to SI metres."""
+    """Dimension an open, server-owned sketch using its server-owned entity references.
+
+    Values and optional positions use DocumentRef.unit; the adapter converts them to SI metres.
+    Example: `[{"type":"distance","value":10,"entity_refs":["entity-id"]}]`;
+    types are `distance`, `diameter`, or `radius`.
+    """
     return _tool(service.add_dimensions, sketch_id, dimensions)
 
 
 @mcp.tool()
 def solidworks_close_sketch(sketch_id: str) -> str:
+    """Close an open, server-owned sketch after its intended geometry and dimensions exist.
+
+    Use the returned closed sketch reference with an extrude, revolve, or cut operation; a
+    closed sketch cannot accept more geometry or dimensions through this constrained server.
+    """
     return _tool(service.close_sketch, sketch_id)
 
 
 @mcp.tool()
 def solidworks_extrude(document_id: str, sketch_id: str, depth: float, direction: str) -> str:
-    """Extrude depth is in DocumentRef.unit and is converted to SI metres before COM."""
+    """Create an extrude from a closed, server-owned sketch in its server-owned document.
+
+    `depth` uses DocumentRef.unit and converts to SI metres before COM; `direction` is `forward`
+    or `reverse`. Topology changes: call solidworks_inspect_model after this call before
+    reusing any face, edge, or feature reference.
+    """
     return _tool(service.extrude, document_id, sketch_id, depth, direction)
 
 
 @mcp.tool()
 def solidworks_revolve(document_id: str, sketch_id: str, axis: str, angle: float) -> str:
-    """Revolve angle is degrees and is converted to COM radians by the adapter."""
+    """Create a revolve from a closed, server-owned sketch about its server-owned entity axis.
+
+    `angle` is degrees and the adapter converts it to COM radians. The axis must belong to the
+    sketch. Topology changes: call solidworks_inspect_model after this call before reusing any
+    face, edge, or feature reference.
+    """
     return _tool(service.revolve, document_id, sketch_id, axis, angle)
 
 
 @mcp.tool()
 def solidworks_cut_extrude(document_id: str, sketch_id: str, depth: float) -> str:
-    """Cut depth is in DocumentRef.unit and is converted to SI metres before COM."""
+    """Cut-extrude a closed, server-owned sketch through its server-owned document.
+
+    `depth` uses DocumentRef.unit and converts to SI metres before COM. Topology changes: call
+    solidworks_inspect_model after this call before reusing any face, edge, or feature reference.
+    """
     return _tool(service.cut_extrude, document_id, sketch_id, depth)
 
 
@@ -636,13 +684,24 @@ def solidworks_cut_extrude(document_id: str, sketch_id: str, depth: float) -> st
 def solidworks_hole(
     document_id: str, face_ref: str, specification: dict[str, Any], position: list[float]
 ) -> str:
-    """Hole positions and sizes use DocumentRef.unit; angles are degrees."""
+    """Create a blind hole on an inspected, server-owned planar face of a server-owned document.
+
+    Position and sizes use DocumentRef.unit; countersink angles are degrees. Example:
+    `{"type":"simple","diameter":5,"depth":10}` with `position` `[20,15]`; types are
+    `simple`, `counterbore`, and `countersink`. Topology changes: call solidworks_inspect_model
+    after this call before reusing any face, edge, or feature reference.
+    """
     return _tool(service.hole, document_id, face_ref, specification, position)
 
 
 @mcp.tool()
 def solidworks_fillet(document_id: str, edge_refs: list[str], radius: float) -> str:
-    """Fillet radius uses DocumentRef.unit."""
+    """Fillet one or more inspected, server-owned edges in a server-owned document.
+
+    `radius` uses DocumentRef.unit. Obtain edge references from solidworks_inspect_model.
+    Topology changes: call solidworks_inspect_model after this call before reusing any face,
+    edge, or feature reference.
+    """
     return _tool(service.fillet, document_id, edge_refs, radius)
 
 
@@ -650,43 +709,86 @@ def solidworks_fillet(document_id: str, edge_refs: list[str], radius: float) -> 
 def solidworks_chamfer(
     document_id: str, edge_refs: list[str], specification: dict[str, Any]
 ) -> str:
-    """Chamfer distance uses DocumentRef.unit and angle uses degrees."""
+    """Chamfer inspected, server-owned edges in a server-owned document with distance and angle.
+
+    Example: `{"type":"distance_angle","distance":2,"angle":45}`. Distance uses
+    DocumentRef.unit and angle uses degrees. Topology changes: call solidworks_inspect_model
+    after this call before reusing any face, edge, or feature reference.
+    """
     return _tool(service.chamfer, document_id, edge_refs, specification)
 
 
 @mcp.tool()
 def solidworks_mirror_feature(document_id: str, feature_refs: list[str], plane: str) -> str:
+    """Mirror inspected, server-owned features across a standard plane in their document.
+
+    Get feature refs from solidworks_inspect_model; `plane` is `Front Plane`, `Top Plane`, or
+    `Right Plane`. Topology changes: call solidworks_inspect_model after this call before
+    reusing any face, edge, or feature reference.
+    """
     return _tool(service.mirror_feature, document_id, feature_refs, plane)
 
 
 @mcp.tool()
 def solidworks_pattern_feature(document_id: str, feature_ref: str, pattern: dict[str, Any]) -> str:
-    """Pattern spacing uses DocumentRef.unit and circular angle uses degrees."""
+    """Pattern an inspected, server-owned feature in its server-owned document.
+
+    Example: `{"type":"linear","direction":"x","spacing":10,"count":3}`; linear
+    direction is `x` or `y`, count is 2 through 100, spacing uses DocumentRef.unit, and circular
+    angles use degrees. Topology changes: call solidworks_inspect_model after this call before
+    reusing any face, edge, or feature reference.
+    """
     return _tool(service.pattern_feature, document_id, feature_ref, pattern)
 
 
 @mcp.tool()
 def solidworks_inspect_model(document_id: str) -> str:
+    """Inspect a server-owned document and return current server-owned feature, face, and edge refs.
+
+    Call after every topology-changing operation and before using a face, edge, or feature input;
+    prior references may no longer describe the current model topology.
+    """
     return _tool(service.inspect_model, document_id)
 
 
 @mcp.tool()
 def solidworks_save_model(document_id: str) -> str:
+    """Save a server-owned document as a server-controlled native artifact.
+
+    The server selects, validates, and confirms the output path inside its data boundary; callers
+    cannot supply a filesystem path. Use the generated artifact path returned in the result.
+    """
     return _tool(service.save_model, document_id)
 
 
 @mcp.tool()
 def solidworks_export_step(document_id: str) -> str:
+    """Export a server-owned document as a server-controlled STEP artifact.
+
+    The server selects, validates, and confirms the output path inside its data boundary; callers
+    cannot supply a filesystem path. Use the generated artifact path returned in the result.
+    """
     return _tool(service.export_step, document_id)
 
 
 @mcp.tool()
 def solidworks_export_stl(document_id: str, mesh_options: dict[str, Any]) -> str:
+    """Export a server-owned document as a server-controlled STL artifact with mesh quality.
+
+    Pass `{"quality":"coarse"}`, `{"quality":"medium"}`, or `{"quality":"fine"}`. The
+    server selects, validates, and confirms the output path inside its data boundary; callers
+    cannot supply a filesystem path.
+    """
     return _tool(service.export_stl, document_id, mesh_options)
 
 
 @mcp.tool()
 def solidworks_capture_preview(document_id: str, view: str) -> str:
+    """Capture a server-owned document as a server-controlled PNG preview artifact.
+
+    `view` is `front`, `top`, `right`, or `isometric`. The server selects, validates, and
+    confirms the output path inside its data boundary; callers cannot supply a filesystem path.
+    """
     return _tool(service.capture_preview, document_id, view)
 
 
