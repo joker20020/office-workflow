@@ -487,21 +487,30 @@ class SolidWorksComAdapter:
                 raise RuntimeError("SolidWorks failed to create hole location point")
         finally:
             document.SketchManager.InsertSketch(True)
+        normal = self._com_value(face, "Normal", None)
+        if not isinstance(normal, (tuple, list)) or len(normal) != 3:
+            raise RuntimeError("SolidWorks returned no planar face normal")
+        document.ClearSelection2(True)
         selected = document.Extension.SelectByRay(
             float(point.X),
             float(point.Y),
             float(point.Z),
-            0.0,
-            0.0,
-            1.0,
+            float(normal[0]),
+            float(normal[1]),
+            float(normal[2]),
             1e-7,
-            _solidworks_constant("swSelSKETCHPOINTS"),
+            _solidworks_constant("swSelFACES"),
             False,
             0,
             0,
         )
         if not selected:
-            raise RuntimeError("SolidWorks could not select hole location point")
+            raise RuntimeError("SolidWorks could not select hole location face")
+        selected_face = document.SelectionManager.GetSelectedObject6(1, -1)
+        if self.persistent_reference_key(document, selected_face) != self.persistent_reference_key(
+            document, face
+        ):
+            raise RuntimeError("hole location ray did not select the owned face")
 
     def hole(
         self,

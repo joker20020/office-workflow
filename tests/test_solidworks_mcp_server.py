@@ -699,12 +699,17 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
                 ("plane", name, entity_type, args[4])
             )
             or True,
-            SelectByRay=lambda *args: events.append(("ray", args)) or True,
+            SelectByRay=lambda *args: events.append(("ray", args))
+            or (args[7] == "face" and args[9] == 0),
+            GetPersistReference3=lambda raw: raw.persist_key,
         ),
         FeatureManager=manager,
     )
     face = Selectable("face")
     face.GetSurface = lambda: SimpleNamespace(IsPlane=lambda: True)
+    face.Normal = (0.0, 0.0, 1.0)
+    face.persist_key = b"face"
+    document.SelectionManager.GetSelectedObject6 = lambda *_: face
     edge = Selectable("edge")
     seed = Selectable("seed")
     adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
@@ -715,6 +720,7 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
         "swConstRadiusFillet": "constant-radius",
         "swFeatureFilletCircular": "circular-profile",
         "swSelSKETCHPOINTS": "sketch-point",
+        "swSelFACES": "face",
     }
     monkeypatch.setattr(
         adapter_module, "_solidworks_constant", constants.__getitem__, raising=False
@@ -747,7 +753,7 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     assert ("plane", "Front Plane", "PLANE", 2) in events
     assert ("plane", "Right Plane", "PLANE", 1) in events
     assert ("plane", "Top Plane", "PLANE", 1) in events
-    assert ("ray", (0.1, 0.2, 0.3, 0.0, 0.0, 1.0, 1e-7, "sketch-point", False, 0, 0)) in events
+    assert ("ray", (0.1, 0.2, 0.3, 0.0, 0.0, 1.0, 1e-7, "face", False, 0, 0)) in events
     assert next(item[1] for item in events if item[0] == "hole5")[5:10] == pytest.approx(
         (
         0.005,
@@ -774,7 +780,7 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
         (0.003, math.pi / 4)
     )
     assert next(item[1] for item in events if item[0] == "mirror2") == (False, False, False, False, 0)
-    assert events.count(("clear", True)) == 12
+    assert events.count(("clear", True)) == 13
 
 
 def test_adapter_feature_selection_is_cleared_when_com_call_raises(monkeypatch):
