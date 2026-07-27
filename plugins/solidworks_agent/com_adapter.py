@@ -14,6 +14,15 @@ from typing import Any, Protocol
 from .types import ConnectionResult
 
 
+_SOLIDWORKS_2023_CONSTANT_FALLBACKS = {
+    # swconst.tlb is installed separately from the SldWorks COM typelib and
+    # therefore is not exposed through the generated SldWorks dispatch module.
+    "swFmFillet": 1,
+    "swConstRadiusFillet": 0,
+    "swFeatureFilletCircular": 0,
+}
+
+
 class DispatchApi(Protocol):
     def get_active_object(self, prog_id: str) -> Any: ...
     def dispatch(self, prog_id: str) -> Any: ...
@@ -65,6 +74,50 @@ def _typed_model_document(document: Any) -> Any:
     return _model_document_class()(ole_object)
 
 
+@lru_cache(maxsize=1)
+def _part_document_class() -> Any:
+    """Load the generated SolidWorks 2023 IPartDoc dispatch wrapper."""
+    import win32com.client  # type: ignore[import-not-found]
+
+    generated = win32com.client.gencache.EnsureModule(
+        "{83A33D31-27C5-11CE-BFD4-00400513BB57}",
+        0,
+        31,
+        0,
+    )
+    return generated.IPartDoc
+
+
+def _typed_part_document(document: Any) -> Any:
+    """Wrap an IModelDoc2 dispatch pointer to call part-only topology APIs."""
+    ole_object = getattr(document, "_oleobj_", None)
+    if ole_object is None:
+        return document
+    return _part_document_class()(ole_object)
+
+
+@lru_cache(maxsize=1)
+def _entity_class() -> Any:
+    """Load the generated SolidWorks 2023 IEntity dispatch wrapper."""
+    import win32com.client  # type: ignore[import-not-found]
+
+    generated = win32com.client.gencache.EnsureModule(
+        "{83A33D31-27C5-11CE-BFD4-00400513BB57}",
+        0,
+        31,
+        0,
+    )
+    return generated.IEntity
+
+
+def _typed_entity(raw: Any) -> Any:
+    """Wrap topology dispatch pointers to use IEntity selection methods."""
+    ole_object = getattr(raw, "_oleobj_", None)
+    if ole_object is None:
+        return raw
+    return _entity_class()(ole_object)
+
+
 @lru_cache(maxsize=None)
 def _solidworks_constant(name: str) -> int:
     """Load a named swconst enum value from the SolidWorks 2023 typelib."""
@@ -74,6 +127,8 @@ def _solidworks_constant(name: str) -> int:
         "{83A33D31-27C5-11CE-BFD4-00400513BB57}", 0, 31, 0
     )
     value = getattr(generated, name, getattr(win32com.client.constants, name, None))
+    if value is None:
+        value = _SOLIDWORKS_2023_CONSTANT_FALLBACKS.get(name)
     if value is None:
         raise RuntimeError(f"SolidWorks 2023 constant is unavailable: {name}")
     return int(value)
@@ -244,8 +299,7 @@ class SolidWorksComAdapter:
 
     def create_sketch_on_face(self, document: Any, face: Any, unit: str = "m") -> SketchContext:
         document.ClearSelection2(True)
-        if not face.Select4(False, None):
-            raise RuntimeError("SolidWorks could not select face")
+        self._select_raw(document, face, False, 0)
         document.SketchManager.InsertSketch(True)
         sketch = document.GetActiveSketch2()
         if sketch is None:
@@ -449,10 +503,16 @@ class SolidWorksComAdapter:
         return data
 
     def _select_raw(self, document: Any, raw: Any, append: bool, mark: int) -> None:
-        if hasattr(raw, "Select4"):
-            selected = raw.Select4(append, self._selection_data(document, mark))
-        elif hasattr(raw, "Select2"):
-            selected = raw.Select2(append, mark)
+        selectable = _typed_entity(raw)
+        if hasattr(selectable, "Select4"):
+            try:
+                selected = selectable.Select4(append, self._selection_data(document, mark))
+            except Exception:
+                if not hasattr(selectable, "Select2"):
+                    raise
+                selected = selectable.Select2(append, mark)
+        elif hasattr(selectable, "Select2"):
+            selected = selectable.Select2(append, mark)
         else:
             raise RuntimeError("SolidWorks entity does not support selection")
         if not selected:
@@ -673,14 +733,20 @@ class SolidWorksComAdapter:
             document.ClearSelection2(True)
 
     def inspect_model(self, document: Any) -> dict[str, Any]:
-        features = []
-        feature = document.FirstFeature()
-        while feature is not None:
-            features.append(feature)
-            feature = feature.GetNextFeature()
-        bodies = list(document.GetBodies2(0, True) or [])
-        faces = [face for body in bodies for face in list(body.GetFaces() or [])]
-        edges = [edge for face in faces for edge in list(face.GetEdges() or [])]
+        features = [
+            feature
+            for feature in list(document.FeatureManager.GetFeatures(False) or [])
+            if self._com_value(feature, "GetTypeName2", "")
+            != "NativeConfigurationTableFeature"
+        ]
+        part_document = _typed_part_document(document)
+        bodies = list(part_document.GetBodies2(0, True) or [])
+        faces = [
+            face for body in bodies for face in list(self._com_value(body, "GetFaces", ()) or [])
+        ]
+        edges = [
+            edge for face in faces for edge in list(self._com_value(face, "GetEdges", ()) or [])
+        ]
         return {
             "title": str(self._com_value(document, "GetTitle", "")),
             "features": features,

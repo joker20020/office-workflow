@@ -874,6 +874,22 @@ def test_adapter_feature_selection_is_cleared_when_com_call_raises(monkeypatch):
     assert clears == [True, True]
 
 
+def test_raw_selection_falls_back_to_select2_when_select4_is_unavailable():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    calls = []
+    raw = SimpleNamespace(
+        Select4=lambda append, data: (_ for _ in ()).throw(RuntimeError("missing member")),
+        Select2=lambda append, mark: calls.append((append, mark)) or True,
+    )
+    document = SimpleNamespace(
+        SelectionManager=SimpleNamespace(CreateSelectData=lambda: SimpleNamespace())
+    )
+
+    adapter_module.SolidWorksComAdapter()._select_raw(document, raw, False, 0)
+
+    assert calls == [(False, 0)]
+
+
 def test_preview_is_real_png_and_temporary_bmp_is_removed(tmp_path):
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     data = tmp_path / "data"
@@ -1051,6 +1067,39 @@ def test_new_part_wraps_a_real_com_document_with_the_generated_modeldoc_type(
     )
 
     assert adapter.new_part("typed-part", "mm") is wrapped
+
+
+def test_inspection_uses_partdoc_wrapper_for_part_topology(monkeypatch):
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    edge = object()
+    face = SimpleNamespace(GetEdges=(edge,))
+    body = SimpleNamespace(GetFaces=(face,))
+    feature = SimpleNamespace(GetTypeName2="BossExtrude")
+    configuration_table = SimpleNamespace(GetTypeName2="NativeConfigurationTableFeature")
+    calls = []
+    document = SimpleNamespace(
+        FeatureManager=SimpleNamespace(
+            GetFeatures=lambda top_level: [feature, configuration_table]
+        ),
+        GetTitle=lambda: "Part",
+    )
+    part_document = SimpleNamespace(
+        GetBodies2=lambda body_type, visible_only: calls.append(
+            (body_type, visible_only)
+        )
+        or [body]
+    )
+    monkeypatch.setattr(adapter_module, "_typed_part_document", lambda _: part_document)
+
+    details = adapter_module.SolidWorksComAdapter().inspect_model(document)
+
+    assert calls == [(0, True)]
+    assert details == {
+        "title": "Part",
+        "features": [feature],
+        "faces": [face],
+        "edges": [edge],
+    }
 
 
 class FakePaths:

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
+def test_live_features_survive_inspection_and_export(
     monkeypatch, tmp_path
 ):
     database_path = tmp_path / "solidworks-live.db"
@@ -55,6 +55,26 @@ def test_live_simple_part_saves_exports_previews_and_closes_only_test_document(
         assert service.close_sketch(sketch.id).success
         print("[solidworks-live] extrude", flush=True)
         assert service.extrude(document.id, sketch.id, 10, "forward").success
+        print("[solidworks-live] inspect extruded base", flush=True)
+        inspected = service.inspect_model(document.id)
+        assert inspected.success, inspected.message
+        assert inspected.value["faces"], "Extruded base did not expose an inspectable face"
+        print("[solidworks-live] create sketch on inspected face", flush=True)
+        face_sketch = service.create_sketch_on_face(
+            document.id, inspected.value["faces"][0].id
+        )
+        assert face_sketch.success, face_sketch.message
+        print("[solidworks-live] close face sketch", flush=True)
+        assert service.close_sketch(face_sketch.value.id).success
+        print("[solidworks-live] inspect face sketch", flush=True)
+        refreshed = service.inspect_model(document.id)
+        assert refreshed.success, refreshed.message
+        assert refreshed.value["edges"], "Extruded base did not expose an inspectable edge"
+        print("[solidworks-live] fillet inspected edge", flush=True)
+        fillet = service.fillet(document.id, [refreshed.value["edges"][0].id], 1)
+        assert fillet.success, fillet.message
+        print("[solidworks-live] inspect fillet", flush=True)
+        assert service.inspect_model(document.id).success
         print("[solidworks-live] save native", flush=True)
         native = service.save_model(document.id)
         print("[solidworks-live] export STEP", flush=True)
