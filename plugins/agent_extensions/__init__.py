@@ -2753,7 +2753,7 @@ class AgentExtensionTools:
                     query_content_list +
                     [
                         TextBlock(
-                                  text=f"用户的问题是:{task}, 请你根据知识库结果回答用户的问题，在你回答用户问题时，需要过滤掉搜索中无关的项"),
+                                  text=f"用户的问题是:{task}, 请你根据知识库结果回答用户的问题，在你回答用户问题时，需要过滤掉搜索结果中无关的项，不要回答与用户问题无关的内容"),
                         TextBlock(text="对于装配工序请使用以下json格式模板进行回答：\n"),
                         TextBlock(text="""
                                {

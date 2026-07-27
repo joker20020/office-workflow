@@ -9,7 +9,7 @@ from typing import Any
 from PIL import Image
 
 from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtWidgets import QApplication, QFrame, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QTextEdit, QWidget
 
 from agentscope.event import (
     DataBlockDeltaEvent,
@@ -32,7 +32,10 @@ from agentscope.event import (
 from agentscope.message import Base64Source, DataBlock, ToolResultState, UserMsg
 
 import src.ui.chat.chat_panel as chat_panel
+import src.ui.chat.composite_message_widget as composite_message_widget
+import src.ui.chat.blocks.tool_result_block as tool_result_block
 from src.ui.chat.composite_message_widget import CompositeMessageWidget
+from src.ui.chat.blocks import create_block_widget as create_real_block_widget
 from src.ui.chat.message_widget import MarkdownMessageWidget
 from src.ui.chat.blocks.image_block import ImageBlockWidget
 from src.ui.chat.blocks.tool_result_block import ToolResultBlockWidget
@@ -666,6 +669,36 @@ class TestChatPanelStreaming:
         assert direct_frames == widget._block_containers
         assert len(direct_frames) == 1
 
+    def test_history_blocks_are_created_with_a_parent_and_keep_no_orphan_frame(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        parents = []
+
+        def create_with_parent(block_data, parent=None):
+            parents.append(parent)
+            return create_real_block_widget(block_data, parent)
+
+        with patch.object(
+            composite_message_widget,
+            "create_block_widget",
+            side_effect=create_with_parent,
+        ):
+            widget = CompositeMessageWidget(
+                "assistant",
+                [
+                    {"type": "text", "text": "Visible text"},
+                    {"type": "tool_call", "id": "call-1", "name": "tool"},
+                ],
+            )
+
+        assert all(parent is not None for parent in parents)
+        direct_frames = [
+            child
+            for child in widget._blocks_container.children()
+            if isinstance(child, QFrame)
+        ]
+        assert direct_frames == widget._block_containers
+
     def test_theme_refresh_repairs_legacy_text_container_classification(self):
         application = QApplication.instance() or QApplication([])
         assert application is not None
@@ -794,6 +827,41 @@ class TestChatPanelStreaming:
 
         assert layout.indexOf(block._execution_edit) < layout.indexOf(block._output_edit)
         assert "font-family: monospace" not in block._output_edit.styleSheet()
+
+    def test_history_execution_log_is_never_shown_as_a_top_level_window(self):
+        application = QApplication.instance() or QApplication([])
+        assert application is not None
+        visibility_states = []
+
+        class TrackingTextEdit(QTextEdit):
+            def setVisible(self, visible):
+                if self.objectName() == "subagentExecutionEvents" and visible:
+                    visibility_states.append(
+                        (self.parentWidget() is not None, self.isWindow()),
+                    )
+                super().setVisible(visible)
+
+        parent = QWidget()
+        with patch.object(tool_result_block, "QTextEdit", TrackingTextEdit):
+            block = ToolResultBlockWidget(
+                {
+                    "type": "tool_result",
+                    "id": "call-1",
+                    "name": "image",
+                    "output": "# Final output",
+                    "execution_events": [
+                        {
+                            "event_kind": "phase",
+                            "title": "Image Agent",
+                            "text": "started",
+                        },
+                    ],
+                },
+                parent,
+            )
+
+        assert block._execution_edit.parentWidget() is not None
+        assert visibility_states == [(True, False)]
 
     def test_tool_result_output_and_execution_logs_allow_scrolling(self):
         application = QApplication.instance() or QApplication([])

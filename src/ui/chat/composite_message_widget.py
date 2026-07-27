@@ -71,14 +71,12 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
         layout.addWidget(self._blocks_container)
 
     def _add_block_widget(self, block_data: Dict[str, Any]) -> Optional[BaseBlockWidget]:
-        # Build the renderer first. Unsupported persisted blocks (for example
-        # AgentScope ``tool_call`` records) must not leave an unlaid-out child
-        # frame at (0, 0), where it would cover the first visible text block.
-        widget = create_block_widget(block_data)
-        if widget is None:
-            return None
-
         container = QFrame(self._blocks_container)
+        # Keep the container hidden until a supported block has been attached.
+        # The block must receive this parent during construction: creating it
+        # without a parent makes Qt briefly treat it as a top-level window when
+        # historical messages are reconstructed.
+        container.hide()
         # Keep this default aligned with create_block_widget(), which treats a
         # missing type as normal text.  Otherwise the first streamed text block
         # receives a structural card border by mistake.
@@ -87,10 +85,18 @@ class CompositeMessageWidget(QWidget, ThemeAwareMixin):
         container_layout.setSpacing(0)
         self._style_block_container(container, is_text_block)
 
-        widget.setParent(container)
+        widget = create_block_widget(block_data, container)
+        if widget is None:
+            # Do not leave an unlaid-out frame at (0, 0) for unsupported
+            # persisted records such as AgentScope ``tool_call`` blocks.
+            container.setParent(None)
+            container.deleteLater()
+            return None
+
         widget.height_changed.connect(self._on_block_height_changed)
         container_layout.addWidget(widget)
         self._blocks_layout.addWidget(container)
+        container.show()
         self._block_widgets.append(widget)
         self._block_containers.append(container)
         return widget

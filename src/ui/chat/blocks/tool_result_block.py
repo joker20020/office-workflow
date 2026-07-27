@@ -118,7 +118,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(6)
-        self._execution_edit = QTextEdit()
+        self._execution_edit = QTextEdit(content)
         self._execution_edit.setObjectName("subagentExecutionEvents")
         self._execution_edit.setReadOnly(True)
         self._execution_edit.setCursorWidth(0)
