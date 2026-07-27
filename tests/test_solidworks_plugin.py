@@ -418,7 +418,7 @@ async def test_cancellation_closes_client_exactly_once_and_propagates(monkeypatc
             self.close_count += 1
 
     class FakeToolkit:
-        def __init__(self, *, mcps):
+        def __init__(self, *, mcps, skills_or_loaders=None):
             assert mcps[0].connected
 
     class BlockingAgent:
@@ -479,7 +479,7 @@ async def test_public_stream_close_cancels_work_and_closes_client_once(monkeypat
             self.close_count += 1
 
     class FakeToolkit:
-        def __init__(self, *, mcps):
+        def __init__(self, *, mcps, skills_or_loaders=None):
             assert mcps[0].connected
 
     class BlockingAgent:
