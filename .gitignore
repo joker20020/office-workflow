@@ -23,6 +23,7 @@ references/
 *.db
 *.sqlite3
 .env
+settings.yaml
 
 .idea/
 .vscode/
