@@ -145,12 +145,29 @@ def test_mcp_descriptions_publish_model_facing_workflow_contracts():
     assert all(f"`{kind}`" in descriptions["solidworks_add_sketch_geometry"] for kind in (
         "line", "circle", "center_rectangle", "three_point_arc"
     ))
+    geometry_contracts = (
+        "`line` requires exactly `type`, `start`, and `end`",
+        "`circle` requires exactly `type`, `center`, and `radius`",
+        "`center_rectangle` requires exactly `type`, `center`, and `corner`",
+        "`three_point_arc` requires exactly `type`, `start`, `mid`, and `end`",
+    )
+    normalized_geometry = " ".join(descriptions["solidworks_add_sketch_geometry"].split())
+    assert all(contract in normalized_geometry for contract in geometry_contracts)
+    assert "two-number `[x,y]` points" in descriptions["solidworks_add_sketch_geometry"]
+    assert "`radius` is positive" in descriptions["solidworks_add_sketch_geometry"]
     assert examples["solidworks_add_dimensions"] == [
         {"type": "distance", "value": 10, "entity_refs": ["entity-id"]}
     ]
     assert all(f"`{kind}`" in descriptions["solidworks_add_dimensions"] for kind in (
         "distance", "diameter", "radius"
     ))
+    normalized_dimensions = " ".join(descriptions["solidworks_add_dimensions"].split())
+    assert (
+        "each item requires exactly `type`, positive `value`, and `entity_refs`, with optional "
+        "two-number `[x,y]` `position`"
+    ) in normalized_dimensions
+    assert "`distance` needs one or two server-owned `entity_refs`" in normalized_dimensions
+    assert "`diameter` and `radius` each need exactly one server-owned `entity_ref`" in normalized_dimensions
     assert examples["solidworks_hole"] == {"type": "simple", "diameter": 5, "depth": 10}
     for kind in ("simple", "counterbore", "countersink"):
         assert f"`{kind}`" in descriptions["solidworks_hole"]

@@ -621,8 +621,11 @@ def solidworks_add_sketch_geometry(sketch_id: str, geometry: list[dict[str, Any]
     """Add geometry to an open, server-owned sketch using DocumentRef.unit coordinates.
 
     The adapter converts lengths to SI metres. Example: `[{"type":"line","start":[0,0],
-    "end":[10,0]}]`; types are `line`, `circle`, `center_rectangle`, and `three_point_arc`.
-    Keep the returned server-owned entity references for dimensions.
+    "end":[10,0]}]`. `line` requires exactly `type`, `start`, and `end`; `circle` requires
+    exactly `type`, `center`, and `radius`; `center_rectangle` requires exactly `type`, `center`,
+    and `corner`; `three_point_arc` requires exactly `type`, `start`, `mid`, and `end`. The
+    `start`, `end`, `center`, `corner`, and `mid` fields are two-number `[x,y]` points, and
+    `radius` is positive. Keep the returned server-owned entity references for dimensions.
     """
     return _tool(service.add_sketch_geometry, sketch_id, geometry)
 
@@ -632,8 +635,10 @@ def solidworks_add_dimensions(sketch_id: str, dimensions: list[dict[str, Any]]) 
     """Dimension an open, server-owned sketch using its server-owned entity references.
 
     Values and optional positions use DocumentRef.unit; the adapter converts them to SI metres.
-    Example: `[{"type":"distance","value":10,"entity_refs":["entity-id"]}]`;
-    types are `distance`, `diameter`, or `radius`.
+    Example: `[{"type":"distance","value":10,"entity_refs":["entity-id"]}]`. Each item
+    requires exactly `type`, positive `value`, and `entity_refs`, with optional two-number `[x,y]`
+    `position`. `distance` needs one or two server-owned `entity_refs`; `diameter` and `radius`
+    each need exactly one server-owned `entity_ref`.
     """
     return _tool(service.add_dimensions, sketch_id, dimensions)
 
@@ -736,8 +741,8 @@ def solidworks_mirror_feature(document_id: str, feature_refs: list[str], plane: 
 def solidworks_pattern_feature(document_id: str, feature_ref: str, pattern: dict[str, Any]) -> str:
     """Pattern an inspected, server-owned feature in its server-owned document.
 
-    Example: `{"type":"linear","direction":"x","spacing":10,"count":3}`; linear
-    `linear` requires `type`, `direction`, `spacing`, and `count`; direction is `x` or `y`, count
+    Example: `{"type":"linear","direction":"x","spacing":10,"count":3}`. `linear`
+    requires `type`, `direction`, `spacing`, and `count`; direction is `x` or `y`, count
     is 2 through 100, and spacing uses DocumentRef.unit. `circular` requires `type`, `angle`, and
     `count`, with angle in degrees and count is 2 through 100. Topology changes: call
     solidworks_inspect_model after this call before reusing any face, edge, or feature reference.
