@@ -480,8 +480,7 @@ class SolidWorksService:
     def _created_feature(self, document_id: str, raw: Any, kind: str) -> OperationResult:
         if not raw:
             raise RuntimeError(f"SolidWorks failed to create {kind} feature")
-        ref = FeatureRef(uuid.uuid4().hex, document_id, kind)
-        self.features[ref.id] = (ref, raw)
+        ref = self._stable_refs(self.features, FeatureRef, document_id, [raw], kind)[0]
         return self._ok(f"Created {kind} feature.", ref)
 
     def _unsupported_many(

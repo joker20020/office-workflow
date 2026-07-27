@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import inspect
+import math
 import sys
 from dataclasses import is_dataclass
 from pathlib import Path
@@ -95,6 +96,14 @@ class FakeAdapter:
         self.feature = SimpleNamespace(persist_key=b"feature")
         self.face = SimpleNamespace(persist_key=b"face")
         self.edge = SimpleNamespace(persist_key=b"edge")
+        self.created_features = []
+
+    def _created_feature(self, kind):
+        if self.feature is None:
+            return None
+        raw = SimpleNamespace(persist_key=f"{kind}-{len(self.created_features)}".encode())
+        self.created_features.append(raw)
+        return raw
 
     def connect(self, readiness_timeout=10.0):
         types = importlib.import_module("plugins.solidworks_agent.types")
@@ -143,29 +152,29 @@ class FakeAdapter:
 
     def hole(self, document, face, specification, position, unit):
         self.calls.append(("hole", document, face, specification, position, unit))
-        return self.feature
+        return self._created_feature("hole")
 
     def fillet(self, document, edges, radius, unit):
         self.calls.append(("fillet", document, edges, radius, unit))
-        return self.feature
+        return self._created_feature("fillet")
 
     def chamfer(self, document, edges, specification, unit):
         self.calls.append(("chamfer", document, edges, specification, unit))
-        return self.feature
+        return self._created_feature("chamfer")
 
     def mirror_feature(self, document, features, plane):
         self.calls.append(("mirror", document, features, plane))
-        return self.feature
+        return self._created_feature("mirror")
 
     def pattern_feature(self, document, feature, pattern, unit):
         self.calls.append(("pattern", document, feature, pattern, unit))
-        return self.feature
+        return self._created_feature("pattern")
 
     def inspect_model(self, document):
         self.calls.append(("inspect", document))
         return {
             "title": "Part",
-            "features": [SimpleNamespace(persist_key=b"feature")],
+            "features": [SimpleNamespace(persist_key=b"feature"), *self.created_features],
             "faces": [SimpleNamespace(persist_key=b"face")],
             "edges": [SimpleNamespace(persist_key=b"edge")],
         }
@@ -327,6 +336,80 @@ def test_feature_operation_validation_rejects_foreign_references_and_false_com_r
 
     adapter.feature = None
     assert not service.hole(document.id, face, {"type": "simple", "diameter": 1, "depth": 1}, [0, 0]).success
+
+
+def test_created_feature_reference_is_reused_by_later_inspection():
+    service, _, document = _part()
+    edge = service.inspect_model(document.id).value["edges"][0].id
+
+    created = service.fillet(document.id, [edge], 2)
+    inspected = service.inspect_model(document.id)
+
+    assert created.success
+    assert inspected.success
+    assert created.value.id in [feature.id for feature in inspected.value["features"]]
+
+
+def test_feature_operation_success_covers_counterbore_and_countersink_payloads():
+    service, adapter, document = _part()
+    face = service.inspect_model(document.id).value["faces"][0].id
+
+    counterbore = service.hole(
+        document.id,
+        face,
+        {
+            "type": "counterbore",
+            "diameter": 5,
+            "depth": 10,
+            "counterbore_diameter": 9,
+            "counterbore_depth": 3,
+        },
+        [2, 3],
+    )
+    countersink = service.hole(
+        document.id,
+        face,
+        {
+            "type": "countersink",
+            "diameter": 5,
+            "depth": 10,
+            "countersink_diameter": 9,
+            "angle": 82,
+        },
+        [2, 3],
+    )
+
+    assert counterbore.success and countersink.success
+    assert adapter.calls[-2:] == [
+        (
+            "hole",
+            adapter.document,
+            adapter.face,
+            {
+                "type": "counterbore",
+                "diameter": 5.0,
+                "depth": 10.0,
+                "counterbore_diameter": 9.0,
+                "counterbore_depth": 3.0,
+            },
+            [2.0, 3.0],
+            "mm",
+        ),
+        (
+            "hole",
+            adapter.document,
+            adapter.face,
+            {
+                "type": "countersink",
+                "diameter": 5.0,
+                "depth": 10.0,
+                "countersink_diameter": 9.0,
+                "angle": 82.0,
+            },
+            [2.0, 3.0],
+            "mm",
+        ),
+    ]
 
 
 def test_face_sketch_and_three_point_arc_are_public_and_owned():
@@ -555,6 +638,124 @@ def test_adapter_converts_document_units_and_degrees_before_com_calls():
         inch, [{"type": "circle", "center": [1, 2], "radius": 0.5}]
     )
     assert events[-1][1] == (0.0254, 0.0508, 0.0, 0.0127)
+
+
+def test_adapter_feature_operations_use_current_com_methods_marks_and_si_units():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    events = []
+
+    class Selectable:
+        def __init__(self, name):
+            self.name = name
+
+        def Select4(self, append, data):  # noqa: N802
+            events.append(("select4", self.name, append, getattr(data, "Mark", None)))
+            return True
+
+        def Select2(self, append, mark):  # noqa: N802
+            events.append(("select2", self.name, append, mark))
+            return True
+
+    class SketchManager:
+        def InsertSketch(self, editing):  # noqa: N802
+            events.append(("sketch", editing))
+
+        def CreatePoint(self, x, y, z):  # noqa: N802
+            events.append(("point", x, y, z))
+            return Selectable("point")
+
+    feature = object()
+    manager = SimpleNamespace(
+        HoleWizard5=lambda *args: (events.append(("hole5", args)), feature)[1],
+        FeatureFillet3=lambda *args: (events.append(("fillet3", args)), feature)[1],
+        InsertFeatureChamfer=lambda *args: (events.append(("chamfer", args)), feature)[1],
+        InsertMirrorFeature2=lambda *args: (events.append(("mirror2", args)), feature)[1],
+        FeatureLinearPattern3=lambda *args: (events.append(("linear3", args)), feature)[1],
+        FeatureCircularPattern3=lambda *args: (events.append(("circular3", args)), feature)[1],
+    )
+    document = SimpleNamespace(
+        ClearSelection2=lambda all_items: events.append(("clear", all_items)),
+        SelectionManager=SimpleNamespace(CreateSelectData=lambda: SimpleNamespace()),
+        SketchManager=SketchManager(),
+        Extension=SimpleNamespace(
+            SelectByID2=lambda name, entity_type, *args: events.append(
+                ("plane", name, entity_type, args[4])
+            )
+            or True
+        ),
+        FeatureManager=manager,
+    )
+    face = Selectable("face")
+    face.GetSurface = lambda: SimpleNamespace(IsPlane=lambda: True)
+    edge = Selectable("edge")
+    seed = Selectable("seed")
+    adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+
+    adapter.hole(
+        document,
+        face,
+        {
+            "type": "counterbore",
+            "diameter": 5,
+            "depth": 10,
+            "counterbore_diameter": 9,
+            "counterbore_depth": 3,
+        },
+        [10, 20],
+        "mm",
+    )
+    adapter.fillet(document, [edge], 2, "mm")
+    adapter.chamfer(document, [edge], {"type": "distance_angle", "distance": 3, "angle": 45}, "mm")
+    adapter.mirror_feature(document, [seed], "Front Plane")
+    adapter.pattern_feature(document, seed, {"type": "linear", "direction": "x", "spacing": 8, "count": 3}, "mm")
+    adapter.pattern_feature(document, seed, {"type": "circular", "angle": 180, "count": 4}, "mm")
+
+    assert ("point", 0.01, 0.02, 0.0) in events
+    assert ("select4", "face", False, 0) in events
+    assert ("select4", "point", False, 0) in events
+    assert ("select4", "edge", False, 1) in events
+    assert ("select4", "seed", False, 1) in events
+    assert ("select4", "seed", False, 4) in events
+    assert ("plane", "Front Plane", "PLANE", 2) in events
+    assert ("plane", "Right Plane", "PLANE", 1) in events
+    assert ("plane", "Top Plane", "PLANE", 1) in events
+    assert next(item[1] for item in events if item[0] == "hole5")[5:10] == pytest.approx(
+        (
+        0.005,
+        0.01,
+        -1.0,
+        0.009,
+        0.003,
+        )
+    )
+    assert next(item[1] for item in events if item[0] == "fillet3")[1] == 0.002
+    assert next(item[1] for item in events if item[0] == "chamfer")[2:4] == pytest.approx(
+        (0.003, math.pi / 4)
+    )
+    assert next(item[1] for item in events if item[0] == "mirror2") == (False, False, False, False, 0)
+    assert next(item[1] for item in events if item[0] == "linear3")[1] == 0.008
+    assert next(item[1] for item in events if item[0] == "circular3")[1] == pytest.approx(math.pi)
+    assert events.count(("clear", True)) == 12
+
+
+def test_adapter_feature_selection_is_cleared_when_com_call_raises():
+    adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
+    clears = []
+    edge = SimpleNamespace(Select4=lambda append, data: True)
+    document = SimpleNamespace(
+        ClearSelection2=lambda all_items: clears.append(all_items),
+        SelectionManager=SimpleNamespace(CreateSelectData=lambda: SimpleNamespace()),
+        FeatureManager=SimpleNamespace(
+            FeatureFillet3=lambda *args: (_ for _ in ()).throw(RuntimeError("boom"))
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace()).fillet(
+            document, [edge], 2, "mm"
+        )
+
+    assert clears == [True, True]
 
 
 def test_preview_is_real_png_and_temporary_bmp_is_removed(tmp_path):
