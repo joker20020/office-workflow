@@ -93,6 +93,7 @@ def _geometry(value: Any) -> list[dict[str, Any]]:
         "line": {"type", "start", "end"},
         "circle": {"type", "center", "radius"},
         "center_rectangle": {"type", "center", "corner"},
+        "three_point_arc": {"type", "start", "mid", "end"},
     }
     clean = []
     for item in _items(value, "geometry"):
@@ -106,6 +107,12 @@ def _geometry(value: Any) -> list[dict[str, Any]]:
             record.update(
                 center=_point(item["center"], "center"),
                 radius=_number(item["radius"], "radius", positive=True),
+            )
+        elif kind == "three_point_arc":
+            record.update(
+                start=_point(item["start"], "start"),
+                mid=_point(item["mid"], "mid"),
+                end=_point(item["end"], "end"),
             )
         else:
             record.update(
@@ -186,6 +193,17 @@ class SolidWorksService:
             ref = SketchRef(uuid.uuid4().hex, document_id, plane)
             self.sketches[ref.id] = (ref, raw)
             return self._ok(f"Created sketch on {plane}.", ref)
+        except Exception as exc:
+            return self._fail(_safe_error(exc))
+
+    def create_sketch_on_face(self, document_id: str, face_ref: str) -> OperationResult:
+        try:
+            document_ref, document = self._document(document_id)
+            _, face = self._owned(self.faces, face_ref, document_id, "face")
+            raw = self.adapter.create_sketch_on_face(document, face, document_ref.unit)
+            ref = SketchRef(uuid.uuid4().hex, document_id, f"face:{face_ref}")
+            self.sketches[ref.id] = (ref, raw)
+            return self._ok("Created sketch on owned face.", ref)
         except Exception as exc:
             return self._fail(_safe_error(exc))
 
@@ -537,6 +555,11 @@ def solidworks_new_part(session_id: str, name: str, unit: str) -> str:
 @mcp.tool()
 def solidworks_create_sketch(document_id: str, plane: str) -> str:
     return _tool(service.create_sketch, document_id, plane)
+
+
+@mcp.tool()
+def solidworks_create_sketch_on_face(document_id: str, face_ref: str) -> str:
+    return _tool(service.create_sketch_on_face, document_id, face_ref)
 
 
 @mcp.tool()

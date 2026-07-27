@@ -12,6 +12,7 @@ EXPECTED_SIGNATURES = {
     "solidworks_status": [],
     "solidworks_new_part": ["session_id", "name", "unit"],
     "solidworks_create_sketch": ["document_id", "plane"],
+    "solidworks_create_sketch_on_face": ["document_id", "face_ref"],
     "solidworks_add_sketch_geometry": ["sketch_id", "geometry"],
     "solidworks_add_dimensions": ["sketch_id", "dimensions"],
     "solidworks_close_sketch": ["sketch_id"],
@@ -108,6 +109,10 @@ class FakeAdapter:
 
     def create_sketch(self, document, plane, unit="m"):
         self.calls.append(("sketch", document, plane, unit))
+        return self.sketch
+
+    def create_sketch_on_face(self, document, face, unit="m"):
+        self.calls.append(("face-sketch", document, face, unit))
         return self.sketch
 
     def add_sketch_geometry(self, sketch, geometry):
@@ -231,6 +236,53 @@ def test_inspection_returns_stable_owned_feature_face_and_edge_refs():
         ).message
     )
     assert service.fillet(document.id, ["foreign"], 0.1).message == "invalid edge reference"
+
+
+def test_face_sketch_and_three_point_arc_are_public_and_owned():
+    module = _module()
+    tools = {tool.name: tool for tool in asyncio.run(module.mcp.list_tools())}
+    assert list(inspect.signature(module.solidworks_create_sketch_on_face).parameters) == [
+        "document_id",
+        "face_ref",
+    ]
+    assert list(tools["solidworks_create_sketch_on_face"].inputSchema["properties"]) == [
+        "document_id",
+        "face_ref",
+    ]
+
+    service, adapter, document = _part()
+    face_ref = service.inspect_model(document.id).value["faces"][0].id
+    sketch = service.create_sketch_on_face(document.id, face_ref)
+    assert sketch.success
+    assert adapter.calls[-1] == ("face-sketch", adapter.document, adapter.face, "mm")
+
+    arc = service.add_sketch_geometry(
+        sketch.value.id,
+        [{"type": "three_point_arc", "start": [0, 0], "mid": [1, 1], "end": [2, 0]}],
+    )
+    assert arc.success
+    assert arc.value[0].kind == "three_point_arc"
+    assert adapter.calls[-1] == (
+        "geometry",
+        adapter.sketch,
+        [{"type": "three_point_arc", "start": [0.0, 0.0], "mid": [1.0, 1.0], "end": [2.0, 0.0]}],
+    )
+    assert service.create_sketch_on_face(document.id, "foreign").message == "invalid face reference"
+
+    events = []
+    active_sketch = object()
+    face = SimpleNamespace(Select4=lambda append, data: events.append((append, data)) or True)
+    face_document = SimpleNamespace(
+        ClearSelection2=lambda all_items: events.append(("clear", all_items)),
+        SketchManager=SimpleNamespace(InsertSketch=lambda editing: events.append(("insert", editing))),
+        GetActiveSketch2=lambda: active_sketch,
+    )
+    context = importlib.import_module("plugins.solidworks_agent.com_adapter").SolidWorksComAdapter(
+        dispatch=SimpleNamespace()
+    ).create_sketch_on_face(face_document, face, "inch")
+    assert context.sketch is active_sketch
+    assert context.unit == "inch"
+    assert events == [("clear", True), (False, None), ("insert", True)]
 
 
 def test_adapter_selects_sketch_uses_modeldoc_manager_and_selects_dimension_entities():
@@ -359,6 +411,10 @@ def test_adapter_converts_document_units_and_degrees_before_com_calls():
             events.append(("circle", args))
             return Entity()
 
+        def Create3PointArc(self, *args):  # noqa: N802
+            events.append(("arc", args))
+            return Entity()
+
     dim_value = SimpleNamespace(SystemValue=0.0)
     dimension = SimpleNamespace(GetDimension2=lambda _: dim_value)
     features = SimpleNamespace(
@@ -381,6 +437,7 @@ def test_adapter_converts_document_units_and_degrees_before_com_calls():
         [
             {"type": "line", "start": [10, 20], "end": [30, 40]},
             {"type": "circle", "center": [10, 20], "radius": 5},
+            {"type": "three_point_arc", "start": [10, 20], "mid": [30, 40], "end": [50, 60]},
         ],
     )
     adapter.add_dimensions(
@@ -390,7 +447,8 @@ def test_adapter_converts_document_units_and_degrees_before_com_calls():
     )
     assert events[0][1] == (0.01, 0.02, 0.0, 0.03, 0.04, 0.0)
     assert events[1][1] == (0.01, 0.02, 0.0, 0.005)
-    assert events[2][1] == (0.02, 0.03, 0.0)
+    assert events[2][1] == (0.01, 0.02, 0.0, 0.03, 0.04, 0.0, 0.05, 0.06, 0.0)
+    assert events[3][1] == (0.02, 0.03, 0.0)
     assert dim_value.SystemValue == 0.01
 
     adapter.extrude(document, context, 10, "forward")

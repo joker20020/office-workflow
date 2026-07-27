@@ -228,6 +228,17 @@ class SolidWorksComAdapter:
         self._scale(unit)
         return SketchContext(document, sketch, unit)
 
+    def create_sketch_on_face(self, document: Any, face: Any, unit: str = "m") -> SketchContext:
+        document.ClearSelection2(True)
+        if not face.Select4(False, None):
+            raise RuntimeError("SolidWorks could not select face")
+        document.SketchManager.InsertSketch(True)
+        sketch = document.GetActiveSketch2()
+        if sketch is None:
+            raise RuntimeError("SolidWorks failed to create sketch")
+        self._scale(unit)
+        return SketchContext(document, sketch, unit)
+
     @classmethod
     def _scale(cls, unit: str) -> float:
         try:
@@ -261,6 +272,15 @@ class SolidWorksComAdapter:
                     *self._point_si(item["center"], context.unit),
                     0.0,
                     self._length(item["radius"], context.unit),
+                )
+            elif item["type"] == "three_point_arc":
+                raw = manager.Create3PointArc(
+                    *self._point_si(item["start"], context.unit),
+                    0.0,
+                    *self._point_si(item["mid"], context.unit),
+                    0.0,
+                    *self._point_si(item["end"], context.unit),
+                    0.0,
                 )
             else:
                 raw = manager.CreateCenterRectangle(
