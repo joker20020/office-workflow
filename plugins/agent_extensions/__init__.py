@@ -27,7 +27,7 @@ from src.agent.agent_integration import (
     SUBAGENT_EVENT_PREFIX as SUBAGENT_EVENT_PREFIX,
 )
 from src.agent.agent_integration import (
-    encode_subagent_event,
+    publish_subagent_progress_event,
 )
 from src.core.artifact_context import current_artifact_context
 from src.core.artifact_paths import ArtifactCategory, ArtifactPathPolicy
@@ -475,10 +475,49 @@ def _safe_code_fence(content: Any, language: str = "") -> str:
 
 
 def _content_text(content: Any) -> str:
-    blocks = content if isinstance(content, list) else [content]
-    return "\n".join(
-        block.text if isinstance(block, TextBlock) else str(block)
-        for block in blocks
+    """Extract text from AgentScope blocks and result wrappers recursively."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, TextBlock):
+        return content.text
+    if isinstance(content, (list, tuple)):
+        return "\n".join(
+            part for block in content if (part := _content_text(block))
+        )
+    if isinstance(content, dict):
+        if content.get("type") == "text" and "text" in content:
+            return str(content["text"])
+        for key in ("content", "output", "text"):
+            if key in content:
+                text = _content_text(content[key])
+                if text:
+                    return text
+        return str(content)
+    block_text = getattr(content, "text", None)
+    if isinstance(block_text, str):
+        return block_text
+    block_content = getattr(content, "content", None)
+    if block_content is not None:
+        text = _content_text(block_content)
+        if text:
+            return text
+    return str(content)
+
+
+def _subagent_handoff_format_notice(subject: str, content: str, issue: str) -> _SubagentResult:
+    """Keep a usable subagent result when its advisory Markdown contract is off."""
+    raw_content = content.strip() or "未返回可提取的文本内容。"
+    return _SubagentResult(
+        "# 执行结果\n"
+        "## 状态\n部分成功\n"
+        f"## 完成摘要\n{subject}已返回结果，但交接格式需要优化。\n"
+        "## 生成文件\n请从具体结果及执行记录中确认。\n"
+        f"## 具体结果\n{raw_content}\n"
+        "## 执行记录\n已保留子智能体原始输出，未因格式问题中断展示。\n"
+        f"## 警告与未完成项\n- 格式提示：{issue}",
+        success=True,
     )
 
 
@@ -544,7 +583,7 @@ def _validate_subagent_handoff(
     authoritative_tasks: Any = None,
 ) -> _SubagentResult:
     """Validate and safely normalize a structured subagent handoff."""
-    text = str(content or "")
+    text = _content_text(content).strip()
     sections, parse_error = _parse_handoff_sections(text)
     validation_issue = parse_error
     status = "失败"
@@ -557,9 +596,9 @@ def _validate_subagent_handoff(
             if status not in _HANDOFF_STATUSES:
                 validation_issue = f"结构化交接状态值无效：{status}"
     if validation_issue is not None:
-        text = str(_subagent_failure(subject, validation_issue))
+        text = str(_subagent_handoff_format_notice(subject, text, validation_issue))
         sections, _ = _parse_handoff_sections(text)
-        status = "失败"
+        status = "部分成功"
 
     files = list(file_records or [])
     tasks = list(task_records or [])
@@ -689,7 +728,10 @@ def _validate_subagent_handoff(
         for title in _HANDOFF_SECTION_TITLES:
             normalized.extend([f"## {title}", sections[title]])
         text = "\n".join(normalized)
-    return _SubagentResult(text, success=status == "成功" and not issues)
+    return _SubagentResult(
+        text,
+        success=status in {"成功", "部分成功"},
+    )
 
 
 def _make_response(content: str, success: bool = True) -> Any:
@@ -1950,15 +1992,8 @@ class AgentExtensionTools:
 
         @functools.wraps(sync_tool)
         async def streaming(*args, **kwargs):
-            yield ToolChunk(
-                content=[
-                    TextBlock(
-                        text=encode_subagent_event(
-                            {"kind": "phase", "title": title, "text": "started"}
-                        )
-                    )
-                ],
-                is_last=False,
+            publish_subagent_progress_event(
+                {"kind": "phase", "title": title, "text": "started"},
             )
             progress_queue: queue.Queue = queue.Queue()
             token = _SUBAGENT_PROGRESS_SINK.set(progress_queue.put)
@@ -1974,50 +2009,37 @@ class AgentExtensionTools:
                             "error",
                         }
                         emitted = True
-                        yield ToolChunk(
-                            content=[TextBlock(text=encode_subagent_event(public))],
-                            is_last=False,
-                        )
+                        publish_subagent_progress_event(public)
                     if task.done():
                         break
                     done, _ = await asyncio.wait({task}, timeout=1.0)
                     if not done and not emitted:
                         elapsed += 1
                         if elapsed % 5 == 0:
-                            yield ToolChunk(
-                                content=[
-                                    TextBlock(
-                                        text=encode_subagent_event(
-                                            {
-                                                "kind": "phase",
-                                                "title": title,
-                                                "text": f"running ({elapsed}s)",
-                                            }
-                                        )
-                                    )
-                                ],
-                                is_last=False,
+                            publish_subagent_progress_event(
+                                {
+                                    "kind": "phase",
+                                    "title": title,
+                                    "text": f"running ({elapsed}s)",
+                                },
                             )
                 response = await task
             finally:
                 _SUBAGENT_PROGRESS_SINK.reset(token)
             succeeded = getattr(response, "state", None) == ToolResultState.SUCCESS
             if not terminal_seen:
-                yield ToolChunk(
-                    content=[
-                        TextBlock(
-                            text=encode_subagent_event(
-                                {
-                                    "kind": "complete" if succeeded else "error",
-                                    "title": title,
-                                    "text": "completed" if succeeded else "failed",
-                                }
-                            )
-                        )
-                    ],
-                    is_last=False,
+                publish_subagent_progress_event(
+                    {
+                        "kind": "complete" if succeeded else "error",
+                        "title": title,
+                        "text": "completed" if succeeded else "failed",
+                    },
                 )
-            yield response
+            yield ToolChunk(
+                content=response.content,
+                state=response.state,
+                metadata=response.metadata,
+            )
 
         streaming.__name__ = tool_name
         return streaming
@@ -2138,7 +2160,7 @@ class AgentExtensionTools:
                 "parameters": {{ 自定义工具参数字典，注意需要传入字典，而不是字符串 }}
             }}
         }}
-        一个常用的AR应用初始化流程如下，请直接使用工具一步一步执行并检查每一步的执行结果：
+        一个常用的AR应用初始化流程如下，请直接使用工具一步一步执行并检查每一步的执行结果，不要执行建模、创建脚本等任何多余操作，若有资源需要先留空，完成后再告诉用户如何进行导入：
         1.检查场景中是否有XR Rig对象，若不存在则使用自定义工具向场景中添加一个XR Rig对象
         2.检查场景中是否有XR Simulator对象，若不存在则添加一个XR Simulator对象使用户可以在编辑器中模拟XR操作
         3.检查场景中是否有MainCanvas，若不存在则添加一个主界面
@@ -2165,8 +2187,8 @@ class AgentExtensionTools:
             model=_build_model(
                 "openai",
                 self._llm_name,
-                os.environ["LLM_BASE_URL"],
-                os.environ["LLM_API_KEY"],
+                os.environ["VLM_BASE_URL"],
+                os.environ["VLM_API_KEY"],
             ),
             toolkit=toolkit,
             react_config=ReActConfig(max_iters=100),
@@ -2262,9 +2284,9 @@ class AgentExtensionTools:
 
     async def _blender_model_connected(self, blender_mcp: Any, task: str) -> str:
         output_directories = self._blender_output_directories()
-        model_directory = output_directories[ArtifactCategory.MODELS]
-        export_directory = output_directories[ArtifactCategory.EXPORTS]
-        image_directory = output_directories[ArtifactCategory.IMAGES]
+        model_directory = output_directories[ArtifactCategory.MODELS].resolve()
+        export_directory = output_directories[ArtifactCategory.EXPORTS].resolve()
+        image_directory = output_directories[ArtifactCategory.IMAGES].resolve()
         outputs_before = self._snapshot_blender_outputs()
         blender_tools = await _blender_tools_with_path_guard(
             blender_mcp,
@@ -2438,7 +2460,7 @@ class AgentExtensionTools:
             task,
             image_path,
             collection_name,
-            limit,
+            int(limit*1.5),
         )
         query_res = (
             await self._rerank_rag_candidates(task, collection_name, candidates)
@@ -2454,7 +2476,7 @@ class AgentExtensionTools:
                     query_content_list +
                     [
                         TextBlock(
-                                  text=f"用户的问题是:{task}, 请你根据知识库结果回答用户的问题，在你回答用户问题时，需要过滤掉搜索中无关的项"),
+                                  text=f"用户的问题是:{task}, 请你根据知识库结果回答用户的问题，在你回答用户问题时，需要过滤掉搜索结果中无关的项，不要回答与用户问题无关的内容"),
                         TextBlock(text="对于装配工序请使用以下json格式模板进行回答：\n"),
                         TextBlock(text="""
                                {

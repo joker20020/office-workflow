@@ -67,6 +67,8 @@ class ThemeManager(QObject):
         super().__init__()
         config = get_config_manager()
         theme_name = config.get("theme", "dark")
+        if theme_name not in self.get_available_themes():
+            theme_name = "dark"
         self._current_theme_name = theme_name
         self._apply_theme_to_class(theme_name)
 
@@ -77,8 +79,7 @@ class ThemeManager(QObject):
         Args:
             theme_name: 主题名称 ("dark" 或 "light")
         """
-        theme_type = ThemeType.DARK if theme_name == "dark" else ThemeType.LIGHT
-        Theme.set_theme(theme_type)
+        Theme.set_theme(ThemeType(theme_name))
 
     def apply_theme(self, theme_name: str) -> None:
         """
@@ -117,7 +118,7 @@ class ThemeManager(QObject):
         Returns:
             可用主题名称列表
         """
-        return ["dark", "light"]
+        return Theme.get_available_theme_names()
 
     def toggle_theme(self) -> None:
         """
@@ -126,7 +127,7 @@ class ThemeManager(QObject):
         dark <-> light
         """
         current = self.get_current_theme_name()
-        new_theme = "light" if current == "dark" else "dark"
+        new_theme = "light" if current in {"dark", "slate", "forest"} else "dark"
         self.apply_theme(new_theme)
 
 

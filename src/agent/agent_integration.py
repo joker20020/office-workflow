@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import concurrent.futures
+import contextvars
 import json
 import mimetypes
 import threading
@@ -38,6 +39,8 @@ try:
         ReplyStartEvent,
         RequireExternalExecutionEvent,
         RequireUserConfirmEvent,
+        ToolResultEndEvent,
+        ToolResultStartEvent,
         UserInterruptEvent,
     )
     from agentscope.message import (
@@ -75,6 +78,8 @@ except ImportError:
     ReplyStartEvent = None
     RequireExternalExecutionEvent = None
     RequireUserConfirmEvent = None
+    ToolResultEndEvent = None
+    ToolResultStartEvent = None
     UserInterruptEvent = None
     PermissionMode = None
     _logger_agent = None
@@ -139,6 +144,9 @@ _DISPLAYABLE_SUBAGENT_EVENT_KINDS = {
 }
 
 SUBAGENT_EVENT_PREFIX = "\x1eagentscope-subagent-event:"
+_SUBAGENT_PROGRESS_DISPATCHER: contextvars.ContextVar[
+    Callable[[Mapping[str, Any]], None] | None
+] = contextvars.ContextVar("subagent_progress_dispatcher", default=None)
 
 
 def encode_subagent_event(event: Mapping[str, Any]) -> str:
@@ -160,6 +168,13 @@ def decode_subagent_event(value: str) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def publish_subagent_progress_event(event: Mapping[str, Any]) -> None:
+    """Forward a display-safe subagent update without adding it to tool text."""
+    dispatcher = _SUBAGENT_PROGRESS_DISPATCHER.get()
+    if dispatcher is not None:
+        dispatcher(event)
 
 
 def normalize_subagent_execution_event(
@@ -325,18 +340,51 @@ class AgentIntegration:
         provisional_id = getattr(getattr(self._agent, "state", None), "reply_id", None)
         reply = AssistantMsg(name="Assistant", content=[], id=provisional_id)
 
+        active_tool_call_id: str | None = None
+        subagent_events_by_tool: dict[str, list[dict[str, Any]]] = {}
+
+        def publish_subagent_event(event: Mapping[str, Any]) -> None:
+            if active_tool_call_id is None:
+                return
+            normalized = normalize_subagent_execution_event(
+                parent_tool_call_id=active_tool_call_id,
+                event=event,
+                state={},
+            )
+            subagent_events_by_tool.setdefault(active_tool_call_id, []).append(
+                normalized.copy(),
+            )
+            self._notify_stream_event(normalized)
+
+        dispatcher_token = _SUBAGENT_PROGRESS_DISPATCHER.set(publish_subagent_event)
         try:
             async for event in self._agent.reply_stream(inputs=inputs):
                 if isinstance(event, ReplyStartEvent):
                     reply.id = event.reply_id
+                if isinstance(event, ToolResultStartEvent):
+                    active_tool_call_id = event.tool_call_id
                 if isinstance(
                     event,
                     (RequireUserConfirmEvent, RequireExternalExecutionEvent),
                 ):
                     with self._reply_ownership_lock:
                         self._parked_reply_id = event.reply_id
+                if isinstance(event, ToolResultEndEvent):
+                    execution_events = subagent_events_by_tool.get(
+                        event.tool_call_id,
+                    )
+                    if execution_events:
+                        event.metadata = {
+                            **dict(getattr(event, "metadata", {}) or {}),
+                            "execution_events": execution_events,
+                        }
                 reply.append_event(event)
                 self._notify_stream_event(event)
+                if (
+                    isinstance(event, ToolResultEndEvent)
+                    and event.tool_call_id == active_tool_call_id
+                ):
+                    active_tool_call_id = None
                 if isinstance(event, ReplyEndEvent):
                     self._last_response_interrupted = (
                         event.finished_reason == ReplyEndReason.INTERRUPTED
@@ -346,6 +394,8 @@ class AgentIntegration:
                             self._parked_reply_id = None
         except Exception as error:
             raise _ReplyStreamError(error, reply) from error
+        finally:
+            _SUBAGENT_PROGRESS_DISPATCHER.reset(dispatcher_token)
 
         return reply
 

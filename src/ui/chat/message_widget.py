@@ -3,10 +3,16 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QTextCursor, QResizeEvent
-from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QFrame, QTextEdit, QWidget, QVBoxLayout, QLabel
 
 from src.ui.theme import Theme
 from src.ui.theme_aware import ThemeAwareMixin
+
+
+def text_editor_natural_width(content_edit: QTextEdit) -> int:
+    """Measure the unwrapped display width of a text editor's contents."""
+    lines = content_edit.document().toPlainText().splitlines() or [""]
+    return max(content_edit.fontMetrics().horizontalAdvance(line) for line in lines) + 16
 
 
 class MarkdownMessageWidget(QWidget, ThemeAwareMixin):
@@ -24,15 +30,33 @@ class MarkdownMessageWidget(QWidget, ThemeAwareMixin):
 
         self._role = role
         self._content = content
+        self._bubble_card: Optional[QFrame] = None
+        self.setObjectName(f"chatMessage{role.capitalize()}")
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(4)
 
         self._role_label = QLabel(self._role.upper())
         self._role_label.setStyleSheet(Theme.get_message_role_label_stylesheet(self._role))
+        if self._role == "user":
+            self._role_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            root_layout.addWidget(self._role_label)
+            self._bubble_card = QFrame(self)
+            self._bubble_card.setObjectName("chatUserBubble")
+            self._bubble_card.setStyleSheet(
+                Theme.get_chat_message_bubble_stylesheet(self._role),
+            )
+            layout = QVBoxLayout(self._bubble_card)
+            layout.setContentsMargins(10, 10, 10, 10)
+            root_layout.addWidget(self._bubble_card)
+        else:
+            self.setStyleSheet(Theme.get_chat_message_bubble_stylesheet(self._role))
+            layout = root_layout
+            layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
 
         self._content_edit = QTextEdit()
         self._content_edit.setReadOnly(True)
@@ -50,7 +74,8 @@ class MarkdownMessageWidget(QWidget, ThemeAwareMixin):
         self._content_edit.mouseDoubleClickEvent = self._on_content_mouse_double_click
         self._set_markdown_content(self._content)
 
-        layout.addWidget(self._role_label)
+        if self._role != "user":
+            layout.addWidget(self._role_label)
         layout.addWidget(self._content_edit)
 
     def _on_content_mouse_press(self, event):
@@ -86,6 +111,21 @@ class MarkdownMessageWidget(QWidget, ThemeAwareMixin):
     def get_content(self) -> str:
         return self._content
 
+    def preferred_user_width(self, maximum_width: int) -> int:
+        """Return the content width for a plain-text user message."""
+        if self._role != "user":
+            return maximum_width
+        margins = self._bubble_card.layout().contentsMargins() if self._bubble_card else None
+        horizontal_margins = (margins.left() + margins.right()) if margins else 0
+        text_width = text_editor_natural_width(self._content_edit)
+        return min(maximum_width, max(96, text_width + horizontal_margins))
+
     def refresh_theme(self) -> None:
+        if self._bubble_card:
+            self._bubble_card.setStyleSheet(
+                Theme.get_chat_message_bubble_stylesheet(self._role),
+            )
+        else:
+            self.setStyleSheet(Theme.get_chat_message_bubble_stylesheet(self._role))
         self._role_label.setStyleSheet(Theme.get_message_role_label_stylesheet(self._role))
         self._content_edit.setStyleSheet(Theme.get_message_content_edit_stylesheet())

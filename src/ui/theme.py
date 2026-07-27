@@ -26,7 +26,11 @@ class ThemeType(Enum):
     """主题类型枚举"""
 
     DARK = "dark"
+    SLATE = "slate"
+    FOREST = "forest"
     LIGHT = "light"
+    PAPER = "paper"
+    MIST = "mist"
 
 
 class Theme:
@@ -161,15 +165,78 @@ class Theme:
         "error_accent": "#ef4444",
     }
 
+    # Low-glare variants share the complete semantic token set with the base
+    # dark/light themes and only adjust the surfaces, text and accent family.
+    SLATE_COLORS = {
+        **DARK_COLORS,
+        "background_primary": "#1b2028", "background_secondary": "#232a35",
+        "background_tertiary": "#303947", "background_hover": "#2a3442",
+        "background_selected": "#35445a", "background_input": "#202733",
+        "border_primary": "#344154", "border_secondary": "#46566d",
+        "text_primary": "#e8edf5", "text_secondary": "#aab7c8",
+        "text_hint": "#78889d", "accent_primary": "#7aa2f7",
+        "accent_secondary": "#5d83d7", "accent_hover": "#a7c3ff",
+        "card_background": "#202733", "card_border": "#344154",
+        "tool_accent": "#7aa2f7",
+    }
+    FOREST_COLORS = {
+        **DARK_COLORS,
+        "background_primary": "#17211d", "background_secondary": "#1e2b25",
+        "background_tertiary": "#2b3a32", "background_hover": "#26362e",
+        "background_selected": "#33483c", "background_input": "#1b2721",
+        "border_primary": "#304338", "border_secondary": "#47614f",
+        "text_primary": "#e6f1e9", "text_secondary": "#afc4b5",
+        "text_hint": "#7f9b88", "accent_primary": "#63b38c",
+        "accent_secondary": "#478c6c", "accent_hover": "#9bd6b5",
+        "card_background": "#1b2721", "card_border": "#304338",
+        "tool_accent": "#63b38c",
+    }
+    PAPER_COLORS = {
+        **LIGHT_COLORS,
+        "background_primary": "#f7f3eb", "background_secondary": "#fffdf8",
+        "background_tertiary": "#eee8dd", "background_hover": "#e9e1d5",
+        "background_selected": "#e0e8ef", "background_input": "#fffdf8",
+        "border_primary": "#ded5c7", "border_secondary": "#cabfae",
+        "text_primary": "#2c332f", "text_secondary": "#59645c",
+        "text_hint": "#7e887f", "accent_primary": "#527a9b",
+        "accent_secondary": "#3e6585", "accent_hover": "#7fabc8",
+        "card_background": "#fffdf8", "card_border": "#ded5c7",
+        "tool_accent": "#527a9b",
+    }
+    MIST_COLORS = {
+        **LIGHT_COLORS,
+        "background_primary": "#f3f7fb", "background_secondary": "#fbfdff",
+        "background_tertiary": "#e9f0f7", "background_hover": "#e2ebf4",
+        "background_selected": "#dceaf6", "background_input": "#fbfdff",
+        "border_primary": "#d3dfeb", "border_secondary": "#bfcfdf",
+        "text_primary": "#263746", "text_secondary": "#536879",
+        "text_hint": "#7d91a1", "accent_primary": "#4f7cac",
+        "accent_secondary": "#3d668f", "accent_hover": "#7aa5ce",
+        "card_background": "#fbfdff", "card_border": "#d3dfeb",
+        "tool_accent": "#4f7cac",
+    }
+
+    _THEME_COLORS = {
+        ThemeType.DARK: DARK_COLORS,
+        ThemeType.SLATE: SLATE_COLORS,
+        ThemeType.FOREST: FOREST_COLORS,
+        ThemeType.LIGHT: LIGHT_COLORS,
+        ThemeType.PAPER: PAPER_COLORS,
+        ThemeType.MIST: MIST_COLORS,
+    }
+
     _current_theme: ThemeType = ThemeType.DARK
     _QCOLORS: dict = {}
 
     @classmethod
     def _get_colors(cls) -> dict:
         """获取当前主题的颜色字典"""
-        if cls._current_theme == ThemeType.DARK:
-            return cls.DARK_COLORS
-        return cls.LIGHT_COLORS
+        return cls._THEME_COLORS[cls._current_theme]
+
+    @classmethod
+    def get_available_theme_names(cls) -> list[str]:
+        """Return registered theme names in the order shown by settings."""
+        return [theme.value for theme in ThemeType]
 
     @classmethod
     def init_emoji_font(cls) -> None:
@@ -1218,13 +1285,36 @@ class Theme:
     def get_message_content_edit_stylesheet(cls) -> str:
         return f"""
             QTextEdit {{
-                background-color: {cls.hex("background_secondary")};
+                background-color: transparent;
                 color: {cls.hex("text_primary")};
                 border: none;
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 13px;
                 {cls.emoji_font_css()}
+            }}
+        """
+
+    @classmethod
+    def get_chat_message_bubble_stylesheet(cls, role: str) -> str:
+        """Return the theme-aware card style used for one chat message role."""
+        if role == "user":
+            background = cls.hex("background_selected")
+            return f"""
+                QFrame#chatUserBubble {{
+                    background-color: {background};
+                    border: 1px solid {cls.hex("accent_primary")};
+                    border-radius: 10px;
+                }}
+            """
+
+        background = cls.hex("background_primary")
+        border_rule = "border: none;"
+        return f"""
+            QWidget#chatMessage{role.capitalize()} {{
+                background-color: {background};
+                {border_rule}
+                border-radius: 10px;
             }}
         """
 
@@ -2098,6 +2188,27 @@ class Theme:
     # ==================== Block 卡片统一样式 ====================
 
     @classmethod
+    def get_chat_message_block_stylesheet(cls) -> str:
+        """Return the neutral visual boundary shared by every chat block."""
+        return f"""
+            QFrame#chatMessageBlock {{
+                background-color: transparent;
+                border: 1px solid {cls.hex("card_border")};
+                border-radius: 8px;
+            }}
+        """
+
+    @classmethod
+    def get_chat_message_text_block_stylesheet(cls) -> str:
+        """Keep normal assistant prose free of a card outline."""
+        return """
+            QFrame#chatMessageTextBlock {
+                background-color: transparent;
+                border: none;
+            }
+        """
+
+    @classmethod
     def get_block_card_stylesheet(cls, accent_color_key: str = "tool_accent") -> str:
         """获取 block 卡片外框样式。
 
@@ -2106,7 +2217,7 @@ class Theme:
         """
         return f"""
             QFrame#blockCard {{
-                background-color: {cls.hex("card_background")};
+                background-color: transparent;
                 border: 1px solid {cls.hex("card_border")};
                 border-left: 3px solid {cls.hex(accent_color_key)};
                 border-radius: 6px;

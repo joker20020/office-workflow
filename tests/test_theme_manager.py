@@ -133,7 +133,7 @@ class TestThemeManagerAvailableThemes:
         manager = ThemeManager.instance()
         themes = manager.get_available_themes()
 
-        assert themes == ["dark", "light"]
+        assert themes == ["dark", "slate", "forest", "light", "paper", "mist"]
 
 
 class TestThemeManagerReset:

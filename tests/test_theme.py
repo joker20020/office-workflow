@@ -167,3 +167,13 @@ class TestThemeTypeEnum:
         # 验证是枚举类型
         assert isinstance(ThemeType.DARK, ThemeType)
         assert isinstance(ThemeType.LIGHT, ThemeType)
+
+    def test_exposes_eye_comfort_light_and_dark_theme_families(self):
+        from src.ui.theme import ThemeType
+
+        assert {theme.value for theme in ThemeType} == {
+            "dark", "slate", "forest", "light", "paper", "mist",
+        }
+        assert Theme.get_available_theme_names() == [
+            "dark", "slate", "forest", "light", "paper", "mist",
+        ]

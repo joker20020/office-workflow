@@ -12,6 +12,8 @@ Tool Result Block — 卡片式折叠展示
   └── CollapsibleBox
       └── QTextEdit (输出内容, 等宽字体)
 """
+import ast
+import re
 from typing import Any, Dict
 
 from PySide6.QtCore import Qt, Signal
@@ -105,18 +107,18 @@ class ToolResultBlockWidget(BaseBlockWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
-        self._output_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._output_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._output_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._output_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._output_edit.setMinimumHeight(72)
+        self._output_edit.setMaximumHeight(280)
         self._output_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self._output_edit.setPlainText(self._tool_output)
+        self._output_edit.setMarkdown(self._tool_output)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(6)
-        content_layout.addWidget(self._output_edit)
-
-        self._execution_edit = QTextEdit()
+        self._execution_edit = QTextEdit(content)
         self._execution_edit.setObjectName("subagentExecutionEvents")
         self._execution_edit.setReadOnly(True)
         self._execution_edit.setCursorWidth(0)
@@ -125,15 +127,18 @@ class ToolResultBlockWidget(BaseBlockWidget):
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         self._execution_edit.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self._execution_edit.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self._execution_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._execution_edit.setMinimumHeight(72)
+        self._execution_edit.setMaximumHeight(240)
         self._execution_edit.setPlainText(self._execution_events_text())
         self._execution_edit.setVisible(bool(self._execution_events))
         content_layout.addWidget(self._execution_edit)
+        content_layout.addWidget(self._output_edit)
 
         self._collapsible = CollapsibleBox(content)
         card_layout.addWidget(self._collapsible)
@@ -165,7 +170,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         if self._output_edit:
             self._output_edit.setStyleSheet(
                 Theme.get_block_card_content_stylesheet(
-                    content_type="code",
+                    content_type="text",
                     is_error=self._is_error,
                 )
             )
@@ -201,14 +206,33 @@ class ToolResultBlockWidget(BaseBlockWidget):
 
     @staticmethod
     def _output_text(output: Any) -> str:
+        if hasattr(output, "content"):
+            return ToolResultBlockWidget._output_text(output.content)
+        if isinstance(output, dict):
+            if "content" in output:
+                return ToolResultBlockWidget._output_text(output["content"])
+            if output.get("type") == "text":
+                return str(output.get("text", ""))
         if isinstance(output, str):
+            wrapped_text = re.match(
+                r"^content=\[TextBlock\(type='text', text=(?P<text>'(?:\\.|[^'])*'), id=",
+                output,
+                flags=re.DOTALL,
+            )
+            if wrapped_text:
+                try:
+                    return str(ast.literal_eval(wrapped_text.group("text")))
+                except (SyntaxError, ValueError):
+                    pass
             return output
         if isinstance(output, list):
-            return "".join(
-                str(block.get("text", ""))
+            return "\n".join(
+                ToolResultBlockWidget._output_text(block)
                 for block in output
-                if isinstance(block, dict) and block.get("type") == "text"
             )
+        block_text = getattr(output, "text", None)
+        if isinstance(block_text, str):
+            return block_text
         return str(output or "")
 
     def _execution_events_text(self) -> str:
@@ -254,7 +278,13 @@ class ToolResultBlockWidget(BaseBlockWidget):
             self._execution_events.append(event_copy)
             self._block_data.setdefault("execution_events", []).append(event_copy.copy())
         if self._execution_edit:
+            scrollbar = self._execution_edit.verticalScrollBar()
+            previous_value = scrollbar.value()
+            was_at_bottom = previous_value >= scrollbar.maximum()
             self._execution_edit.setPlainText(self._execution_events_text())
+            scrollbar.setValue(
+                scrollbar.maximum() if was_at_bottom else min(previous_value, scrollbar.maximum()),
+            )
             self._execution_edit.setVisible(True)
         if self._collapsible and self._collapsible.is_expanded():
             self._collapsible.update_content_height(animate=False)
@@ -271,7 +301,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
         self._is_error = self._detect_error_state(content)
 
         if self._output_edit:
-            self._output_edit.setPlainText(content)
+            self._output_edit.setMarkdown(content)
         if self._status_icon_label:
             self._status_icon_label.setText("✓" if not self._is_error else "✗")
         if self._collapsible and self._collapsible.is_expanded():
@@ -300,7 +330,7 @@ class ToolResultBlockWidget(BaseBlockWidget):
             if self._status_icon_label:
                 self._status_icon_label.setText("✓" if not self._is_error else "✗")
             if self._output_edit:
-                self._output_edit.setPlainText(self._tool_output)
+                self._output_edit.setMarkdown(self._tool_output)
             if self._collapsible and self._collapsible.is_expanded():
                 self._collapsible.update_content_height(animate=False)
             self._apply_styles()

@@ -228,6 +228,10 @@ permission:
 theme:
   dark: "深色"
   light: "浅色"
+  slate: "石板夜"
+  forest: "森林夜"
+  paper: "暖纸"
+  mist: "雾蓝"
 
 node_editor:
   run: "运行"
