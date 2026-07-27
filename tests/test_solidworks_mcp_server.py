@@ -646,6 +646,38 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     adapter_module = importlib.import_module("plugins.solidworks_agent.com_adapter")
     events = []
 
+    class ModelToSketchTransform:
+        @property
+        def Inverse(self):  # noqa: N802
+            events.append(("inverse-transform",))
+            return SketchToModelTransform()
+
+    class SketchToModelTransform:
+        def apply(self, coordinates):
+            events.append(("apply-inverse-transform", coordinates))
+            x, y, z = coordinates
+            return (2.0 - y, 3.0 + x, 4.0 + z)
+
+    class MathPoint:
+        def __init__(self, coordinates):
+            self._coordinates = tuple(coordinates)
+
+        @property
+        def ArrayData(self):  # noqa: N802
+            return self._coordinates
+
+        def MultiplyTransform(self, transform):  # noqa: N802
+            return MathPoint(transform.apply(self._coordinates))
+
+    class MathUtility:
+        def CreatePoint(self, coordinates):  # noqa: N802
+            events.append(("create-math-point", tuple(coordinates)))
+            return MathPoint(coordinates)
+
+    class Sketch:
+        def __init__(self):
+            self.ModelToSketchTransform = ModelToSketchTransform()
+
     class Selectable:
         def __init__(self, name, x=0.1, y=0.2, z=0.3):
             self.name = name
@@ -666,6 +698,10 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
             events.append(("model-coordinate", self.name, "Z", self._coordinates[2]))
             return self._coordinates[2]
 
+        def GetSketch(self):  # noqa: N802
+            events.append(("get-sketch", self.name))
+            return Sketch()
+
         def Select4(self, append, data):  # noqa: N802
             events.append(("select4", self.name, append, getattr(data, "Mark", None)))
             return True
@@ -680,9 +716,7 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
 
         def CreatePoint(self, x, y, z):  # noqa: N802
             events.append(("point", x, y, z))
-            # A face-local sketch point is intentionally mapped to nontrivial
-            # model coordinates, as a rotated/translated planar face would be.
-            return Selectable("point", x + 0.37, y - 0.41, z + 0.83)
+            return Selectable("point", x, y, z)
 
     feature = object()
     definitions = []
@@ -730,6 +764,7 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     edge = Selectable("edge")
     seed = Selectable("seed")
     adapter = adapter_module.SolidWorksComAdapter(dispatch=SimpleNamespace())
+    adapter._app = SimpleNamespace(GetMathUtility=lambda: MathUtility())
     constants = {
         "swFmFillet": "fillet",
         "swFmLPattern": "linear",
@@ -771,12 +806,18 @@ def test_adapter_feature_operations_use_feature_data_and_documented_hole_ray_sel
     assert ("plane", "Right Plane", "PLANE", 1) in events
     assert ("plane", "Top Plane", "PLANE", 1) in events
     ray_args = next(item[1] for item in events if item[0] == "ray")
-    assert ray_args[:3] == pytest.approx((0.38, -0.39, 0.83))
+    assert ray_args[:3] == pytest.approx((1.98, 3.01, 4.0))
     assert ray_args[3:] == (0.0, 0.0, 1.0, 1e-7, "face", False, 0, 0)
-    assert [item for item in events if item[0] == "model-coordinate"] == [
-        ("model-coordinate", "point", "X", pytest.approx(0.38)),
-        ("model-coordinate", "point", "Y", pytest.approx(-0.39)),
-        ("model-coordinate", "point", "Z", pytest.approx(0.83)),
+    assert [item for item in events if item[0] in {
+        "get-sketch",
+        "create-math-point",
+        "inverse-transform",
+        "apply-inverse-transform",
+    }] == [
+        ("get-sketch", "point"),
+        ("create-math-point", (0.01, 0.02, 0.0)),
+        ("inverse-transform",),
+        ("apply-inverse-transform", (0.01, 0.02, 0.0)),
     ]
     assert next(item[1] for item in events if item[0] == "hole5")[5:10] == pytest.approx(
         (

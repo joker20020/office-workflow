@@ -472,15 +472,26 @@ class SolidWorksComAdapter:
                     return
         raise RuntimeError(f"SolidWorks could not select plane: {plane}")
 
-    @staticmethod
-    def _sketch_point_model_coordinates(point: Any) -> tuple[float, float, float]:
-        """Return ISketchPoint X/Y/Z model-space coordinates for SelectByRay.
-
-        SolidWorks exposes ``ISketchPoint.X``, ``Y``, and ``Z`` in model
-        coordinates even when the point was created while editing a sketch.
-        SelectByRay requires its origin in that same model coordinate system.
-        """
-        coordinates = tuple(float(getattr(point, axis)) for axis in ("X", "Y", "Z"))
+    def _sketch_point_model_coordinates(self, point: Any) -> tuple[float, float, float]:
+        """Transform a 2D ``ISketchPoint`` location to model coordinates."""
+        sketch_coordinates = tuple(float(getattr(point, axis)) for axis in ("X", "Y", "Z"))
+        if not all(math.isfinite(value) for value in sketch_coordinates):
+            raise RuntimeError("SolidWorks returned invalid sketch coordinates for hole location")
+        sketch = point.GetSketch()
+        if sketch is None:
+            raise RuntimeError("SolidWorks returned no sketch for hole location point")
+        math_point = self._require_app().GetMathUtility().CreatePoint(sketch_coordinates)
+        if math_point is None:
+            raise RuntimeError("SolidWorks failed to create math point for hole location")
+        transform = self._com_value(sketch, "ModelToSketchTransform", None)
+        inverse_transform = self._com_value(transform, "Inverse", None)
+        if inverse_transform is None:
+            raise RuntimeError("SolidWorks returned no sketch-to-model transform for hole location")
+        model_point = math_point.MultiplyTransform(inverse_transform)
+        model_coordinates = self._com_value(model_point, "ArrayData", None)
+        if not isinstance(model_coordinates, (tuple, list)) or len(model_coordinates) != 3:
+            raise RuntimeError("SolidWorks returned invalid model coordinates for hole location")
+        coordinates = tuple(float(value) for value in model_coordinates)
         if not all(math.isfinite(value) for value in coordinates):
             raise RuntimeError("SolidWorks returned invalid model coordinates for hole location")
         return coordinates
