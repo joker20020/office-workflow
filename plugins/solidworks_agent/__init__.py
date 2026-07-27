@@ -387,7 +387,7 @@ class SolidWorksAgentTools:
                 system_prompt=SYSTEM_PROMPT,
                 model=_build_model(),
                 toolkit=toolkit,
-                react_config=ReActConfig(max_iters=60),
+                react_config=ReActConfig(max_iters=200),
                 state=solidworks_state
             )
             response = await _consume_reply_stream(
