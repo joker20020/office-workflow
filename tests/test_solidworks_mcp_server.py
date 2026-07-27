@@ -141,6 +141,26 @@ class FakeAdapter:
         self.calls.append(("cut", document, sketch, depth))
         return self.feature
 
+    def hole(self, document, face, specification, position, unit):
+        self.calls.append(("hole", document, face, specification, position, unit))
+        return self.feature
+
+    def fillet(self, document, edges, radius, unit):
+        self.calls.append(("fillet", document, edges, radius, unit))
+        return self.feature
+
+    def chamfer(self, document, edges, specification, unit):
+        self.calls.append(("chamfer", document, edges, specification, unit))
+        return self.feature
+
+    def mirror_feature(self, document, features, plane):
+        self.calls.append(("mirror", document, features, plane))
+        return self.feature
+
+    def pattern_feature(self, document, feature, pattern, unit):
+        self.calls.append(("pattern", document, feature, pattern, unit))
+        return self.feature
+
     def inspect_model(self, document):
         self.calls.append(("inspect", document))
         return {
@@ -225,17 +245,88 @@ def test_inspection_returns_stable_owned_feature_face_and_edge_refs():
     for key in ("features", "faces", "edges"):
         assert first[key][0].id == second[key][0].id
         assert first[key][0].document_id == document.id
-    assert service.fillet(document.id, [first["edges"][0].id], 0.1).success is False
-    assert (
-        "Unsupported"
-        in service.hole(
-            document.id,
-            first["faces"][0].id,
-            {"type": "simple", "diameter": 0.01, "depth": 0.02},
-            [0, 0],
-        ).message
-    )
+    assert service.fillet(document.id, [first["edges"][0].id], 0.1).success
+    assert service.hole(
+        document.id,
+        first["faces"][0].id,
+        {"type": "simple", "diameter": 0.01, "depth": 0.02},
+        [0, 0],
+    ).success
     assert service.fillet(document.id, ["foreign"], 0.1).message == "invalid edge reference"
+
+
+def test_feature_operations_resolve_only_owned_references_and_register_results():
+    service, adapter, document = _part()
+    inspected = service.inspect_model(document.id).value
+    face = inspected["faces"][0]
+    edge = inspected["edges"][0]
+    feature = inspected["features"][0]
+
+    operations = [
+        (
+            service.hole(
+                document.id,
+                face.id,
+                {"type": "simple", "diameter": 10, "depth": 20},
+                [5, 6],
+            ),
+            "hole",
+        ),
+        (service.fillet(document.id, [edge.id], 2), "fillet"),
+        (
+            service.chamfer(
+                document.id,
+                [edge.id],
+                {"type": "distance_angle", "distance": 3, "angle": 45},
+            ),
+            "chamfer",
+        ),
+        (service.mirror_feature(document.id, [feature.id], "Front Plane"), "mirror"),
+        (
+            service.pattern_feature(
+                document.id,
+                feature.id,
+                {"type": "linear", "direction": "x", "spacing": 8, "count": 3},
+            ),
+            "pattern",
+        ),
+        (
+            service.pattern_feature(
+                document.id,
+                feature.id,
+                {"type": "circular", "angle": 180, "count": 4},
+            ),
+            "pattern",
+        ),
+    ]
+
+    assert all(result.success for result, _ in operations)
+    assert [kind for _, kind in operations] == [result.value.kind for result, _ in operations]
+    assert adapter.calls[-6:] == [
+        ("hole", adapter.document, adapter.face, {"type": "simple", "diameter": 10.0, "depth": 20.0}, [5.0, 6.0], "mm"),
+        ("fillet", adapter.document, [adapter.edge], 2.0, "mm"),
+        ("chamfer", adapter.document, [adapter.edge], {"type": "distance_angle", "distance": 3.0, "angle": 45.0}, "mm"),
+        ("mirror", adapter.document, [adapter.feature], "Front Plane"),
+        ("pattern", adapter.document, adapter.feature, {"type": "linear", "direction": "x", "spacing": 8.0, "count": 3}, "mm"),
+        ("pattern", adapter.document, adapter.feature, {"type": "circular", "angle": 180.0, "count": 4}, "mm"),
+    ]
+
+
+def test_feature_operation_validation_rejects_foreign_references_and_false_com_results():
+    service, adapter, document = _part()
+    inspected = service.inspect_model(document.id).value
+    face = inspected["faces"][0].id
+    edge = inspected["edges"][0].id
+    feature = inspected["features"][0].id
+
+    assert not service.hole(document.id, "foreign", {"type": "simple", "diameter": 1, "depth": 1}, [0, 0]).success
+    assert not service.fillet(document.id, [], 1).success
+    assert not service.chamfer(document.id, [edge], {"type": "distance_angle", "distance": 1, "angle": 0}).success
+    assert not service.mirror_feature(document.id, [feature], "arbitrary").success
+    assert not service.pattern_feature(document.id, "foreign", {"type": "circular", "angle": 90, "count": 2}).success
+
+    adapter.feature = None
+    assert not service.hole(document.id, face, {"type": "simple", "diameter": 1, "depth": 1}, [0, 0]).success
 
 
 def test_face_sketch_and_three_point_arc_are_public_and_owned():
@@ -794,7 +885,7 @@ def test_persistent_reference_key_uses_model_extension_and_survives_new_wrappers
     assert first["edges"][0].id == second["edges"][0].id
 
 
-def test_unsupported_payloads_are_strictly_validated_before_safe_failure():
+def test_feature_payloads_are_strictly_validated_before_com_access():
     service, _, document = _part()
     inspected = service.inspect_model(document.id).value
     face = inspected["faces"][0].id
@@ -818,7 +909,7 @@ def test_unsupported_payloads_are_strictly_validated_before_safe_failure():
             {"type": "linear", "direction": "x", "spacing": 0.01, "count": 3},
         ),
     ]
-    assert all("Unsupported operation" in result.message for result in valid_cases)
+    assert all(result.success for result in valid_cases)
 
     invalid_cases = [
         service.hole(document.id, face, {"type": "simple", "diameter": -1, "depth": 1}, [0, 0]),
@@ -831,4 +922,4 @@ def test_unsupported_payloads_are_strictly_validated_before_safe_failure():
             {"type": "linear", "direction": "x", "spacing": 1, "count": 1, "macro": "x"},
         ),
     ]
-    assert all("Unsupported operation" not in result.message for result in invalid_cases)
+    assert all(result.success is False for result in invalid_cases)

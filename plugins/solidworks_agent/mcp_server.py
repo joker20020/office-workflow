@@ -356,8 +356,9 @@ class SolidWorksService:
         self, document_id: str, face_ref: str, specification: dict[str, Any], position: list[float]
     ) -> OperationResult:
         try:
-            self._owned(self.faces, face_ref, document_id, "face")
-            _point(position, "position")
+            document_ref, document = self._document(document_id)
+            _, face = self._owned(self.faces, face_ref, document_id, "face")
+            clean_position = _point(position, "position")
             if not isinstance(specification, dict):
                 raise ValueError("invalid hole specification")
             schemas = {
@@ -380,47 +381,65 @@ class SolidWorksService:
             hole_type = specification.get("type")
             if hole_type not in schemas or set(specification) != schemas[hole_type]:
                 raise ValueError("invalid hole specification")
+            clean = {"type": hole_type}
             for key, value in specification.items():
                 if key != "type":
-                    _number(value, key, positive=True)
-            raise NotImplementedError("hole feature is not safely mapped")
+                    clean[key] = _number(value, key, positive=True)
+            raw = self.adapter.hole(document, face, clean, clean_position, document_ref.unit)
+            return self._created_feature(document_id, raw, "hole")
         except Exception as exc:
             return self._fail(_safe_error(exc))
 
     def fillet(self, document_id: str, edge_refs: list[str], radius: float) -> OperationResult:
         try:
-            _number(radius, "radius", positive=True)
+            document_ref, document = self._document(document_id)
+            clean_radius = _number(radius, "radius", positive=True)
+            edges = self._owned_many(self.edges, edge_refs, document_id, "edge")
+            raw = self.adapter.fillet(document, edges, clean_radius, document_ref.unit)
+            return self._created_feature(document_id, raw, "fillet")
         except Exception as exc:
             return self._fail(_safe_error(exc))
-        return self._unsupported_many(document_id, self.edges, edge_refs, "edge", "fillet")
 
     def chamfer(
         self, document_id: str, edge_refs: list[str], specification: dict[str, Any]
     ) -> OperationResult:
         try:
+            document_ref, document = self._document(document_id)
             if (
                 not isinstance(specification, dict)
                 or specification.get("type") != "distance_angle"
                 or set(specification) != {"type", "distance", "angle"}
             ):
                 raise ValueError("invalid chamfer specification")
-            _number(specification["distance"], "distance", positive=True)
-            _number(specification["angle"], "angle", positive=True)
+            clean = {
+                "type": "distance_angle",
+                "distance": _number(specification["distance"], "distance", positive=True),
+                "angle": _number(specification["angle"], "angle", positive=True),
+            }
+            edges = self._owned_many(self.edges, edge_refs, document_id, "edge")
+            raw = self.adapter.chamfer(document, edges, clean, document_ref.unit)
+            return self._created_feature(document_id, raw, "chamfer")
         except Exception as exc:
             return self._fail(_safe_error(exc))
-        return self._unsupported_many(document_id, self.edges, edge_refs, "edge", "chamfer")
 
     def mirror_feature(
         self, document_id: str, feature_refs: list[str], plane: str
     ) -> OperationResult:
-        if plane not in PLANES:
-            return self._fail("invalid mirror plane")
-        return self._unsupported_many(document_id, self.features, feature_refs, "feature", "mirror")
+        try:
+            if plane not in PLANES:
+                raise ValueError("invalid mirror plane")
+            _, document = self._document(document_id)
+            features = self._owned_many(self.features, feature_refs, document_id, "feature")
+            raw = self.adapter.mirror_feature(document, features, plane)
+            return self._created_feature(document_id, raw, "mirror")
+        except Exception as exc:
+            return self._fail(_safe_error(exc))
 
     def pattern_feature(
         self, document_id: str, feature_ref: str, pattern: dict[str, Any]
     ) -> OperationResult:
         try:
+            document_ref, document = self._document(document_id)
             if not isinstance(pattern, dict):
                 raise ValueError("invalid pattern specification")
             pattern_type = pattern.get("type")
@@ -439,20 +458,37 @@ class SolidWorksService:
             count = pattern["count"]
             if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= 100:
                 raise ValueError("invalid pattern count")
+            clean = {"type": pattern_type, "count": count}
+            if pattern_type == "linear":
+                clean.update(
+                    direction=pattern["direction"],
+                    spacing=_number(pattern["spacing"], "spacing", positive=True),
+                )
+            else:
+                clean["angle"] = _number(pattern["angle"], "angle", positive=True)
+            _, feature = self._owned(self.features, feature_ref, document_id, "feature")
+            raw = self.adapter.pattern_feature(document, feature, clean, document_ref.unit)
+            return self._created_feature(document_id, raw, "pattern")
         except Exception as exc:
             return self._fail(_safe_error(exc))
-        return self._unsupported_many(
-            document_id, self.features, [feature_ref], "feature", "pattern"
-        )
+
+    def _owned_many(self, registry: dict, refs: Any, document_id: str, label: str) -> list[Any]:
+        if not isinstance(refs, list) or not 1 <= len(refs) <= MAX_ITEMS:
+            raise ValueError(f"invalid {label} references")
+        return [self._owned(registry, ref, document_id, label)[1] for ref in refs]
+
+    def _created_feature(self, document_id: str, raw: Any, kind: str) -> OperationResult:
+        if not raw:
+            raise RuntimeError(f"SolidWorks failed to create {kind} feature")
+        ref = FeatureRef(uuid.uuid4().hex, document_id, kind)
+        self.features[ref.id] = (ref, raw)
+        return self._ok(f"Created {kind} feature.", ref)
 
     def _unsupported_many(
         self, document_id: str, registry: dict, refs: Any, label: str, operation: str
     ) -> OperationResult:
         try:
-            if not isinstance(refs, list) or not 1 <= len(refs) <= MAX_ITEMS:
-                raise ValueError(f"invalid {label} references")
-            for ref in refs:
-                self._owned(registry, ref, document_id, label)
+            self._owned_many(registry, refs, document_id, label)
             raise NotImplementedError(f"{operation} feature is not safely mapped")
         except Exception as exc:
             return self._fail(_safe_error(exc))

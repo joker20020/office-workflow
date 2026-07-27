@@ -425,6 +425,179 @@ class SolidWorksComAdapter:
             raise RuntimeError("SolidWorks failed to create cut extrude feature")
         return feature
 
+    @staticmethod
+    def _selection_data(document: Any, mark: int) -> Any:
+        manager = getattr(document, "SelectionManager", None)
+        if manager is None or not hasattr(manager, "CreateSelectData"):
+            return None
+        data = manager.CreateSelectData()
+        data.Mark = mark
+        return data
+
+    def _select_raw(self, document: Any, raw: Any, append: bool, mark: int) -> None:
+        if hasattr(raw, "Select4"):
+            selected = raw.Select4(append, self._selection_data(document, mark))
+        elif hasattr(raw, "Select2"):
+            selected = raw.Select2(append, mark)
+        else:
+            raise RuntimeError("SolidWorks entity does not support selection")
+        if not selected:
+            raise RuntimeError("SolidWorks could not select owned entity")
+
+    def _select_plane(self, document: Any, plane: str, mark: int) -> None:
+        aliases = self._PLANE_ALIASES.get(plane, (plane,))
+        for candidate in aliases:
+            for callout_factory in (lambda: None, _empty_com_dispatch):
+                try:
+                    selected = document.Extension.SelectByID2(
+                        candidate, "PLANE", 0, 0, 0, False, mark, callout_factory(), 0
+                    )
+                except Exception:
+                    continue
+                if selected:
+                    return
+        raise RuntimeError(f"SolidWorks could not select plane: {plane}")
+
+    def _select_face_at_position(
+        self, document: Any, face: Any, position: list[float], unit: str
+    ) -> None:
+        x, y = self._point_si(position, unit)
+        try:
+            selected = document.Extension.SelectByID2("", "FACE", x, y, 0.0, False, 0, None, 0)
+        except Exception as exc:
+            raise RuntimeError("SolidWorks could not select hole face at position") from exc
+        if not selected:
+            raise RuntimeError("SolidWorks could not select hole face at position")
+        selected_raw = document.SelectionManager.GetSelectedObject6(1, -1)
+        if self.persistent_reference_key(document, selected_raw) != self.persistent_reference_key(
+            document, face
+        ):
+            raise RuntimeError("hole position does not select the owned face")
+
+    def hole(
+        self,
+        document: Any,
+        face: Any,
+        specification: dict[str, Any],
+        position: list[float],
+        unit: str,
+    ) -> Any:
+        """Create one blind Hole Wizard hole at an owned face position."""
+        document.ClearSelection2(True)
+        self._select_face_at_position(document, face, position, unit)
+        hole_type = {"counterbore": 0, "countersink": 1, "simple": 2}[specification["type"]]
+        diameter = self._length(specification["diameter"], unit)
+        depth = self._length(specification["depth"], unit)
+        value1 = value2 = 0.0
+        if specification["type"] == "counterbore":
+            value1 = self._length(specification["counterbore_diameter"], unit)
+            value2 = self._length(specification["counterbore_depth"], unit)
+        elif specification["type"] == "countersink":
+            value1 = self._length(specification["countersink_diameter"], unit)
+            value2 = math.radians(specification["angle"])
+        feature = document.FeatureManager.HoleWizard3(
+            hole_type,
+            0,
+            0,
+            "",
+            0,
+            diameter,
+            depth,
+            value1,
+            value2,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            "",
+            False,
+            False,
+            True,
+            False,
+            False,
+        )
+        document.ClearSelection2(True)
+        if not feature:
+            raise RuntimeError("SolidWorks failed to create Hole Wizard feature")
+        return feature
+
+    def fillet(self, document: Any, edges: list[Any], radius: float, unit: str) -> Any:
+        document.ClearSelection2(True)
+        for index, edge in enumerate(edges):
+            self._select_raw(document, edge, index > 0, 1)
+        feature = document.FeatureManager.FeatureFillet2(
+            2, self._length(radius, unit), 0.0, 0, 0, 0, None, None, None, None, None
+        )
+        document.ClearSelection2(True)
+        if not feature:
+            raise RuntimeError("SolidWorks failed to create fillet feature")
+        return feature
+
+    def chamfer(
+        self, document: Any, edges: list[Any], specification: dict[str, Any], unit: str
+    ) -> Any:
+        document.ClearSelection2(True)
+        for index, edge in enumerate(edges):
+            self._select_raw(document, edge, index > 0, 0)
+        feature = document.FeatureManager.InsertFeatureChamfer(
+            0,
+            1,
+            self._length(specification["distance"], unit),
+            math.radians(specification["angle"]),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+        document.ClearSelection2(True)
+        if not feature:
+            raise RuntimeError("SolidWorks failed to create chamfer feature")
+        return feature
+
+    def mirror_feature(self, document: Any, features: list[Any], plane: str) -> Any:
+        document.ClearSelection2(True)
+        for index, feature in enumerate(features):
+            self._select_raw(document, feature, index > 0, 1)
+        self._select_plane(document, plane, 2)
+        feature = document.FeatureManager.InsertMirrorFeature(False, False, False, False)
+        document.ClearSelection2(True)
+        if not feature:
+            raise RuntimeError("SolidWorks failed to create mirror feature")
+        return feature
+
+    def pattern_feature(self, document: Any, feature: Any, pattern: dict[str, Any], unit: str) -> Any:
+        document.ClearSelection2(True)
+        self._select_raw(document, feature, False, 4)
+        if pattern["type"] == "linear":
+            # Standard planes provide the two supported global pattern directions.
+            self._select_plane(document, "Right Plane" if pattern["direction"] == "x" else "Front Plane", 1)
+            created = document.FeatureManager.FeatureLinearPattern2(
+                pattern["count"],
+                self._length(pattern["spacing"], unit),
+                1,
+                0.0,
+                False,
+                False,
+                "",
+                "",
+                False,
+            )
+        else:
+            self._select_plane(document, "Top Plane", 1)
+            created = document.FeatureManager.FeatureCircularPattern2(
+                pattern["count"], math.radians(pattern["angle"]), False, "", False
+            )
+        document.ClearSelection2(True)
+        if not created:
+            raise RuntimeError("SolidWorks failed to create pattern feature")
+        return created
+
     def inspect_model(self, document: Any) -> dict[str, Any]:
         features = []
         feature = document.FirstFeature()
