@@ -280,6 +280,10 @@ async def _consume_reply_stream(agent: Any, inputs: Any) -> AssistantMsg:
 class SolidWorksAgentTools:
     """Public SolidWorks subagent tools."""
 
+    @staticmethod
+    def _skill_path() -> str:
+        return str(Path(__file__).with_name("skills") / "solidworks-feature-modeling")
+
     def tool_solidworks_model(
         self,
         task: str,
@@ -363,7 +367,7 @@ class SolidWorksAgentTools:
             except Exception as exc:
                 return _failure(f"Unable to connect to the project-local SolidWorks MCP: {exc}")
 
-            toolkit = Toolkit(mcps=[client])
+            toolkit = Toolkit(mcps=[client], skills_or_loaders=[self._skill_path()])
             agent = Agent(
                 name="SolidWorksAgent",
                 system_prompt=SYSTEM_PROMPT,

@@ -124,10 +124,11 @@ def _install_recording_runtime(
             self.connected = False
 
     class FakeToolkit:
-        def __init__(self, *, mcps):
+        def __init__(self, *, mcps, skills_or_loaders=None):
             events.append("toolkit")
             assert mcps[0].connected is True
             captured["toolkit_mcps"] = mcps
+            captured["toolkit_skills_or_loaders"] = skills_or_loaders
 
     class FakeAgent:
         name = "SolidWorksAgent"
@@ -231,6 +232,11 @@ async def test_lifecycle_uses_local_stdio_session_stream_and_structured_prompt(
     assert session_id in message
     assert correlation_id in message
     assert "solidworks_new_part" in message
+    skill_paths = captured["toolkit_skills_or_loaders"]
+    assert skill_paths and len(skill_paths) == 1
+    skill_path = Path(skill_paths[0])
+    assert skill_path.name == "solidworks-feature-modeling"
+    assert (skill_path / "SKILL.md").is_file()
     assert {event["kind"] for event in public_events} == {"text", "complete"}
 
     prompt = captured["agent"]["system_prompt"]

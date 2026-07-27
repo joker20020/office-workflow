@@ -1,0 +1,4 @@
+interface:
+  display_name: "SolidWorks Feature Modeling"
+  short_description: "Create safe feature-level SolidWorks models."
+  default_prompt: "Use $solidworks-feature-modeling to create and export a feature-level SolidWorks part."
